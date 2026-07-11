@@ -977,7 +977,7 @@ architecture invests accordingly.
   it completes fully or has no effect. No partial record, and — critically — no
   partially public record (NFR-DATA-03, NFR-REL-04).
 - **Safe retry.** A failed save leaves a consistent state and preserves the actor
-  entered data, so the action can be retried without re-entry (NFR-ERR-05/06,
+  entered data, so the action can be retried without re-entry (FR-ERR-05/06,
   NFR-REL-04).
 - **Graceful degradation.** Reads and writes travel separate paths through separate
   components, so if the submission path is impaired the public directory remains
