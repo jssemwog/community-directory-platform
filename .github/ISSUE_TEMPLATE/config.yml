@@ -1,0 +1,5 @@
+# No implementation work begins without an issue, and no issue exists without a
+# requirement reference (IP-4). Disabling blank issues is what makes the
+# requirement reference structurally required rather than merely offered: it
+# closes the blank-issue escape hatch that would otherwise bypass the form.
+blank_issues_enabled: false

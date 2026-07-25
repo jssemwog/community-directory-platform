@@ -1,0 +1,212 @@
+name: Implementation issue
+description: >-
+  The one increment of work, traced to a requirement. Encodes the working
+  agreements in CONTRIBUTING.md and docs/12-implementation-plan.md.
+title: "<type>: <one reviewable increment>"
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        **No implementation work begins without an issue, and no issue exists
+        without a requirement reference (`IP-4`).** This form is that
+        enforcement — the requirement reference below is required, structurally.
+
+
+        Every field is required; where one does not apply, write **none** so the
+        absence reads as a decision, not an omission. This template is derived
+        from `CONTRIBUTING.md` and `docs/12-implementation-plan.md`; where it
+        appears to conflict with the approved chain (`docs/01`–`docs/12`), the
+        chain wins.
+
+
+        **Do not resolve an open question here.** A field name, a default, a
+        status value, an ordering, a retention period, or a specific list can
+        each close a question the product owner was never asked. Name the
+        *rule*; leave the *list* to configuration.
+
+  - type: textarea
+    id: purpose-scope
+    attributes:
+      label: Purpose and scope
+      description: >-
+        What this issue delivers, and the boundary of that delivery. One
+        reviewable increment — if its title needs the word "and", it is two
+        issues. State what makes this the smallest thing that satisfies the
+        requirement.
+    validations:
+      required: true
+
+  - type: textarea
+    id: requirement-reference
+    attributes:
+      label: Requirement or source-document reference
+      description: >-
+        At least one. No reference means it is not in the MVP (`IP-4`). Cite the
+        approved requirement, journey, or non-functional requirement this work
+        serves — or the source document it amends.
+      placeholder: >-
+        One or more of: FR-…  ·  a journey (V… / L… / A…)  ·  NFR-…  ·  a source
+        document (docs/NN-…). No prose — the reference identifiers.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Implementation phase
+      description: The delivery phase this work belongs to (`docs/12`).
+      options:
+        - "P0a — stack-neutral foundation (blocked by nothing)"
+        - "P0b — stack-dependent foundation (blocked by DG-2)"
+        - "P1 — data foundation"
+        - "P2 — public browsing foundation"
+        - "P3 — listing submission workflow"
+        - "P4 — administrative review workflow"
+        - "P5 — testing, hardening, release preparation"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: workstream
+    attributes:
+      label: Workstream
+      description: The surface this work owns (`docs/12`). The surfaces are the security model.
+      options:
+        - "W1 — Foundation"
+        - "W2 — Public"
+        - "W3 — Submission"
+        - "W4 — Administrative"
+        - "W5 — Quality and release"
+    validations:
+      required: true
+
+  - type: textarea
+    id: invariants
+    attributes:
+      label: Invariants it must not break
+      description: >-
+        The boundary and data-integrity invariants this work touches or must
+        preserve. Each named invariant is proven by an attacking test in the
+        same pull request (`IP-5`, `IP-6`). Write **none** only if the work
+        touches no invariant.
+      placeholder: "BI-…  and/or  DI-…  — or “none”."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: gate
+    attributes:
+      label: Related decision gate
+      description: >-
+        The gate that governs this work (`docs/12`, `docs/13`). Work behind an
+        unopened gate may be written now, but is not started until the gate opens.
+      options:
+        - "None — no product decision required"
+        - "DG-0 — process"
+        - "DG-1 — data design"
+        - "DG-2 — technology"
+        - "DG-3 — build-time"
+        - "DG-4 — release"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: blocked
+    attributes:
+      label: Is this work blocked?
+      description: >-
+        A blocked issue's gate is not yet open. It may be written now — writing
+        it is how the gate's cost becomes visible — but it must not be started
+        until the gate above opens.
+      options:
+        - "Not blocked — its gate is open (or none applies); this work may start"
+        - "Blocked — its gate is not yet open; write now, do not start"
+    validations:
+      required: true
+
+  - type: textarea
+    id: open-questions
+    attributes:
+      label: Open question it must not answer
+      description: >-
+        The unusual field, and the one that does the most work — it turns "do
+        not accidentally decide this" from a hope into a review checklist item.
+        Name every open question this work sits near but must leave to the
+        product owner. Write **none** only after checking there is genuinely none.
+      placeholder: "OQ-…  ·  NOQ-…  ·  AQ-…  — or “none”."
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: silent-answer-check
+    attributes:
+      label: Silent-answer check
+      description: >-
+        The failure mode this whole plan exists to prevent (`IR-1`, reviewer
+        responsibility #2).
+      options:
+        - label: >-
+            I have confirmed this issue answers no open question by default — it
+            introduces no field name, default, status value, ordering, retention
+            period, category, location granularity, or asserted list that would
+            close a question the product owner has not been asked.
+        - label: >-
+            Where an open question blocks a specific value, this issue builds and
+            tests the *rule* and leaves the *list* to configuration (the rule is
+            testable; the list is not).
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: >-
+        Stated, and testable. "We tried to break it and could not" is the
+        standard for an invariant — not "the test passes". Include the empty,
+        error, validation, loading, and confirmation states this work is
+        responsible for, where they apply.
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: >-
+        Issues or pull requests that must merge before this one starts. An issue
+        that cannot be merged without another merging first is half an issue —
+        reconsider its size. Write **none** if it is independent.
+    validations:
+      required: true
+
+  - type: textarea
+    id: exclusions
+    attributes:
+      label: Explicit exclusions
+      description: >-
+        What this issue deliberately does not do. Distinguish **excluded** (not
+        in the MVP — `docs/03`) from **blocked** (would be built, but its
+        decision is unmade). Conflating them is how a missing decision quietly
+        becomes a missing feature.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: definition-of-ready
+    attributes:
+      label: Definition of ready
+      description: >-
+        An issue may be **started** only when all eight hold (`CONTRIBUTING.md`,
+        `docs/12`). A blocked issue may be written before condition 4 holds, but
+        not started. Condition 3 is the one that will be argued about.
+      options:
+        - label: "1 — It cites a requirement, journey, or NFR (`IP-4`)."
+        - label: "2 — It is within `docs/03` scope."
+        - label: >-
+            3 — Every open question it depends on is answered, or it is
+            explicitly scoped to the part that does not depend on one (the rule,
+            not the list).
+        - label: "4 — Its gate (`DG-1`–`DG-4`) is open."
+        - label: "5 — Its acceptance criteria are stated and testable."
+        - label: "6 — The invariants it must not break are named."
+        - label: "7 — Its dependencies are merged."
+        - label: "8 — It is small enough for one reviewable pull request."
