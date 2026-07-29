@@ -1,0 +1,426 @@
+# Traceability matrix
+
+> **Requirement (`docs/05`, `docs/06`) → journey (`docs/04`) → operation (`docs/09`) /
+> screen (`docs/10`) / entity (`docs/08`) → issue → branch → pull request → test
+> (`docs/11`) → merge.**
+
+This matrix makes the chain above **legible in both directions** and keeps it honest as work
+is added. It is established under issue #31 (`P0a`) and **seeded only from the approved,
+merged chain** `docs/01`–`docs/13` and `ADR-001`. No application work has started, so the
+downstream columns (issue, pull request, test) are **deliberately empty** — and that emptiness
+is itself the record: it shows exactly how much of the chain is not yet built.
+
+**This document is a derivation with no independent authority.** It **adds no requirement and
+removes none.** Where it appears to conflict with the chain (`docs/01`–`docs/13`), **the chain
+wins and this matrix is wrong.** A matrix cell that names a field, a default, an ordering, a
+retention period, or a test that does not exist has **silently answered a question the product
+owner was never asked** — that is a defect in this document, not a fact about the system
+(`IR-1`, reviewer responsibility #2). Where the chain left a **seam**, the cell records the
+**seam**, not a guess.
+
+**It is technology-neutral.** No language, framework, data store, hosting platform, test
+runner, CI system, or authentication mechanism appears here, and none may be added. That
+choice is `DG-2`, and `DG-2` is open.
+
+---
+
+## The update obligation
+
+**This matrix is maintained as part of `P0a` and updated in the pull request that changes it —
+never reconstructed at release, when it would be archaeology** (`docs/12`, *Traceability
+expectations*; `IP-9`). A pull request that adds an issue, a test, an ADR, or a merged change
+without updating the row it touches has broken the chain, and the reviewer's job is to catch
+it (`IR-5`, `IR-9`). See *Maintenance* at the foot of this document.
+
+---
+
+## How to read it
+
+The matrix has **four views**, each answering a different question, plus **supporting
+registers** the four views point into.
+
+| View | Answers | Direction |
+|---|---|---|
+| **1 — Forward** | "Given this requirement, where is it built and proven?" | requirement → downstream |
+| **2 — Backward** | "Given this change, what requirement or decision justified it?" | change → requirement |
+| **3 — Invariants** | "Which test attacks this boundary or integrity rule?" | invariant → test |
+| **4 — Open questions** | "Which gate holds this question, and what does it block?" | question → gate → work |
+
+### Status vocabulary
+
+The distinctions below are load-bearing. **Conflating *excluded* with *blocked* is how a
+missing decision quietly becomes a missing feature, permanently** (`docs/12`, *Deferred
+implementation areas*).
+
+| Status | Meaning |
+|---|---|
+| **Committed** | Approved and in the MVP. Will reach at least one issue. |
+| **Blocked** | *Would* be built, but a product decision is unmade. Named with the gate/question that holds it. **Not** the same as excluded. |
+| **Conditional** | Built **only if** an open question resolves a particular way; its absence is then recorded as a decision (`IP-7`). |
+| **Deferred** | Consciously **not** built for the MVP and **not** needed for it. Not waiting on anyone. |
+| **Excluded** | Out of scope by `docs/03` — not deferred, *excluded*. |
+| **Pending** | The downstream artifact (issue, PR, test) does **not exist yet**. An empty cell is honest; a filled aspirational one is a lie the release will rest on. |
+
+### The gate classification is preserved, not softened
+
+Every open question in View 4 is marked **hard blocker** or **shaping input** — the
+distinction from `docs/12`/`docs/13`, carried here unchanged:
+
+- **Hard blocker** — the work is *impossible to do honestly* without the answer. Proceeding
+  means guessing, and the guess silently becomes the answer. Work does not start.
+- **Shaping input** — the work is *possible but under-informed*. It is **considered and
+  consciously carried as a stated assumption**, not resolved by default, and revisited the
+  moment it is answered. **A shaping input is not permission to proceed casually.**
+
+### Why the downstream columns are empty
+
+`P0a` (process foundation) is the only work done; `P0b` and everything after are blocked by
+`DG-2` (technology) and `DG-1` (data design). **No entity, field, operation, screen, or test
+exists yet.** Every "Issue · PR · Test" cell below therefore reads *pending*. When application
+work begins, the issue that builds a row fills that row's downstream cell **in the same pull
+request**.
+
+---
+
+## View 1 — Forward traceability
+
+### 1a. Functional requirements → journeys, surface, and the questions they wait on
+
+Grouped by requirement family; **every `FR-*` identifier is named** so nothing is silently
+dropped. Priorities and decision dependencies are taken from `docs/05`. Phase is **derived**
+from the journey/surface each family serves (`docs/12` phase table) and carries no authority of
+its own.
+
+| FR family (all IDs) | Journeys (`docs/04`) | Surface · phase (derived) | Blocked / shaping question | Status | Issue · PR · Test |
+|---|---|---|---|---|---|
+| **FR-VIS-01…10** (visitor browse/view) | V1, V5, V6, V7 | Public read · **P2** | `OQ-3` (ordering), `OQ-7` (public fields), `OQ-11` (removal) | **VIS-10 Deferred** (`OQ-1`); rest Committed | pending |
+| **FR-SUB-01…09** (listing submission) | L1–L4 | Public write · **P3** | `OQ-8`/`OQ-8b` (required fields), `OQ-9` (anti-spam) | **SUB-08 Deferred** (`OQ-2`); **SUB-09 Blocked** (`OQ-9`); rest Committed | pending |
+| **FR-ADM-01…13** (administrator actions) | A1–A7 | Administrative · **P4** | `OQ-10` (edit-after-approval), `OQ-11` (removal), `OQ-12` (duplicates) | **ADM-10/12/13 Blocked/Conditional**; rest Committed | pending |
+| **FR-SRCH-01…09** (search & filter) | V2, V3, V4, V6 | Public read · **P2** | `OQ-4` (search scope), `OQ-5` (category model), `OQ-6` (location granularity) | **SRCH-02/09 Blocked** (`OQ-4`,`OQ-5`); rest Committed | pending |
+| **FR-DATA-01…11** (listing data) | Data; V3–V5 | Data · **P1** | `OQ-5`, `OQ-6`, `OQ-7`, `OQ-8b` | **DATA-06/08 Blocked**; rest Committed | pending |
+| **FR-VAL-01…06** (validation) | L2, L3, A3, A6 | Public write / admin · **P3** | `OQ-8`/`OQ-8b` (rule set only) | Committed (behavior); **rule set Blocked** (`OQ-8`) | pending |
+| **FR-MOD-01…08** (moderation) | A4, A5, A7; boundaries | Administrative · **P4** | `OQ-11` (removal), `OQ-15` (escalation) | **MOD-06 Blocked**, **MOD-08 Deferred** (`OQ-15`); rest Committed | pending |
+| **FR-AUTH-01…04** (access control) | Cross-cutting; A1–A7 | Boundary · **P1/P4** | mechanism deferred (`DD-4`, `NOQ-9`) | Committed (boundary); mechanism → `ADR-004` | pending |
+| **FR-ERR-01…06** (error/empty states) | V1, V6, L1–L3, A1 | Cross-surface · **P2–P4** | — | Committed | pending |
+| **FR-CONF-01…04** (confirmations) | L4, A4, A5, A6 | Public write / admin · **P3/P4** | — | Committed | pending |
+| **FR-ACC-01…05** (accessibility/responsive) | All core flows | Cross-cutting · **P2 onward** | `NOQ-5` (conformance *claim* only) | Committed (behaviors); **claim Blocked** (`NOQ-5`) | pending |
+| **FR-AUD-01…06** (status & auditability) | Data; A4, A5 | Data / admin · **P1/P4** | `OQ-13` (rejected retention), `OQ-14`+`NOQ-8` (audit log) | **AUD-05 Conditional** (`OQ-14`/`NOQ-8`), **AUD-06 Blocked** (`OQ-13`); rest Committed | pending |
+
+**Deferred and blocked functional requirements, named explicitly** (so their absence reads as
+a decision, per acceptance criterion): `FR-VIS-10` (deferred — `OQ-1`), `FR-SUB-08` (deferred —
+`OQ-2`), `FR-SUB-09` (blocked — `OQ-9`), `FR-ADM-10` (blocked — `OQ-10`), `FR-ADM-12` (blocked —
+`OQ-11`), `FR-ADM-13` (blocked — `OQ-12`), `FR-SRCH-02` (shaped — `OQ-4`), `FR-SRCH-09` (blocked
+— `OQ-5`), `FR-DATA-06` (blocked — `OQ-6`), `FR-DATA-08` (blocked — `OQ-8b`), `FR-MOD-06`
+(blocked — `OQ-11`), `FR-MOD-08` (deferred — `OQ-15`), `FR-AUD-05` (conditional — `OQ-14`/
+`NOQ-8`), `FR-AUD-06` (blocked — `OQ-13`).
+
+### 1b. Non-functional requirements → where they land, and what they wait on
+
+Every `NFR-*` identifier is named. "Where it lands" is from `docs/06`–`docs/08`; the shaping/
+blocking question is from `docs/06`'s own NFR→NOQ mapping.
+
+| NFR family (all IDs) | Where it lands | Blocked / shaping question | Status | Issue · PR · Test |
+|---|---|---|---|---|
+| **NFR-PERF-01…06** | `DD-12`; measurement | `NOQ-1`, `NOQ-4` (shaping) | **Blocked** — no threshold asserted (`docs/11` Cat. 3) | pending |
+| **NFR-REL-01…06** | `DD-8`; error states | `NOQ-2` (hard) | REL-03/04/06 Committed; target **Blocked** (`NOQ-2`) | pending |
+| **NFR-SEC-01…08** | `C8`, `C7`; `BI-5` | `OQ-9` (SEC-06), `NOQ-9` (SEC-07) | Committed; SEC-06 **Blocked** (`OQ-9`), SEC-07 **Blocked** (`NOQ-9`) | pending |
+| **NFR-PRIV-01…05** | `S-2`, `DI-5`; `BI-6` | `OQ-7` (PRIV-01/02), `OQ-13` (PRIV-05) | Committed (rule); **field set Blocked** (`OQ-7`), retention **Blocked** (`OQ-13`) | pending |
+| **NFR-ACC-01…05** | Core-flow UI | `NOQ-5` (ACC-04/05) | Committed (behaviors); **level Blocked** (`NOQ-5`) | pending |
+| **NFR-USA-01…06** | UI messaging | — | Committed | pending |
+| **NFR-RESP-01…04** | Responsive layout | `NOQ-6` (RESP-03) | Committed (behavior); **matrix Blocked** (`NOQ-6`) | pending |
+| **NFR-MAINT-01…05** | Codebase, tests, config | `DG-2` (tooling) | Committed; test tooling → `DG-2` | pending |
+| **NFR-OBS-01…06** | `C12`; `DD-13` | `NOQ-7` (OBS-06), `OQ-14`/`NOQ-8` (OBS-05) | Committed; OBS-05 **Conditional**, OBS-06 retention **Blocked** (`NOQ-7`) — exclusion rule **not** deferred | pending |
+| **NFR-DATA-01…06** | `DI-1`–`DI-7` | — | Committed | pending |
+| **NFR-BACK-01…05** | `DD-9`; store capability | `NOQ-3` (BACK-01/03) | Committed (exercised at all); **RPO/RTO Blocked** (`NOQ-3`) | pending |
+| **NFR-SCALE-01…04** | `PA-1`; `DD-12` | `NOQ-1`, `NOQ-4` (shaping) | **Blocked/shaped** — carries `PA-1` ("small") | pending |
+| **NFR-COMP-01…04** | Supported matrix | `NOQ-6` | Committed (behavior); **matrix Blocked** (`NOQ-6`) | pending |
+| **NFR-OPS-01…05** | Operational procedures | — (carries `PA-1`–`PA-3`) | Committed | pending |
+
+### 1c. Journeys, operations, and screens — the middle of the chain
+
+Seeded catalogs the forward views point through. All downstream **pending**.
+
+**Journeys (`docs/04`).** Visitor: **V1** browse · **V2** search · **V3** filter by category ·
+**V4** filter by location · **V5** view details · **V6** no-results · **V7** inaccurate content.
+Lister: **L1** open form · **L2** submit · **L3** correct errors · **L4** confirmation. Admin:
+**A1** view queue · **A2** review · **A3** edit · **A4** approve · **A5** reject · **A6** update
+existing · **A7** handle problematic content.
+
+| Operation (`docs/09`) | Serves | Phase | Screen (`docs/10`) | Test |
+|---|---|---|---|---|
+| `OP-1` retrieve approved listings | V1, V2 | P2 | `S1` Directory | pending |
+| `OP-2` retrieve one approved listing | V5 | P2 | `S2` Listing detail | pending |
+| `OP-3` submit a listing request | L1–L3 | P3 | `S3` Request form | pending |
+| `OP-4` retrieve pending queue | A1 | P4 | `S5` Pending queue | pending |
+| `OP-5` retrieve one record for review | A2 | P4 | `S6` Record detail | pending |
+| `OP-6` edit a record's content | A3 | P4 | `S7` Record edit | pending |
+| `OP-7` approve a pending submission | A4 | P4 | `S6` | pending |
+| `OP-8` reject a pending submission | A5 | P4 | `S6` | pending |
+| `OP-9` remove/unpublish *(conditional — `S-5`/`OQ-11`)* | A6, A7 | P4 | `S6`/`S7` | pending |
+| `OP-10` approve a revision *(conditional — `S-5`/`OQ-10`)* | A6 | P4 | `S7` | pending |
+| `OP-11` retrieve the category set | V3, L1 | P2 | `S1`, `S3` | pending |
+| `S4` Submission confirmation | L4 | P3 | (screen) | pending |
+
+---
+
+## View 2 — Backward traceability
+
+**Every issue and every merged pull request names the requirement — or the decision — it
+serves. Nothing is silently added; that is how out-of-scope features actually get built, not
+by decision but by drift** (`IR-5`).
+
+Seeded with the **`P0a` process foundation**, which is real and merged. This work serves
+`docs/12` process requirements (`PA-5`, the working agreements, `IP-*`), **not** a functional
+requirement — process work has no `FR-*`, and recording it here as serving the plan is the
+honest backward link. **The issue number and the pull-request number are not the same number**
+(`CONTRIBUTING.md`, *Commits*); both are shown.
+
+| Issue | Branch | PR | Serves (justification) | Landed on `main` |
+|---|---|---|---|---|
+| #25 working agreements | `docs/…` | #33 | `PA-5`, review workflow (`docs/12`) | `bceac13` |
+| #30 decision log | `docs/…` | #34 | `DG-1`–`DG-4` visibility (`IR-1`) | `19f24d6` |
+| #28 ADR directory & template | `docs/…` | #35 | ADR foundation (`docs/07`) | `370dddb` |
+| #29 `ADR-001` (Option A) | `docs/…` | #36 | Ratify architecture shape (`PA-4`, `IR-6`) | `f05bac2` |
+| #26 issue template | `docs/26-…` | #37 | `IP-4` enforcement | `3fc81a7` |
+| #27 pull-request template | `docs/27-…` | #38 | `IP-9`, DoD, review focus | `c2883bf` |
+| **#31 traceability matrix** | `docs/31-traceability-matrix` | *pending* | `docs/12` *Traceability expectations*, `IR-5` | *pending* |
+| #32 branch protection | *pending* | *pending* | `PA-5` (owned by issue #32, **not here**) | *pending* |
+
+**Application (`P1`+) issues will be appended to this view as they are opened** — each naming
+the `FR-*`/`NFR-*`/journey it serves, so the backward direction holds from the first line of
+application code. Until `DG-1` and `DG-2` open, there are none to add.
+
+---
+
+## View 3 — Invariants and the tests that attack them
+
+**Every `BI-*` and `DI-*` names the test that attacks it. An invariant with no attacking test
+is an invariant with no evidence.** The test column is **pending** for all — no test exists
+yet, and an empty cell here is honest (`DG-4` must not be pre-answered with an aspirational
+test). The standard, when the cell is filled, is *"we tried to break it and could not"* —
+proven **at the level where the invariant is enforced** (the operation, not the UI — `BI-9`,
+`IP-5`), not merely "the test passes."
+
+### Boundary invariants (`docs/11`)
+
+| ID | Invariant | Source requirement | Enforced at · phase | Attacking test |
+|---|---|---|---|---|
+| `BI-1` | Approved-only public visibility | `FR-VIS-02`, `DI-5` | `C4` public projection · **P2** | pending |
+| `BI-2` | Public write cannot produce an approved record | `FR-AUD-04`, `DI-4` | `OP-3` · **P3** | pending |
+| `BI-3` | Search scope never exceeds publication scope | `FR-SRCH-*` (scope) | `C4` · **P2** | pending |
+| `BI-4` | No public output discloses a non-approved record's existence | `NFR-SEC-02` | Public surface · **P2** — **its own issue** (equivalence test) | pending |
+| `BI-5` | No administrative capability without an authorized identity | `NFR-SEC-01/02` | `C8` · **P4 (first)** | pending |
+| `BI-6` | Administrative data never appears publicly | `FR-DATA-11`, `NFR-PRIV-01/03` | Public projection · **P2/P4** | pending |
+| `BI-7` | Publication is atomic, never partial | `NFR-DATA-03`, `DI-3` | `C6` · **P1** | pending |
+| `BI-8` | Exactly one valid status, changed only by permitted transition | `NFR-DATA-01/02`, `DI-1/2` | Status model · **P1** | pending |
+| `BI-9` | The UI is not the boundary | `docs/07` | All operations · **all phases** | pending |
+
+> **`BI-4` is the hardest to test and the easiest to skip** — its failure is an *absence*.
+> It requires an **equivalence test** proving *never existed*, *pending*, *rejected*, and
+> *removed* are indistinguishable to an unauthorised observer (message, count, shape, timing).
+> It is **its own issue**, always, and warrants a second reviewer (`IR-4`).
+
+### Data-integrity invariants (`docs/08`)
+
+| ID | Rule | Source | Phase | Test |
+|---|---|---|---|---|
+| `DI-1` | Exactly one status at all times | `NFR-DATA-01`, `FR-AUD-01` | P1 | pending |
+| `DI-2` | Status changes only via permitted transition | `NFR-DATA-02` | P1 | pending |
+| `DI-3` | Every action completes fully or not at all (never partially public) | `NFR-DATA-03` | P1 | pending |
+| `DI-4` | Administrative attributes settable only by system/admin | `FR-AUD-04`, `NFR-DATA-04` | P1 | pending |
+| `DI-5` | No non-approved record reachable through any public path | `FR-VIS-02`, `NFR-PRIV-03` | P1/P2 | pending |
+| `DI-6` | `submitted at` write-once; `last updated at` on every change | `FR-AUD-02/03`, `NFR-DATA-05` | P1 | pending |
+| `DI-7` | Stored data reflects last successful action; no silent loss | `NFR-DATA-06` | P1 | pending |
+| `DI-8` | Identity stable for the record's whole life | `docs/08` (`DDM-2` physical) | P1 | pending |
+| `DI-9` | Category value always a member of the predefined set | `FR-DATA-10`, `FR-DATA-02` | P1 | pending |
+
+---
+
+## View 4 — Open questions → gate → work
+
+**Every open question is traceable to the gate that holds it and the work it blocks.** Seeded
+from `docs/13-decision-log.md`, which is the live register; this view mirrors it and **answers
+nothing**. Classification is carried unchanged — a hard blocker is not softened to unblock
+work, and a shaping input is not overstated into a block.
+
+| Question | Gate | Class | Blocks / shapes | Status | Lands in |
+|---|---|---|---|---|---|
+| `OQ-6` location granularity | `DG-1` | **Hard blocker** | All of `P1` (backfill risk) | Unresolved | `S-6`, `ADR-006` |
+| `OQ-7` public vs private fields | `DG-1` | **Hard blocker** | `P1`, `P2` — the public projection | Unresolved | `S-2`, `ADR-006` |
+| `OQ-8` / `OQ-8b` required fields; contact minimum | `DG-1` | **Hard blocker** | `P3` validation *rules* | Unresolved | `S-1`, `ADR-006` |
+| `OQ-10` edit-after-approval | `DG-1` | **Hard blocker** | `P1` (`E7`, lifecycle state), `OP-10` | Unresolved | `S-5`, `ADR-006` |
+| `OQ-11` removal / unpublish | `DG-1` | **Hard blocker** | `P1` status model, `OP-9` | Unresolved | `S-5`, `ADR-006` |
+| `OQ-13` rejected-submission retention | `DG-1` | **Hard blocker** | `P1` (`S-11`), purge | Unresolved | `S-11`, `ADR-006` |
+| `OQ-4` searchable fields & matching mode | `DG-1` | *Shaping input* | Search *scope* (`BI-3` built regardless) | Unresolved | `S-4`, `ADR-007` |
+| `OQ-5` category model — cardinality, curation | `DG-1` | *Shaping input* | `S-3` representation (membership enforced regardless) | Unresolved | `S-3` |
+| `NOQ-2` availability target | `DG-2` | **Hard blocker** | Store & hosting selection | Unresolved | `ADR-003`, `ADR-010` |
+| `NOQ-3` backup / RPO / RTO | `DG-2` | **Hard blocker** | Store selection (capability) | Unresolved | `ADR-003`, `ADR-010` |
+| Technology stack | `DG-2` | **Hard blocker** | `P0b` and everything after | Unresolved | `ADR-002`–`ADR-005` |
+| `NOQ-1` performance thresholds | `DG-2` | *Shaping input* | Informs tech selection; carried as `PA-1` | Unresolved | — |
+| `NOQ-4` expected first-release load | `DG-2` | *Shaping input* | As `NOQ-1`; first to revisit if `PA-1` wrong | Unresolved | — |
+| `OQ-9` anti-spam behavior | `DG-3` | **Hard blocker** | `P3` `C11` mechanism (seam built) | Unresolved | `S-9`, `ADR-008` |
+| `OQ-14` + `NOQ-8` audit logging (one decision) | `DG-3` | **Hard blocker** | `P4` (`C10`, `E5`) — **irreversible if late** | Unresolved | `S-7`, `S-8`, `ADR-009` |
+| `NOQ-9` admin credential & session strength | `DG-3` | **Hard blocker** | `P4` auth boundary | Unresolved | `ADR-004` |
+| `NOQ-5` accessibility standard & level | `DG-3` | *Shaping input* **— answer early** | Conformance *claim* only (behaviors built regardless) | Unresolved | `ADR-011` |
+| `NOQ-6` browser / device / AT matrix | `DG-3` | *Shaping input* | Support *claim* only | Unresolved | `ADR-011` |
+| `NOQ-7` operational-log retention | `DG-4` | Release gate | Retention only (exclusion rule **not** deferred) | Unresolved | `DD-13` |
+| Testing depth | `DG-4` | Release gate | Size of suite (Cat. 1 holds regardless) | Unresolved | — |
+| Category 3 acceptance | `DG-4` | Release gate | The release decision | Unresolved | `docs/11` Cat. 3 |
+| `OQ-1` visitor report-inaccuracy path | — | **Deferred** | Nothing (`V7` view-only) | Deferred | — |
+| `OQ-2` lister outcome notification | — | **Deferred** | Nothing in MVP (`DD-16`) | Deferred | — |
+| `OQ-3` default ordering | — | **Deferred** | Nothing (built *consistent*) | Deferred | — |
+| `OQ-12` duplicate resolution | — | **Deferred** | Nothing structural | Deferred | `S-10` |
+| `OQ-15` abuse escalation | — | **Deferred** | A human process | Deferred | — |
+| `AQ-1` duplicate-submission behavior | — | **Deferred** | Undefined — exploratory charter | Deferred | — |
+| `AQ-5` API versioning | — | **Deferred** | No scheme; one client | Deferred | — |
+
+---
+
+## Supporting registers
+
+### Decision gates (`docs/13`)
+
+| Gate | Subject | Status | Blocks |
+|---|---|---|---|
+| `DG-0` | Process | **Open** | Nothing — `P0a` proceeds |
+| `DG-1` | Data design | Unresolved | All of `P1`; transitively `P2`–`P4` |
+| `DG-2` | Technology | Unresolved | `P0b` scaffold and all of `P1` |
+| `DG-3` | Build-time | Unresolved | `P3`, `P4`; verifiability of `P2` |
+| `DG-4` | Release | Unresolved | The release decision, not the build |
+
+**Every gate is owned by a role, not yet a person** (`docs/13`) — assigning a person to each
+gate is the first maintenance action the decision log requires.
+
+### ADR register (`docs/07`, `docs/adr/`)
+
+| ADR | Decision | Status | Blocked by |
+|---|---|---|---|
+| `ADR-001` | Modular monolith; reject microservices & browser-direct | **Accepted** (issue #29) | — |
+| `ADR-002` | Language & framework | Pending | `DG-2` (`DD-2`) |
+| `ADR-003` | Data-store product | Pending | `NOQ-2`, `NOQ-3` (`DD-3`) |
+| `ADR-004` | Administrator authentication mechanism | Pending | `NOQ-9` (`DD-4`) |
+| `ADR-005` | Hosting platform & runtime model | Pending | `DG-2` (`DD-5`) |
+| `ADR-006` | Listing data model & lifecycle states | Pending | `OQ-6/7/8/8b/10/11/13` (`DD-1`) |
+| `ADR-007` | Search approach | Pending | `OQ-4` (`DD-14`) |
+| `ADR-008` | Anti-spam approach | Pending | `OQ-9` (`DD-6`) |
+| `ADR-009` | Audit-logging approach | Pending | `OQ-14`/`NOQ-8` (`DD-7`) |
+| `ADR-010` | Backup, recovery & availability posture | Pending | `NOQ-2`, `NOQ-3` |
+| `ADR-011` | Accessibility standard, level & supported matrix | Pending | `NOQ-5`, `NOQ-6` |
+| `ADR-012` | Testing strategy | Pending | — (`NFR-MAINT-03`, `R-6`) |
+
+### Architecture components (`docs/07`)
+
+| Component | Responsibility | Serves | Phase |
+|---|---|---|---|
+| `C1` Public Directory Interface | Public read UI | `FR-VIS-*`, `FR-SRCH-*` | P2 |
+| `C2` Submission Interface | Public write UI | `FR-SUB-*` | P3 |
+| `C3` Administrative Interface | Admin UI | `FR-ADM-*` | P4 |
+| `C4` Directory Query Service | Public projection | `BI-1/3/4/6` | P2 |
+| `C5` Submission Service | Accept submissions | `FR-SUB-*`, `BI-2` | P3 |
+| `C6` Moderation Service | Lifecycle transitions | `FR-MOD-*`, `BI-7/8` | P4 |
+| `C7` Validation Rules | Field/format validation | `FR-VAL-*` | P3 |
+| `C8` Identity & Access | Auth boundary | `FR-AUTH-02`, `BI-5` | P4 |
+| `C9` Listing Repository | Persistence | `E1`, `DI-*` | P1 |
+| `C10` Audit Recorder *(conditional — `OQ-14`/`NOQ-8`)* | Audit emission | `FR-AUD-05` | P4 |
+| `C11` Abuse Safeguard *(conditional — `OQ-9`)* | Anti-spam | `FR-SUB-09` | P3 |
+| `C12` Observability & Operations | Logs, health | `NFR-OBS-*` | P0b/P5 |
+
+### Entities (`docs/08`)
+
+| Entity | Status | Seam |
+|---|---|---|
+| `E1` Listing record | **Required** | — |
+| `E2` Category | **Required** | `S-3` (representation) |
+| `E3` Administrator | **Required; stored elsewhere** | — |
+| `E4` Review action | **Seam** | `S-7` |
+| `E5` Audit entry | **Conditional** | `S-8` (`OQ-14`/`NOQ-8`) |
+| `E6` Submission-safeguard data | **Conditional** | `S-9` (`OQ-9`) |
+| `E7` Listing revision | **Conditional** | `S-5` (`OQ-10`) |
+
+### Data-model seams (`docs/08`)
+
+`S-1` submission obligations (`OQ-8/8b`) · `S-2` public/private field designation (`OQ-7`) ·
+`S-3` category cardinality/curation (`OQ-5`) · `S-4` searchable attributes & matching (`OQ-4`) ·
+`S-5` edit-after-approval / removal (`OQ-10`, `OQ-11`) · `S-6` location attributes (`OQ-6`) ·
+`S-7` review-data shape (`OQ-14` dependency) · `S-8` audit entries (`OQ-14`, `NOQ-8`) ·
+`S-9` anti-spam data (`OQ-9`) · `S-10` duplicate representation (`OQ-12`) ·
+`S-11` rejected retention & purge (`OQ-13`). **A cell that fills a seam with a guessed field
+has answered `DG-1` by the back door.**
+
+### Deferred vs excluded (`docs/12`, `docs/03`)
+
+- **Conditional / blocked (would be built, decision unmade):** `OP-9`, `OP-10`, `E5`, `E6`,
+  `E7`, audit emission, anti-spam mechanism, revision/retention structures. Recorded against
+  their questions above.
+- **Deferred (not built, not needed):** outcome notification (`OQ-2`, `DD-16`), report-
+  inaccuracy path (`OQ-1`), API versioning (`AQ-5`), redundancy/caching/dedicated search index.
+- **Excluded by `docs/03` (not deferred):** business-owner accounts, listing claiming, reviews,
+  ratings, analytics, advertising, payments, events, social features, native apps, third-party
+  API consumption. **These will not be built because they are not in the MVP** — not because a
+  decision is pending.
+
+### Implementation phases (`docs/12`)
+
+| Phase | Delivers | Gate | Status |
+|---|---|---|---|
+| `P0a` | Working agreements, ADR foundation, `ADR-001`, decision log, **this matrix** | `DG-0` | **In progress** (only #31, #32 remain) |
+| `P0b` | Scaffold, CI, deployment | `DG-2` | Blocked |
+| `P1` | Entities, status machine, integrity invariants | `DG-1`, `DG-2` | Blocked |
+| `P2` | Public browsing, the public projection | `P1`; `DG-1` | Blocked |
+| `P3` | Listing submission workflow | `P1`; `DG-1`, `DG-3` | Blocked |
+| `P4` | Administrative review workflow | `P1`; `DG-3` | Blocked |
+| `P5` | Testing, hardening, release preparation | `P2`–`P4`; `DG-4` | Blocked |
+
+---
+
+## Maintenance
+
+**The matrix is worthless the moment it goes stale, and stale is the default state of a
+document nobody is obliged to touch.** Keep it true by updating it **in the pull request that
+changes what it records** — never afterward (`IP-9`, `IR-9`).
+
+1. **A new issue** → add a row to **View 2** naming the `FR-*`/`NFR-*`/journey it serves
+   (backward link), and fill the **Issue** cell of the **View 1** row(s) it builds (forward
+   link). An issue with no requirement reference does not merge (`IP-4`).
+2. **A pull request** → record its number and the merged commit in **View 2**. Remember the
+   **issue number and PR number differ**.
+3. **A test that attacks an invariant** → fill the **Test** cell in **View 3** — only when the
+   test genuinely exists, and only when it attacks the invariant **at the level it is enforced**
+   (`BI-9`, `IP-5`). An aspirational test cell is a lie the release decision will rest on.
+4. **An ADR merged** → update the **ADR register** status, and the rows whose decision it
+   settles.
+5. **An open question answered** → the answer lands in the **owning document** (`docs/03`–
+   `docs/11`) and the **decision log** (`docs/13`); update **View 4** status, and unblock the
+   requirement/seam rows the answer releases. **Do not record the answer here** — this matrix
+   points at the decision, it does not hold it.
+6. **A seam built out** → update `docs/08` and the entity/seam registers with the pull request
+   that builds it (`IP-7`: a seam is an option, not an obligation).
+7. **Never fill a cell with a guess.** A row that names a field, a default, an ordering, a
+   retention period, or a status value has made a product decision. **Stop, and take the
+   question to its owner** (`IR-1`, reviewer responsibility #2).
+
+**The two directions are the whole point.** *Forward*: every approved requirement reaches an
+issue, or is recorded here as deferred/blocked — nothing silently dropped. *Backward*: every
+issue and merged pull request names what it serves — nothing silently added, which is how
+out-of-scope features actually get built: not by decision, but by drift.
+
+---
+
+## Source
+
+| Document | What this matrix takes from it |
+|---|---|
+| `docs/03-mvp-scope.md` | Excluded vs. in-scope; the scope fence. |
+| `docs/04-user-journeys.md` | `V1`–`V7`, `L1`–`L4`, `A1`–`A7`. |
+| `docs/05` / `docs/06` | `FR-*` / `NFR-*`, priorities, and their decision dependencies. |
+| `docs/07-system-architecture.md` | Components `C1`–`C12`, deferred decisions `DD-1`–`DD-16`, ADRs. |
+| `docs/08-data-model.md` | Entities `E1`–`E7`, integrity invariants `DI-1`–`DI-9`, seams `S-1`–`S-11`. |
+| `docs/09-api-design.md` | Operations `OP-1`–`OP-11`. |
+| `docs/10-ui-design.md` | Screens `S1`–`S7`. |
+| `docs/11-test-strategy.md` | Boundary invariants `BI-1`–`BI-9`; what counts as evidence. |
+| `docs/12-implementation-plan.md` | Phases, workstreams, the traceability obligation, `IP-*`, `IR-*`. |
+| `docs/13-decision-log.md` | The gates, classifications, and open-question status (View 4). |
+| `docs/adr/ADR-001-…` | The one accepted decision. |
+
+**This matrix is a derivation. Where it conflicts with the chain, the chain wins and this
+matrix is wrong.**
