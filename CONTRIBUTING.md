@@ -117,6 +117,34 @@ reviewer who approves a boundary breach.*
 **Squash merge to `main`,** on one reviewer's approval. This is the established method; every
 commit on `main` arrived this way.
 
+### Branch protection
+
+`main` is protected so that `PA-5` — *work reaches `main` through reviewed pull requests* — is
+enforced by the repository, not merely by convention. **A defence that a direct push can bypass
+is not a defence** (`IR-1`). The protection is a repository setting, applied by a maintainer
+with admin rights; it is recorded here so the configuration is discoverable and reviewable.
+
+- **A pull request is required.** Changes reach `main` only through a pull request — no direct
+  pushes.
+- **One approving review is required**, matching *Review and approval workflow* above.
+- **Review conversations must be resolved** before merging.
+- **No status check is required — yet, and deliberately.** There is no continuous-integration
+  pipeline: CI and its test tooling follow from `ADR-002` and are `P0b` work, **blocked by
+  `DG-2`**. Requiring a check now would either block every merge against a check that never
+  reports, or quietly presuppose the stack. **The required status check is added in `P0b`, by
+  the issue that builds the pipeline** — not here.
+- **Squash is the only enabled merge method.** Merge commits and rebase merges are disabled, so
+  every commit on `main` is a squashed pull request with its number appended.
+- **Force pushes to `main` are blocked, and `main` cannot be deleted.** Linear history is
+  required.
+- **Administrators currently retain a bypass** (`enforce_admins` is off), because the project
+  has **one maintainer** and GitHub does not permit approving your own pull request — enforcing
+  the review requirement on the sole admin would leave no one able to merge. The bypass is an
+  emergency recovery path, not a licence to skip review.
+- **Reconsider the admin bypass when a second maintainer or reviewer is available.** Once
+  another person can supply the approving review, admin enforcement can be turned on so the rule
+  binds everyone, including administrators.
+
 ---
 
 ## Review
