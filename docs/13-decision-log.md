@@ -62,11 +62,11 @@ until it is answered. That is a harder deadline than a calendar date, and an hon
 
 | Gate | Subject | Owner | Status | Blocks | Hard blockers | Shaping inputs |
 |---|---|---|---|---|---|---|
-| **`DG-0`** | Process | Maintainer — *assign* | **Open** | Nothing | — | — |
-| **`DG-1`** | **Data design** | Product owner — *assign* | **Unresolved** | **All of `P1`**; transitively `P2`, `P3`, `P4` | 6 | 2 |
-| **`DG-2`** | **Technology** | Product owner — *assign* | **Unresolved** | The **`P0b` scaffold** and all of `P1` | 2 | 2 |
-| **`DG-3`** | **Build-time** | Product owner — *assign* | **Unresolved** | `P3`, `P4`, and the *verifiability* of `P2` | 3 | 2 |
-| **`DG-4`** | **Release** | Product owner — *assign* | **Unresolved** | The **release decision**, not the build | — | — |
+| **`DG-0`** | Process | **Joe S.** — maintainer | **Open** | Nothing | — | — |
+| **`DG-1`** | **Data design** | **Joe S.** — product owner | **Unresolved** | **All of `P1`**; transitively `P2`, `P3`, `P4` | 6 | 2 |
+| **`DG-2`** | **Technology** | **Joe S.** — product owner | **Unresolved** | The **`P0b` scaffold** and all of `P1` | 2 | 2 |
+| **`DG-3`** | **Build-time** | **Joe S.** — product owner | **Unresolved** | `P3`, `P4`, and the *verifiability* of `P2` | 3 | 2 |
+| **`DG-4`** | **Release** | **Joe S.** — product owner | **Unresolved** | The **release decision**, not the build | — | — |
 
 > **`DG-0` is open. Everything else is not.**
 >
@@ -74,10 +74,22 @@ until it is answered. That is a harder deadline than a calendar date, and an hon
 > the stack-neutral half of Phase 0 (`P0a`).** That is not a scheduling inconvenience to route
 > around. It is the plan telling the truth.
 
-**Owners are recorded by role, and the role is not a name.** `docs/02-stakeholders.md` names
-no individual, and this log will not invent one. **Assigning a person to each gate is the
-first maintenance action this document requires** — until then, every gate below is owned in
-principle and unowned in practice, which is precisely the condition `IR-1` describes.
+**Every gate now has a named accountable owner.** `docs/02-stakeholders.md` names no individual
+at the organisation level; **Joe S.** is the person currently holding the product-owner role
+(and the maintainer role for `DG-0`), and is recorded above as accountable for `DG-0` through
+`DG-4`. Naming the owner is what turns a gate that is "owned in principle and unowned in
+practice" — precisely the condition `IR-1` describes — into one with a person answerable for it.
+
+- The **developer or technical-advisor role** may research options, analyse trade-offs, and
+  make recommendations.
+- **Final product, policy, risk-acceptance, and technology decisions remain with the
+  accountable product owner.**
+- **Ownership may be revised** when additional maintainers or subject-matter experts join the
+  project.
+
+**Naming an owner neither answers an open question nor clears a gate.** Every gate below remains
+exactly as unresolved as it was; the owner is simply the person now accountable for answering
+it, in the owning document, through the normal review workflow.
 
 ### Take these seven to the product owner first
 
@@ -219,8 +231,9 @@ phase; none is waiting on anyone.
 **This log is worthless the moment it goes stale**, and stale is the default state of a
 document nobody is obliged to touch.
 
-1. **Assign a person to every gate.** Until then the gates are owned in principle and unowned
-   in practice — the exact condition `IR-1` describes.
+1. **Keep a named person accountable for every gate.** This is now done — **Joe S.** owns
+   `DG-0`–`DG-4` (see *Gate summary*). Revisit it when maintainers or subject-matter experts
+   join; a gate left unowned is the exact condition `IR-1` describes.
 2. **Update it in the pull request that changes it** (`IP-9`), never afterwards.
 3. **When an answer arrives:** amend the **owning document** (`docs/03`–`docs/11`), record the
    *Outcome* and its reference here, update *Status*, and **unblock the work** — removing the
