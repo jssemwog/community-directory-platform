@@ -314,13 +314,27 @@ Source: support/maintainer need for "backups" and a recoverable system. The
 commitment to *have* backup and recovery is fixed; the specific recovery
 objectives are business decisions.
 
+**Backup and recovery — decided (`NOQ-3`, 2026-07-30).** The committed MVP posture is:
+**daily backups**; a **recovery point objective (RPO — the maximum amount of recent data it
+is acceptable to lose in a failure) of up to 24 hours**; a **recovery time objective (RTO —
+the maximum acceptable time to restore service) of one business day**; a **restore test before
+launch and at least quarterly thereafter**; and **at least one independent backup copy kept
+outside the primary provider, refreshed at least weekly**. **Every copy of the data — live
+data, provider-managed backups, exported backups, and independent off-provider copies —
+carries the same confidentiality, access-control, and protection guarantees.** This posture is
+proportionate to the small first-release assumption (`PA-1`) and is deliberately
+**provider-neutral**: it names no database, hosting service, or backup product, and reads
+identically whatever `DG-2` later decides. See `docs/13-decision-log.md` `NOQ-3`. This resolves
+the backup and recovery objectives only; **`DG-2` (technology) remains open.**
+
 | ID | Requirement | Quality attribute | Source | Priority | Verification | Notes |
 |---|---|---|---|---|---|---|
-| NFR-BACK-01 | Listing and submission data shall be backed up on a defined, documented schedule so that it can be restored after loss or corruption. | Backup and recovery | Stakeholders (maintainers) | Must | Inspection / Demonstration | The commitment to scheduled backups is fixed; the frequency is **Decision pending: NOQ-3**. |
-| NFR-BACK-02 | The system shall have a documented, tested recovery procedure that restores the directory to a consistent, usable state from a backup. | Backup and recovery | Stakeholders (maintainers) | Must | Demonstration | Recovery must be proven, not assumed. |
-| NFR-BACK-03 | Recovery shall meet defined objectives for maximum tolerable data loss (recovery point) and maximum tolerable downtime (recovery time). | Backup and recovery | Stakeholders | Should | Demonstration / Analysis | The RPO and RTO values are **Decision pending: NOQ-3**; no figure is invented here. |
-| NFR-BACK-04 | Backups shall be protected so that they preserve the same confidentiality guarantees as live data, including exclusion of unauthorized access to non-public submission data. | Backup and recovery / Privacy | Privacy; NFR-PRIV-03 | Must | Inspection | Backups are a data-exposure surface too. |
-| NFR-BACK-05 | The integrity of backups should be verified periodically so that a backup is known to be restorable before it is needed. | Backup and recovery | Stakeholders (maintainers) | Should | Demonstration / Audit | Guards against silent backup failure. |
+| NFR-BACK-01 | Listing and submission data shall be backed up on a defined, documented schedule — **at least daily** — so that it can be restored after loss or corruption. | Backup and recovery | Stakeholders (maintainers) | Must | Inspection / Demonstration | **Decided (`NOQ-3`, 2026-07-30): at least daily.** Provider-neutral — no backup product implied. |
+| NFR-BACK-02 | The system shall have a documented, tested recovery procedure that restores the directory to a consistent, usable state from a backup, and that procedure shall be **restore-tested before launch**. | Backup and recovery | Stakeholders (maintainers) | Must | Demonstration | Recovery must be proven, not assumed. **Decided (`NOQ-3`, 2026-07-30): a restore is tested before launch;** the recurring cadence is `NFR-BACK-05`. |
+| NFR-BACK-03 | Recovery shall meet defined objectives for maximum tolerable data loss (**recovery point objective, RPO**) and maximum tolerable downtime (**recovery time objective, RTO**): an **RPO of up to 24 hours** and an **RTO of one business day**. | Backup and recovery | Stakeholders | Should | Demonstration / Analysis | **Decided (`NOQ-3`, 2026-07-30): RPO up to 24 hours; RTO one business day** — restoration completed within one normal working day of a maintainer detecting the loss. |
+| NFR-BACK-04 | Every copy of the data — **live data, provider-managed backups, exported backups, and independent off-provider copies** — shall carry **equivalent confidentiality, access control, and protection**, including exclusion of unauthorized access to non-public submission data. | Backup and recovery / Privacy | Privacy; NFR-PRIV-03 | Must | Inspection | Backups are a data-exposure surface too. **Decided (`NOQ-3`, 2026-07-30): applies to all copies, including the independent off-provider copy (`NFR-BACK-06`).** |
+| NFR-BACK-05 | The integrity of backups should be verified periodically so that a backup is known to be restorable before it is needed. | Backup and recovery | Stakeholders (maintainers) | Should | Demonstration / Audit | Guards against silent backup failure. **Decided (`NOQ-3`, 2026-07-30): a restore is tested at least quarterly after launch** (the before-launch test is `NFR-BACK-02`). |
+| NFR-BACK-06 | At least one backup copy shall be kept in a location or account **independent of the primary data-store provider**, refreshed **at least weekly**, so that the data survives the loss of — or loss of access to — the primary provider. | Backup and recovery | Stakeholders (maintainers); `NOQ-3` | Must | Inspection / Demonstration | **Decided (`NOQ-3`, 2026-07-30).** Provider-neutral: an off-provider copy, not a named product or service. The same confidentiality and access-control guarantees apply (`NFR-BACK-04`). |
 
 ---
 
@@ -413,7 +427,7 @@ here.** Each decision-pending requirement above points to one of these.
 |---|---|---|---|
 | NOQ-1 | What are the committed response-time thresholds for browse, search, and detail, and at what load do they hold? | NFR-PERF-01, NFR-PERF-02, NFR-PERF-03 | Vision; Scope OQ #9 |
 | NOQ-2 | ~~What availability target and window are committed, and what are the acceptable planned-maintenance windows?~~ **Decided (2026-07-30):** 99% over a rolling monthly window, excluding announced maintenance; public read path prioritised over admin. See `NFR-REL-01/02/05` and `docs/13` `NOQ-2`. | NFR-REL-01, NFR-REL-02, NFR-REL-05 | Stakeholders (maintainers) |
-| NOQ-3 | What are the committed backup frequency, recovery point (max data loss), and recovery time (max downtime)? | NFR-BACK-01, NFR-BACK-03 | Stakeholders (maintainers) |
+| NOQ-3 | ~~What are the committed backup frequency, recovery point (max data loss), and recovery time (max downtime)?~~ **Decided (2026-07-30):** daily backups; RPO up to 24 h; RTO one business day; restore-tested before launch and quarterly; ≥ weekly independent off-provider copy; equivalent confidentiality for all copies. See `NFR-BACK-01`–`NFR-BACK-06` and `docs/13` `NOQ-3`. | NFR-BACK-01, NFR-BACK-03 | Stakeholders (maintainers) |
 | NOQ-4 | What is the expected first-release usage level (concurrent visitors, total listings, submission rate) and the growth headroom to support? | NFR-PERF-05, NFR-PERF-06, NFR-SCALE-01, NFR-SCALE-02 | Scope A-2, A-4; OQ #9 |
 | NOQ-5 | Which published accessibility standard and level (if any) is committed, and what contrast ratio follows from it? | NFR-ACC-04, NFR-ACC-05 | MVP: basic accessibility |
 | NOQ-6 | Which browsers, devices, and assistive technologies form the supported compatibility matrix? | NFR-RESP-03, NFR-COMP-01, NFR-COMP-02 | Vision; FR-ACC-03 |

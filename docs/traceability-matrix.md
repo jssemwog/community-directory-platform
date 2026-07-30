@@ -122,7 +122,7 @@ blocking question is from `docs/06`'s own NFR→NOQ mapping.
 | NFR family (all IDs) | Where it lands | Blocked / shaping question | Status | Issue · PR · Test |
 |---|---|---|---|---|
 | **NFR-PERF-01…06** | `DD-12`; measurement | `NOQ-1`, `NOQ-4` (shaping) | **Blocked** — no threshold asserted (`docs/11` Cat. 3) | pending |
-| **NFR-REL-01…06** | `DD-8`; error states | `NOQ-2` (hard) | REL-03/04/06 Committed; target **Blocked** (`NOQ-2`) | pending |
+| **NFR-REL-01…06** | `DD-8`; error states | `NOQ-2` — **Decided** | REL-03/04/06 Committed; **target Decided** (`NOQ-2`, 2026-07-30): 99% over a rolling monthly window, announced maintenance excluded, public read path prioritised over admin | pending |
 | **NFR-SEC-01…08** | `C8`, `C7`; `BI-5` | `OQ-9` (SEC-06), `NOQ-9` (SEC-07) | Committed; SEC-06 **Blocked** (`OQ-9`), SEC-07 **Blocked** (`NOQ-9`) | pending |
 | **NFR-PRIV-01…05** | `S-2`, `DI-5`; `BI-6` | `OQ-7` (PRIV-01/02), `OQ-13` (PRIV-05) | Committed (rule); **field set Blocked** (`OQ-7`), retention **Blocked** (`OQ-13`) | pending |
 | **NFR-ACC-01…05** | Core-flow UI | `NOQ-5` (ACC-04/05) | Committed (behaviors); **level Blocked** (`NOQ-5`) | pending |
@@ -131,7 +131,7 @@ blocking question is from `docs/06`'s own NFR→NOQ mapping.
 | **NFR-MAINT-01…05** | Codebase, tests, config | `DG-2` (tooling) | Committed; test tooling → `DG-2` | pending |
 | **NFR-OBS-01…06** | `C12`; `DD-13` | `NOQ-7` (OBS-06), `OQ-14`/`NOQ-8` (OBS-05) | Committed; OBS-05 **Conditional**, OBS-06 retention **Blocked** (`NOQ-7`) — exclusion rule **not** deferred | pending |
 | **NFR-DATA-01…06** | `DI-1`–`DI-7` | — | Committed | pending |
-| **NFR-BACK-01…05** | `DD-9`; store capability | `NOQ-3` (BACK-01/03) | Committed (exercised at all); **RPO/RTO Blocked** (`NOQ-3`) | pending |
+| **NFR-BACK-01…06** | `DD-9`; store capability | `NOQ-3` — **Decided** | Committed; **RPO/RTO Decided** (`NOQ-3`, 2026-07-30): daily backups, RPO ≤ 24 h, RTO 1 business day, ≥ weekly off-provider copy (`NFR-BACK-06`), equal confidentiality for all copies | pending |
 | **NFR-SCALE-01…04** | `PA-1`; `DD-12` | `NOQ-1`, `NOQ-4` (shaping) | **Blocked/shaped** — carries `PA-1` ("small") | pending |
 | **NFR-COMP-01…04** | Supported matrix | `NOQ-6` | Committed (behavior); **matrix Blocked** (`NOQ-6`) | pending |
 | **NFR-OPS-01…05** | Operational procedures | — (carries `PA-1`–`PA-3`) | Committed | pending |
@@ -253,8 +253,8 @@ work, and a shaping input is not overstated into a block.
 | `OQ-13` rejected-submission retention | `DG-1` | **Hard blocker** | `P1` (`S-11`), purge | Unresolved | `S-11`, `ADR-006` |
 | `OQ-4` searchable fields & matching mode | `DG-1` | *Shaping input* | Search *scope* (`BI-3` built regardless) | Unresolved | `S-4`, `ADR-007` |
 | `OQ-5` category model — cardinality, curation | `DG-1` | *Shaping input* | `S-3` representation (membership enforced regardless) | Unresolved | `S-3` |
-| `NOQ-2` availability target | `DG-2` | **Hard blocker** | Store & hosting selection | Unresolved | `ADR-003`, `ADR-010` |
-| `NOQ-3` backup / RPO / RTO | `DG-2` | **Hard blocker** | Store selection (capability) | Unresolved | `ADR-003`, `ADR-010` |
+| `NOQ-2` availability target | `DG-2` | **Hard blocker** | Store & hosting selection | **Decided (2026-07-30)** | `ADR-003`, `ADR-010` |
+| `NOQ-3` backup / RPO / RTO | `DG-2` | **Hard blocker** | Store selection (capability) | **Decided (2026-07-30)** | `ADR-003`, `ADR-010` |
 | Technology stack | `DG-2` | **Hard blocker** | `P0b` and everything after | Unresolved | `ADR-002`–`ADR-005` |
 | `NOQ-1` performance thresholds | `DG-2` | *Shaping input* | Informs tech selection; carried as `PA-1` | Unresolved | — |
 | `NOQ-4` expected first-release load | `DG-2` | *Shaping input* | As `NOQ-1`; first to revisit if `PA-1` wrong | Unresolved | — |
