@@ -149,13 +149,22 @@ error states (`FR-ERR-01`, `FR-ERR-02`, `FR-ERR-04`). The public read path
 administrator path is important but tolerates more downtime given a small,
 scheduled operator team.
 
+**Availability target — decided (`NOQ-2`, 2026-07-30).** The committed target is **99%
+availability for the public directory over a rolling monthly window, excluding announced
+maintenance.** The **public read path takes priority over administrative tools**: the target
+above is measured against the public directory, and the administrator path is explicitly the
+lower-priority surface. This is a modest first-release target, deliberately not a
+production-scale ("four nines") commitment; it is proportionate to the small first-release
+assumption (`PA-1`) and revisited if load grows (`NOQ-4`). See `docs/13-decision-log.md`
+`NOQ-2`. This resolves the availability target only; **`DG-2` (technology) remains open.**
+
 | ID | Requirement | Quality attribute | Source | Priority | Verification | Notes |
 |---|---|---|---|---|---|---|
-| NFR-REL-01 | The public directory (browsing, searching, filtering, and viewing approved listings) shall meet a defined, documented availability target over a stated measurement window. | Reliability | Vision; stakeholders (maintainers) | Must | Measurement | The commitment to a measured availability target is fixed; the target percentage and window are **Decision pending: NOQ-2**. |
-| NFR-REL-02 | The public directory should be available at least 99% of the time over a rolling monthly window, excluding announced maintenance. | Availability | Stakeholders (maintainers) | Should | Measurement | Provisional, modest first-release target. **Decision pending: NOQ-2.** Not a production-scale ("four nines") commitment. |
+| NFR-REL-01 | The public directory (browsing, searching, filtering, and viewing approved listings) shall meet a defined, documented availability target over a stated measurement window. | Reliability | Vision; stakeholders (maintainers) | Must | Measurement | The defined target is **99% over a rolling monthly window, excluding announced maintenance** (`NFR-REL-02`). **Decided (`NOQ-2`, 2026-07-30).** |
+| NFR-REL-02 | The public directory shall be available at least 99% of the time over a rolling monthly window, excluding announced maintenance. | Availability | Stakeholders (maintainers) | Must | Measurement | The committed first-release availability target. **Decided (`NOQ-2`, 2026-07-30);** measured against the public read path, which takes priority over administrative tools. Not a production-scale ("four nines") commitment. |
 | NFR-REL-03 | When the directory or the request form is temporarily unavailable, the system shall present a clear error state distinct from the empty-directory and no-results states, without exposing internal diagnostic detail to the public. | Reliability / Usability | V1, L1 exceptions; FR-ERR-04 | Must | Test / Demonstration | Quality constraint on the behavior already required by FR-ERR-04. |
 | NFR-REL-04 | A failure while saving a submission or an administrator action shall leave no partial or publicly visible record, preserving a consistent state that the actor can safely retry. | Reliability / Data integrity | L2/A4/A5 exceptions; FR-SUB-06, FR-ERR-05 | Must | Test | Reinforces the no-partial-write guarantee as a reliability property. Cross-links NFR-DATA-03. |
-| NFR-REL-05 | Planned maintenance that makes the public directory unavailable should occur within announced windows and should be communicated to users through a clear, non-technical message. | Availability / Usability | Stakeholders (maintainers) | Should | Inspection / Demonstration | Maintenance-window policy detail is **Decision pending: NOQ-2**. |
+| NFR-REL-05 | Planned maintenance that makes the public directory unavailable should occur within announced windows and should be communicated to users through a clear, non-technical message. | Availability / Usability | Stakeholders (maintainers) | Should | Inspection / Demonstration | **Decided (`NOQ-2`, 2026-07-30): announced maintenance is excluded from the availability calculation** in `NFR-REL-02`. |
 | NFR-REL-06 | The system should degrade gracefully when a non-essential part is impaired — for example, keeping approved listings browsable even if the submission form is temporarily unavailable — rather than failing entirely. | Reliability | V1, L1; FR-ERR-04 | Should | Demonstration / Analysis | Prioritizes the availability-critical public read path. |
 
 ---
@@ -403,7 +412,7 @@ here.** Each decision-pending requirement above points to one of these.
 | ID | Question | Affected requirements | Source |
 |---|---|---|---|
 | NOQ-1 | What are the committed response-time thresholds for browse, search, and detail, and at what load do they hold? | NFR-PERF-01, NFR-PERF-02, NFR-PERF-03 | Vision; Scope OQ #9 |
-| NOQ-2 | What availability target and window are committed, and what are the acceptable planned-maintenance windows? | NFR-REL-01, NFR-REL-02, NFR-REL-05 | Stakeholders (maintainers) |
+| NOQ-2 | ~~What availability target and window are committed, and what are the acceptable planned-maintenance windows?~~ **Decided (2026-07-30):** 99% over a rolling monthly window, excluding announced maintenance; public read path prioritised over admin. See `NFR-REL-01/02/05` and `docs/13` `NOQ-2`. | NFR-REL-01, NFR-REL-02, NFR-REL-05 | Stakeholders (maintainers) |
 | NOQ-3 | What are the committed backup frequency, recovery point (max data loss), and recovery time (max downtime)? | NFR-BACK-01, NFR-BACK-03 | Stakeholders (maintainers) |
 | NOQ-4 | What is the expected first-release usage level (concurrent visitors, total listings, submission rate) and the growth headroom to support? | NFR-PERF-05, NFR-PERF-06, NFR-SCALE-01, NFR-SCALE-02 | Scope A-2, A-4; OQ #9 |
 | NOQ-5 | Which published accessibility standard and level (if any) is committed, and what contrast ratio follows from it? | NFR-ACC-04, NFR-ACC-05 | MVP: basic accessibility |
