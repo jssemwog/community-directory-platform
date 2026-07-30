@@ -133,7 +133,7 @@ required **capability**, not merely a schedule.
 
 | ID | Question | Class | Status | Needed by | Blocks or shapes | Source | Outcome |
 |---|---|---|---|---|---|---|---|
-| `NOQ-2` | **Availability target?** | **Hard blocker** | Unresolved | **Before store and hosting selection** | Store and hosting selection. *99% and 99.9% are different deployments* | `docs/06`; `docs/07` `DD-3` | — |
+| `NOQ-2` | **Availability target?** | **Hard blocker** | **Decided** | **Before store and hosting selection** | Store and hosting selection. *99% and 99.9% are different deployments* | `docs/06`; `docs/07` `DD-3` | **Decided 2026-07-30 (Joe S.):** **99%** availability for the public directory over a **rolling monthly** window, **excluding announced maintenance**; the public read path takes priority over administrative tools. Recorded in `docs/06` `NFR-REL-01/02/05`. **`DG-2` remains Unresolved** (the technology-stack and `NOQ-3` blockers are still open). |
 | `NOQ-3` | **Backup / RPO / RTO?** | **Hard blocker** | Unresolved | **Before store selection** | Store selection. Determines the store's required **capability**, not just a schedule | `docs/06`; `docs/07` `DD-3` | — |
 | `NOQ-1` | Performance thresholds? | *Shaping input* | Unresolved | Carried as `PA-1` | `DD-2`, `DD-5`, `DD-12`. **Informs technology selection; does not block it.** **No threshold is asserted anywhere — and none may be invented** | `docs/06`; `docs/11` Cat. 3 | — |
 | `NOQ-4` | Expected first-release load? | *Shaping input* | Unresolved | Carried as `PA-1` | As `NOQ-1`. Everything assumes **"small"** (`PA-1`); if that is wrong, **this is the first decision to revisit** (`DD-12`) | `docs/06`; `docs/07` `A-5`, `A-6` | — |
