@@ -176,8 +176,29 @@ information is limited to locality, country, the administrative area where provi
 postal code only where voluntarily provided. Postal code is treated as text — letters,
 digits, spaces, and hyphens — with **no universal United States five-digit rule**, and is
 never used to infer or expose a residential street address. Which of these stored fields
-appear publicly is a **separate** decision (`OQ-7`) and is not settled here. No storage
-mechanism, normalisation approach, country list, or technology is chosen by this decision.
+appear publicly is a **separate** decision (`OQ-7`), now also decided — see *What the
+public sees* below. No storage mechanism, normalisation approach, country list, or
+technology is chosen by this decision.
+
+**What the public sees (decided — `OQ-7`).** The public directory shows only what a
+visitor needs in order to **identify the business, understand what it offers, understand
+its general location, and contact it through an intentionally public business contact
+method**. The public read path does **not** show every stored field; it serves an explicit
+**public projection**:
+
+| Category | Fields |
+|---|---|
+| **Public** | Business name, category, description, locality, country, administrative area where provided; postal code only where provided and designated for public display; each contact method (phone, email, website) the business designated public, that was supplied as a business contact and passed moderation. |
+| **Administrator-visible** | Record status, submission/update/review timestamps, reviewer identity, moderation notes, rejection reasons, approval and unpublishing history, and any submitter information another approved requirement authorises collecting. |
+| **Audit-only** | Audit entries and security-event records — never public. |
+| **Not collected during the MVP** | Precise business and residential street addresses (`OQ-6`). |
+
+A person's name appears publicly **only** where it is intentionally part of the approved
+business name or description; no separate public owner-name field is created. For a
+home-based business the public location remains locality, country, administrative area
+where provided, and postal code only where voluntarily provided and approved for public
+display. Full classification: `docs/08-data-model.md` *Field classification*. No storage
+mechanism or visibility-flag design is chosen by this decision.
 
 **Contact rule (open question):** the intent is that a listing carry **at least
 one** contact method (phone, email, or website), but whether that minimum is

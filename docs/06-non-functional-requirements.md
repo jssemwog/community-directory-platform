@@ -197,8 +197,8 @@ not all meant to be public, and administrative fields that must never be public.
 
 | ID | Requirement | Quality attribute | Source | Priority | Verification | Notes |
 |---|---|---|---|---|---|---|
-| NFR-PRIV-01 | The system shall expose to visitors only the listing fields intended to be public, and shall never present administrative fields (status, submission date, last-updated date) as public content. | Privacy | FR-DATA-11, FR-DATA-09 | Must | Test / Inspection | Quality guarantee over the field-exposure behavior. Exact public/withheld set is **Decision pending: OQ-7**. |
-| NFR-PRIV-02 | Contact details supplied in a submission shall be exposed publicly only to the extent intended for public display, and any contact field designated non-public shall not be visible to visitors. | Privacy | V5; cross-cutting privacy; FR-DATA-11 | Must | Test / Inspection | Depends on the public/withheld decision. **Decision pending: OQ-7.** |
+| NFR-PRIV-01 | The system shall expose to visitors only the listing fields intended to be public, and shall never present administrative fields (status, submission date, last-updated date) as public content. | Privacy | FR-DATA-11, FR-DATA-11b, FR-DATA-09 | Must | Test / Inspection | Quality guarantee over the field-exposure behavior. The public/withheld set is **Decided (`OQ-7`)** — see `docs/08` *Field classification*; administrator-visible and audit-only information is never public. |
+| NFR-PRIV-02 | Contact details supplied in a submission shall be exposed publicly only to the extent intended for public display, and any contact field designated non-public shall not be visible to visitors. | Privacy | V5; cross-cutting privacy; FR-DATA-11, FR-DATA-11c | Must | Test / Inspection | **Decided (`OQ-7`):** a contact method is published only where the business designated it public, it was supplied as a business contact, and it passed moderation; otherwise it is administrator-visible. How the designation is represented remains `DDM-6`. |
 | NFR-PRIV-03 | Non-public submission data (including pending and rejected submissions) shall be accessible only to authorized administrators and shall never be reachable through any public browse, search, or detail path. | Privacy / Security | FR-VIS-02, FR-AUTH-01; A5 | Must | Test | Pending/rejected records must not leak via public surfaces. |
 | NFR-PRIV-04 | The system shall collect through the public form only the information needed for a listing, and shall not require personal information beyond the defined listing fields. | Privacy (data minimisation) | Scope: data; L2 | Should | Inspection | Data-minimisation principle; required-field set is **Decision pending: OQ-8**. |
 | NFR-PRIV-05 | Any retention of rejected submissions or other non-public data shall be limited to a defined, documented purpose and period rather than kept indefinitely by default. | Privacy | A5; FR-AUD-06 | Should | Inspection / Audit | Retention of rejected submissions is itself undecided. **Decision pending: OQ-13.** |
@@ -436,7 +436,7 @@ here.** Each decision-pending requirement above points to one of these.
 | NOQ-9 | What minimum administrator credential and session-handling strength is required (independent of the deferred authentication mechanism)? | NFR-SEC-07 | Stakeholders; A-6 |
 
 **Referenced functional open questions.** `OQ-7` (public vs. withheld fields —
-NFR-PRIV-01, NFR-PRIV-02), `OQ-8` (required submission fields — NFR-PRIV-04),
+NFR-PRIV-01, NFR-PRIV-02) is now **Decided**; `OQ-8` (required submission fields — NFR-PRIV-04),
 `OQ-9` (anti-spam safeguard — NFR-SEC-06), `OQ-10`/`OQ-11` (approved-edit and
 removal rules — NFR-DATA-02), `OQ-13` (rejected-submission retention —
 NFR-PRIV-05), and `OQ-14` (audit logging — NFR-OBS-05) remain open in
@@ -531,7 +531,7 @@ carrying a deferred target is linked to the question that must resolve it.
 | NFR-REL-01, NFR-REL-02, NFR-REL-05 | NOQ-2 |
 | NFR-SEC-06 | OQ-9 |
 | NFR-SEC-07 | NOQ-9 |
-| NFR-PRIV-01, NFR-PRIV-02 | OQ-7 |
+| NFR-PRIV-01, NFR-PRIV-02 | ~~OQ-7~~ — **Decided** |
 | NFR-PRIV-04 | OQ-8 |
 | NFR-PRIV-05 | OQ-13 |
 | NFR-ACC-04, NFR-ACC-05 | NOQ-5 |

@@ -93,11 +93,11 @@ its own.
 
 | FR family (all IDs) | Journeys (`docs/04`) | Surface · phase (derived) | Blocked / shaping question | Status | Issue · PR · Test |
 |---|---|---|---|---|---|
-| **FR-VIS-01…10** (visitor browse/view) | V1, V5, V6, V7 | Public read · **P2** | `OQ-3` (ordering), `OQ-7` (public fields), `OQ-11` (removal) | **VIS-10 Deferred** (`OQ-1`); rest Committed | pending |
+| **FR-VIS-01…10** (visitor browse/view) | V1, V5, V6, V7 | Public read · **P2** | `OQ-3` (ordering), `OQ-11` (removal); ~~`OQ-7`~~ **Decided** (public fields) | **Public read path now serves the approved public projection** (`FR-DATA-11`/`11b`/`11c`, `docs/08` *Field classification*); **VIS-10 Deferred** (`OQ-1`); rest Committed | pending |
 | **FR-SUB-01…09** (listing submission) | L1–L4 | Public write · **P3** | `OQ-8`/`OQ-8b` (required fields), `OQ-9` (anti-spam) | **SUB-08 Deferred** (`OQ-2`); **SUB-09 Blocked** (`OQ-9`); rest Committed | pending |
 | **FR-ADM-01…13** (administrator actions) | A1–A7 | Administrative · **P4** | `OQ-10` (edit-after-approval), `OQ-11` (removal), `OQ-12` (duplicates) | **ADM-10/12/13 Blocked/Conditional**; rest Committed | pending |
 | **FR-SRCH-01…09** (search & filter) | V2, V3, V4, V6 | Public read · **P2** | `OQ-4` (search scope), `OQ-5` (category model); ~~`OQ-6`~~ **Decided** (location granularity) | **SRCH-02/09 Blocked** (`OQ-4`,`OQ-5`); rest Committed | pending |
-| **FR-DATA-01…11** (listing data, incl. `FR-DATA-06b`, `FR-DATA-06c`) | Data; V3–V5 | Data · **P1** | `OQ-5`, `OQ-7`, `OQ-8b`; ~~`OQ-6`~~ **Decided** | **Location fields Committed** (`OQ-6`): `FR-DATA-04` locality **required**, `FR-DATA-06` country **required**, `FR-DATA-05` administrative area **optional**, `FR-DATA-06b` postal code **optional**, `FR-DATA-06c` street address **not collected**. **DATA-08 Blocked** (`OQ-8b`); public exposure of these fields still **Blocked** by `OQ-7`; rest Committed | pending |
+| **FR-DATA-01…11** (listing data, incl. `FR-DATA-06b/06c`, `FR-DATA-11b/11c`) | Data; V3–V5 | Data · **P1** | `OQ-5`, `OQ-8b`; ~~`OQ-6`~~, ~~`OQ-7`~~ **Decided** | **Location fields Committed** (`OQ-6`): `FR-DATA-04` locality **required**, `FR-DATA-06` country **required**, `FR-DATA-05` administrative area **optional**, `FR-DATA-06b` postal code **optional**, `FR-DATA-06c` street address **not collected**. **Public projection Committed** (`OQ-7`): `FR-DATA-11`, `FR-DATA-11b` classification, `FR-DATA-11c` business-designated contact visibility. **DATA-08 Blocked** (`OQ-8b`); rest Committed | pending |
 | **FR-VAL-01…06** (validation) | L2, L3, A3, A6 | Public write / admin · **P3** | `OQ-8`/`OQ-8b` (rule set only) | Committed (behavior); **rule set Blocked** (`OQ-8`) | pending |
 | **FR-MOD-01…08** (moderation) | A4, A5, A7; boundaries | Administrative · **P4** | `OQ-11` (removal), `OQ-15` (escalation) | **MOD-06 Blocked**, **MOD-08 Deferred** (`OQ-15`); rest Committed | pending |
 | **FR-AUTH-01…04** (access control) | Cross-cutting; A1–A7 | Boundary · **P1/P4** | mechanism deferred (`DD-4`, `NOQ-9`) | Committed (boundary); mechanism → `ADR-004` | pending |
@@ -124,7 +124,7 @@ blocking question is from `docs/06`'s own NFR→NOQ mapping.
 | **NFR-PERF-01…06** | `DD-12`; measurement | `NOQ-1`, `NOQ-4` (shaping) | **Blocked** — no threshold asserted (`docs/11` Cat. 3) | pending |
 | **NFR-REL-01…06** | `DD-8`; error states | `NOQ-2` — **Decided** | REL-03/04/06 Committed; **target Decided** (`NOQ-2`, 2026-07-30): 99% over a rolling monthly window, announced maintenance excluded, public read path prioritised over admin | pending |
 | **NFR-SEC-01…08** | `C8`, `C7`; `BI-5` | `OQ-9` (SEC-06), `NOQ-9` (SEC-07) | Committed; SEC-06 **Blocked** (`OQ-9`), SEC-07 **Blocked** (`NOQ-9`) | pending |
-| **NFR-PRIV-01…05** | `S-2`, `DI-5`; `BI-6` | `OQ-7` (PRIV-01/02), `OQ-13` (PRIV-05) | Committed (rule); **field set Blocked** (`OQ-7`), retention **Blocked** (`OQ-13`) | pending |
+| **NFR-PRIV-01…05** | `S-2` (**resolved**), `DI-5`; `BI-6` | `OQ-13` (PRIV-05); ~~`OQ-7`~~ **Decided** (PRIV-01/02) | Committed (rule); **field set Committed** (`OQ-7` — `docs/08` *Field classification*); retention **Blocked** (`OQ-13`) | pending |
 | **NFR-ACC-01…05** | Core-flow UI | `NOQ-5` (ACC-04/05) | Committed (behaviors); **level Blocked** (`NOQ-5`) | pending |
 | **NFR-USA-01…06** | UI messaging | — | Committed | pending |
 | **NFR-RESP-01…04** | Responsive layout | `NOQ-6` (RESP-03) | Committed (behavior); **matrix Blocked** (`NOQ-6`) | pending |
@@ -210,7 +210,7 @@ proven **at the level where the invariant is enforced** (the operation, not the 
 | `BI-3` | Search scope never exceeds publication scope | `FR-SRCH-*` (scope) | `C4` · **P2** | pending |
 | `BI-4` | No public output discloses a non-approved record's existence | `NFR-SEC-02` | Public surface · **P2** — **its own issue** (equivalence test) | pending |
 | `BI-5` | No administrative capability without an authorized identity | `NFR-SEC-01/02` | `C8` · **P4 (first)** | pending |
-| `BI-6` | Administrative data never appears publicly | `FR-DATA-11`, `NFR-PRIV-01/03` | Public projection · **P2/P4** | pending |
+| `BI-6` | Administrative data never appears publicly | `FR-DATA-11`, `FR-DATA-11b`, `NFR-PRIV-01/03` | Public projection (field set Decided — `OQ-7`) · **P2/P4** | pending |
 | `BI-7` | Publication is atomic, never partial | `NFR-DATA-03`, `DI-3` | `C6` · **P1** | pending |
 | `BI-8` | Exactly one valid status, changed only by permitted transition | `NFR-DATA-01/02`, `DI-1/2` | Status model · **P1** | pending |
 | `BI-9` | The UI is not the boundary | `docs/07` | All operations · **all phases** | pending |
@@ -246,7 +246,7 @@ work, and a shaping input is not overstated into a block.
 | Question | Gate | Class | Blocks / shapes | Status | Lands in |
 |---|---|---|---|---|---|
 | `OQ-6` location fields & granularity | `DG-1` | **Hard blocker** | All of `P1` (backfill risk) | **Decided (2026-07-31)** — locality **required**, country **required** (multi-country from launch), administrative area **optional**, postal code **optional** (international text), street address **not collected** | `S-6` (**resolved**), `ADR-006`; `docs/13` `DG-1`; `docs/03`, `docs/05` `FR-DATA-04/05/06/06b/06c`, `docs/08` `E1` |
-| `OQ-7` public vs private fields | `DG-1` | **Hard blocker** | `P1`, `P2` — the public projection | Unresolved | `S-2`, `ADR-006` |
+| `OQ-7` public vs private field projection | `DG-1` | **Hard blocker** | `P1`, `P2` — the public projection | **Decided (2026-07-31)** — public: name, category, description, locality, country, administrative area where provided, postal code where provided and designated public, and business-designated public contact methods; all other fields administrator-visible or audit-only | `S-2` (**resolved**), `ADR-006`; `docs/13` `DG-1`; `docs/03`, `docs/05` `FR-DATA-11/11b/11c`, `docs/06` `NFR-PRIV-01/02`, `docs/08` *Field classification* |
 | `OQ-8` / `OQ-8b` required fields; contact minimum | `DG-1` | **Hard blocker** | `P3` validation *rules* | Unresolved | `S-1`, `ADR-006` |
 | `OQ-10` edit-after-approval | `DG-1` | **Hard blocker** | `P1` (`E7`, lifecycle state), `OP-10` | Unresolved | `S-5`, `ADR-006` |
 | `OQ-11` removal / unpublish | `DG-1` | **Hard blocker** | `P1` status model, `OP-9` | Unresolved | `S-5`, `ADR-006` |
@@ -339,7 +339,7 @@ gate is the first maintenance action the decision log requires.
 
 ### Data-model seams (`docs/08`)
 
-`S-1` submission obligations (`OQ-8/8b`) · `S-2` public/private field designation (`OQ-7`) ·
+`S-1` submission obligations (`OQ-8/8b`) · ~~`S-2` public/private field designation (`OQ-7`)~~ **resolved — `OQ-7` Decided** ·
 `S-3` category cardinality/curation (`OQ-5`) · `S-4` searchable attributes & matching (`OQ-4`) ·
 `S-5` edit-after-approval / removal (`OQ-10`, `OQ-11`) · ~~`S-6` location attributes (`OQ-6`)~~ **resolved — `OQ-6` Decided** ·
 `S-7` review-data shape (`OQ-14` dependency) · `S-8` audit entries (`OQ-14`, `NOQ-8`) ·
