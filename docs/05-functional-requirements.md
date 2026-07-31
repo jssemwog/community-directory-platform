@@ -121,7 +121,7 @@ Source journeys: V1–V7. Related capabilities: public browsing, listing details
 | FR-VIS-01 | The system shall allow any visitor to browse the directory of approved listings without requiring an account or authentication. | Visitor | V1; Public browsing | Must | Low-friction discovery is a core vision principle. |
 | FR-VIS-02 | The system shall display only listings whose status is *approved* to visitors. | Visitor | V1, V5; Pending by default | Must | No pending or rejected record is ever visible publicly. See FR-AUTH, FR-MOD. |
 | FR-VIS-03 | The system shall present the set of approved listings in a consistent, defined order. | Visitor | V1 | Should | Exact default ordering (alphabetical, newest, etc.) is undecided — **OQ-3**. |
-| FR-VIS-04 | The system shall allow a visitor to open a single approved listing and view its full public details. | Visitor | V5; Listing details | Must | Public fields per FR-DATA and **OQ-7**. |
+| FR-VIS-04 | The system shall allow a visitor to open a single approved listing and view its full public details. | Visitor | V5; Listing details | Must | "Public details" means the **public projection** defined by FR-DATA-11, FR-DATA-11b, and FR-DATA-11c — never every stored field. Decided: OQ-7. |
 | FR-VIS-05 | The system shall display, for an opened listing, each public field that holds a value and omit or clearly indicate fields that hold no value. | Visitor | V5; Listing details | Should | Prevents empty/misleading detail views. |
 | FR-VIS-06 | The system shall show a distinct empty-state message when no approved listings exist yet, worded differently from a no-results state and from an error state. | Visitor | V1, V6; empty states | Must | See FR-ERR-01..03. |
 | FR-VIS-07 | The system shall enable a visitor to move from a listing's details back to the previous list or result set. | Visitor | V5 | Should | Supports the return/re-select alternate path. |
@@ -211,7 +211,9 @@ information a listing record holds — **not** any storage technology or schema.
 | FR-DATA-08 | The system shall require at least one contact method (phone, email, or website) on every listing. | System | Scope: data | Should | Contact-minimum enforcement is not yet approved; not enforced by default. Decision pending: OQ-8b. |
 | FR-DATA-09 | The system shall maintain administrative fields on each listing — status, submission date, and last-updated date — that are set by the system or administrators and are never entered or edited by the public. | System | Scope: data | Must | See FR-AUD; never public content (FR-DATA-11). |
 | FR-DATA-10 | The system shall record the predefined category set as a defined, finite list available for both submission and filtering. | System | V3; scope | Must | Who curates and whether admins manage it is **OQ-5**. |
-| FR-DATA-11 | The system shall expose only intended public fields to visitors and shall never present administrative fields (status, dates) or withheld contact details as public content. | System | V5; cross-cutting privacy | Must | Exact public/withheld field set is **OQ-7**. |
+| FR-DATA-11 | The system shall expose to visitors only the fields of the approved public projection — business name, category, description, locality, country, administrative area where provided, postal code only where provided and designated for public display, and each contact method the business designated public — and shall never present any other stored field as public content. | System | V5; cross-cutting privacy | Must | The public read path shall **not** expose every stored field by default. Full classification in `docs/08` *Field classification*. Decided: OQ-7. |
+| FR-DATA-11b | The system shall classify every listing field it holds as **public**, **administrator-visible**, or **audit-only**, shall treat any field whose classification is undecided as not public, and shall never include administrator-visible or audit-only information in the public projection. | System | V5; cross-cutting privacy | Must | Fail-closed by default. Administrator-visible: record status, submission, update and review timestamps, reviewer identity, moderation notes, rejection reasons, approval/unpublishing history, and submitter information where another approved requirement authorises its collection. Audit-only: audit entries and security-event records. Decided: OQ-7; whether each such field is collected or retained remains OQ-8/OQ-8b, OQ-10, OQ-11, OQ-13, OQ-14/NOQ-8. |
+| FR-DATA-11c | The system shall allow a business to designate which of its supplied contact methods (phone, email, website) may be displayed publicly, and shall publish a contact method only where it was intentionally supplied as a business contact, was designated for public display, and passed moderation. | System | V5; cross-cutting privacy | Must | Contact methods remain individually optional (FR-DATA-07); this adds no contact-method minimum (that remains **OQ-8b**) and introduces no contact form, messaging service, or social-media field. How the designation is represented is a later data-model decision (`DDM-6`). Decided: OQ-7. |
 
 ---
 
@@ -343,7 +345,7 @@ requirement.
 | Keyword search | FR-SRCH-01, FR-SRCH-02, FR-SRCH-03 |
 | Basic category filtering | FR-SRCH-04, FR-SRCH-09, FR-DATA-02, FR-DATA-10 |
 | Basic location filtering | FR-SRCH-05, FR-DATA-04, FR-DATA-05, FR-DATA-06, FR-DATA-06b, FR-DATA-06c |
-| Listing details | FR-VIS-04, FR-VIS-05, FR-DATA-11 |
+| Listing details | FR-VIS-04, FR-VIS-05, FR-DATA-11, FR-DATA-11b, FR-DATA-11c |
 | Public listing-request form | FR-SUB-01, FR-SUB-02, FR-SUB-03 |
 | Pending by default | FR-SUB-04, FR-MOD-01, FR-AUD-01 |
 | Administrator review | FR-ADM-01, FR-ADM-03, FR-ERR-03 |
@@ -364,7 +366,7 @@ requirements.
 | V2 Search by keyword | FR-SRCH-01, FR-SRCH-02, FR-SRCH-03 |
 | V3 Filter by category | FR-SRCH-04, FR-SRCH-07, FR-SRCH-09, FR-DATA-02 |
 | V4 Filter by location | FR-SRCH-05, FR-SRCH-07, FR-DATA-04, FR-DATA-05, FR-DATA-06, FR-DATA-06b |
-| V5 View listing details | FR-VIS-04, FR-VIS-05, FR-VIS-07, FR-VIS-08, FR-DATA-11 |
+| V5 View listing details | FR-VIS-04, FR-VIS-05, FR-VIS-07, FR-VIS-08, FR-DATA-11, FR-DATA-11b, FR-DATA-11c |
 | V6 No-results search | FR-SRCH-08, FR-ERR-02, FR-SRCH-07 |
 | V7 Encounter inaccurate/outdated info | FR-VIS-10, FR-ADM-09, FR-MOD-06 |
 | L1 Open request form | FR-SUB-01, FR-SUB-02, FR-ERR-04 |
@@ -380,7 +382,7 @@ requirements.
 | A7 Handle duplicate/abusive content | FR-ADM-11, FR-ADM-13, FR-MOD-04, FR-MOD-05, FR-MOD-06, FR-MOD-08 |
 | Cross-cutting: accessibility | FR-ACC-01..05 |
 | Cross-cutting: responsiveness | FR-ACC-03 |
-| Cross-cutting: privacy | FR-DATA-11, FR-VIS-05 |
+| Cross-cutting: privacy | FR-DATA-11, FR-DATA-11b, FR-DATA-11c, FR-VIS-05 |
 | Cross-cutting: validation | FR-VAL-01..06 |
 | Cross-cutting: error handling | FR-ERR-04, FR-ERR-05, FR-ERR-06 |
 | Cross-cutting: moderation | FR-MOD-01..08 |
@@ -430,7 +432,7 @@ committed.
 | OQ-4 | Which fields are searched, and is matching exact, partial, or fuzzy? | FR-SRCH-02 | Journeys OQ-4; V2 |
 | OQ-5 | Single vs. multiple category selection; who curates the category set and can admins manage it? | FR-SRCH-09, FR-DATA-02, FR-DATA-10 | Journeys OQ-5; Scope OQ-4; V3 |
 | ~~OQ-6~~ | ~~Location granularity — city only, or also state/region and country (and is launch multi-country)?~~ **Decided:** locality **required**, country **required** (multi-country from launch), administrative area **optional**, postal code **optional** (international text), street address **not collected**. See FR-DATA-04, FR-DATA-05, FR-DATA-06, FR-DATA-06b, FR-DATA-06c and `docs/13`. | FR-SRCH-05, FR-DATA-04, FR-DATA-05, FR-DATA-06, FR-DATA-06b, FR-DATA-06c | Journeys OQ-6; Scope OQ-1, OQ-2; V4 |
-| OQ-7 | Which listing/contact fields are ever shown publicly vs. withheld? | FR-VIS-04, FR-DATA-11 | Journeys OQ-7; V5, privacy |
+| ~~OQ-7~~ | ~~Which listing/contact fields are ever shown publicly vs. withheld?~~ **Decided:** the public projection is business name, category, description, locality, country, administrative area where provided, postal code only where provided and designated public, and each contact method the business designated public; everything else is administrator-visible or audit-only and never public. See FR-DATA-11, FR-DATA-11b, FR-DATA-11c, FR-VIS-04, `docs/08` *Field classification*, and `docs/13`. | FR-VIS-04, FR-VIS-05, FR-DATA-11, FR-DATA-11b, FR-DATA-11c | Journeys OQ-7; V5, privacy |
 | OQ-8 | Which fields are required at submission (and format checks)? | FR-SUB-02, FR-SUB-05, FR-VAL-01, FR-VAL-05 | Journeys OQ-8; L2, L3 |
 | OQ-8b | Is at least one contact method enforced per listing? | FR-DATA-08, FR-VAL-05 | Scope OQ-3; Journeys OQ-8 |
 | OQ-9 | Is there any anti-spam safeguard for the unauthenticated submission form? | FR-SUB-09 | Journeys OQ-9; L2 |

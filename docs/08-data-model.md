@@ -386,31 +386,82 @@ record, no rejected record, and no non-public attribute of any record may be rea
 through a public path (`FR-VIS-02`, `NFR-PRIV-03`). This is **not** an open question and
 must be treated as an invariant: `DI-5` below.
 
-**Dimension 2 — field-level exposure, which is *not* settled.**
-*Given* an approved record, which of its attributes may a visitor see? `OQ-7` is open,
-and the model must not close it.
+**Dimension 2 — field-level exposure, now settled by `OQ-7`.**
+*Given* an approved record, which of its attributes may a visitor see? **`OQ-7` is
+Decided**, and the designations are filled in below.
+
+**The public-projection principle.** The public directory exposes only what a visitor
+needs in order to **identify the business**, **understand what it offers**, **understand
+its general location**, and **contact it through an intentionally public business contact
+method**. The public read path **does not expose every stored field**; it serves an
+explicit **public projection** that separates public business information from
+administrator-visible information, audit-only information, and information outside MVP
+collection scope. *How* that separation is enforced is not decided here.
 
 | Attribute | Record-level | Field-level exposure |
 |---|---|---|
-| Name, category, description, locality | Public only when approved | Public — implied by the browse/search/detail journeys (`FR-VIS-04`) |
-| Administrative area, country, postal code | Public only when approved | **Open — `OQ-7`.** `OQ-6` has settled that these attributes **exist** and whether they are required; **which of them appear in the public projection is decided separately and is not settled here.** |
-| Phone, email, website | Public only when approved | **Open — `OQ-7`.** The submitter's own contact details are the sharpest case: a phone number offered *so administrators can verify a listing* is not the same as a phone number offered *for publication.* |
+| Name, category, description, locality | Public only when approved | **Public** (`FR-DATA-11`, `FR-VIS-04`) |
+| Country, administrative area (where provided) | Public only when approved | **Public** (`FR-DATA-11`; inventory settled by `OQ-6`) |
+| Postal code | Public only when approved | **Public only where provided** and designated for public display; withholdable by a home-based or privacy-sensitive business; **never used to infer or expose a precise residential address** (`FR-DATA-06b`, `FR-DATA-11`) |
+| Phone, email, website | Public only when approved | **Public only where the business designated that method public**, it was intentionally supplied as a *business* contact, and it passed moderation; otherwise **administrator-visible** (`FR-DATA-11c`, `NFR-PRIV-02`) |
+| Submitter identity and submitter contact details; separate business-owner identity | — | **Never public** (`FR-DATA-11b`, `NFR-PRIV-03`) — where such data exists at all |
 | Status, submitted at, last updated at | — | **Never public** (`FR-DATA-11`, `NFR-PRIV-01`) |
-| Reviewed by, reviewed at, moderation note | — | **Never public** (`NFR-PRIV-03`) |
-| Safeguard data (E6) | — | **Never public** (`NFR-PRIV-03/04`) |
+| Reviewed by, reviewed at, moderation note, rejection reason, approval/unpublishing history | — | **Never public** (`NFR-PRIV-03`) |
+| Audit entries (`E5`), security-event records, safeguard data (`E6`), addresses of network origin, device information, provider/infrastructure metadata | — | **Never public** (`NFR-PRIV-03/04`, `NFR-OBS-02`) |
+| Precise business or residential street address | — | **Not collected in the MVP** (`FR-DATA-06c`, `OQ-6`) — therefore never public |
 
-**The seam, stated plainly (`S-2`).** The model requires that **every attribute carry an
+**A person's name may appear publicly only where it is intentionally part of the approved
+business name or description.** `OQ-7` creates **no separate public owner-name field**.
+
+**The seam, now filled (`S-2`).** The model requires that **every attribute carry an
 explicit public-or-not designation**, and that the default for any attribute whose
-designation is undecided is **not public**. It does *not* fill in the designations that
-`OQ-7` owns. Fail-closed is the only safe default: a field wrongly withheld is a bug
-someone reports; a field wrongly published is a privacy incident that cannot be undone.
+designation is undecided is **not public**. `OQ-7` supplies those designations; the
+fail-closed default remains in force for any attribute added later. A field wrongly
+withheld is a bug someone reports; a field wrongly published is a privacy incident that
+cannot be undone.
 
-**A distinction `OQ-7` must draw explicitly.** The form may need to collect data that is
-never published — most obviously a contact method used to verify the submitter rather
-than to display. `NFR-PRIV-02` anticipates exactly this ("any contact field designated
-non-public…"), and `NFR-PRIV-04` limits collection to what is needed. If `OQ-7` resolves
-without separating *collected* from *published*, the model will have a category of data
-with no home, and the likeliest failure is that it gets published by default.
+**The distinction `OQ-7` draws explicitly.** *Collected* is not *published*. The form may
+need to hold a contact method used to verify the submitter rather than to display, and
+such a value is administrator-visible, never public (`NFR-PRIV-02`). Conversely, `OQ-7`
+adds **no** field to the collection inventory: it decides exposure only, and the fields
+`OQ-6` recorded as not collected stay not collected.
+
+---
+
+## Field classification
+
+The classification the public projection is built from. Four categories: **Public**,
+**Administrator-visible**, **Audit-only**, and **Not collected during the MVP**. Decided
+by `OQ-7` (2026-07-31), against the field inventory settled by `OQ-6`.
+
+| Group | Field | Classification | Condition and source |
+|---|---|---|---|
+| **Core business** | Business name | **Public** | Always, once approved. `FR-DATA-01` |
+| **Core business** | Category | **Public** | Always, once approved. `FR-DATA-02` |
+| **Core business** | Short business description | **Public** | Always, once approved. `FR-DATA-03` |
+| **Location** | Locality | **Public** | Required field. `FR-DATA-04` (`OQ-6`) |
+| **Location** | Country | **Public** | Required field. `FR-DATA-06` (`OQ-6`) |
+| **Location** | Administrative area | **Public** | Where provided; optional field. `FR-DATA-05` (`OQ-6`) |
+| **Location** | Postal code | **Public only where provided and designated for public display** | Optional; withholdable by home-based or privacy-sensitive businesses; subject to the listing's approved visibility designation and moderation; never used to infer or expose a residential address. `FR-DATA-06b` |
+| **Location** | Precise business or residential street address | **Not collected during the MVP** | Never held, therefore never published. `FR-DATA-06c` (`OQ-6`) |
+| **Contact** | Business phone | **Public only where designated public by the business** | Optional; must be intentionally supplied as a business contact and pass moderation; otherwise administrator-visible. `FR-DATA-07`, `FR-DATA-11c` |
+| **Contact** | Business email | **Public only where designated public by the business** | As above. `FR-DATA-07`, `FR-DATA-11c` |
+| **Contact** | Business website | **Public only where designated public by the business** | As above. `FR-DATA-07`, `FR-DATA-11c` |
+| **Submitter / owner** | Submitter identity; submitter contact details; separate business-owner identity | **Administrator-visible; never public** | Only where another approved requirement authorises collection at all — `OQ-7` authorises none. `FR-DATA-11b`, `NFR-PRIV-03/04` |
+| **Moderation / workflow** | Record status | **Administrator-visible** | `FR-DATA-09`, `NFR-PRIV-01` |
+| **Moderation / workflow** | Submitted-at, last-updated-at | **Administrator-visible** | `FR-AUD-02/03`, `NFR-PRIV-01` |
+| **Moderation / workflow** | Reviewer identity, reviewed-at, moderation note, rejection reason | **Administrator-visible** | Where they exist — shape is `S-7`. `NFR-PRIV-03` |
+| **Moderation / workflow** | Approval history, unpublishing history, other internal workflow information | **Administrator-visible** | Where they exist — governed by `OQ-10`, `OQ-11`, `OQ-13`. `NFR-PRIV-03` |
+| **Audit / security** | Audit entries (`E5`) | **Audit-only; never public** | Existence and content governed by `OQ-14`/`NOQ-8`. `NFR-OBS-05` |
+| **Audit / security** | Security-event records, safeguard data (`E6`), addresses of network origin, device information, provider or infrastructure metadata | **Audit-only; never public** | Where they exist — `OQ-9`, `NOQ-7`. `NFR-PRIV-03/04`, `NFR-OBS-02` |
+
+**What this table does not do.** It does not decide **whether** an administrator-visible
+or audit-only field is collected or retained at all — that remains `OQ-8`/`OQ-8b`
+(submission obligations), `OQ-10`, `OQ-11`, `OQ-13` (lifecycle and retention), and
+`OQ-14`/`NOQ-8` (audit). It adds no business-profile field, no contact form, no messaging
+service, and no social-media field. And it selects **no mechanism**: whether the
+public/withheld boundary and the per-contact visibility designation are expressed as
+flags, a separate structure, or otherwise remains `DDM-6`.
 
 ---
 
@@ -691,7 +742,7 @@ contribution to them.
 | `OQ-4` | Which fields are searched, and is matching exact, partial or fuzzy? | Determines which attributes must be efficiently searchable. Search scope must never exceed publication scope. | `S-4` |
 | `OQ-5` | Single vs. multiple category; who curates the set; can administrators manage it? | Many-to-one vs. many-to-many is **structural**, not a field addition. If administrators curate the set, the category set becomes *mutable data*, not configuration. | `S-3` |
 | ~~`OQ-6`~~ **Decided** | Location granularity and the location-field set. | **Answered:** locality and country **required**; administrative area and postal code **optional**; precise/residential street address **not collected**; multi-country capable from launch. The `E1` attributes and the required/optional classification above are updated accordingly. Normalisation remains open (`DDM-5`). | `S-6` — **resolved** |
-| `OQ-7` | Which listing/contact fields are public vs. withheld? | Fills the field-level exposure column. Must separate *collected* from *published*. | `S-2` |
+| ~~`OQ-7`~~ **Decided** | Which listing/contact fields are public vs. withheld? | **Answered:** public = business name, category, description, locality, country, administrative area where provided, postal code where provided and designated public, and each contact method the business designated public. Everything else is administrator-visible or audit-only. *Collected* and *published* are separated explicitly; no field was added to the collection inventory. Mechanism remains `DDM-6`. | `S-2` — **resolved** |
 | `OQ-8` | Which fields are required at submission, and with what format checks? | Fills `VR-S1` and `VR-S3`. Distinct from "required on a valid record". | `S-1` |
 | `OQ-8b` | Is at least one contact method enforced per listing? | Fills `VR-S2`. A cross-field constraint that cannot be expressed as a per-field obligation. | `S-1` |
 | `OQ-9` | Any anti-spam safeguard on the unauthenticated form? | Decides whether `E6` exists and what it holds. Most safeguards retain data about a non-consenting person. | `S-9` |
@@ -709,7 +760,7 @@ contribution to them.
 | Seam | Where the model is deliberately incomplete | Blocked on |
 |---|---|---|
 | `S-1` | The submission obligation set — required fields, contact minimum, formats. | `OQ-8`, `OQ-8b` |
-| `S-2` | Field-level public/private designation. **Default: not public.** | `OQ-7` |
+| ~~`S-2`~~ **Resolved** | Field-level public/private designation. **Default: not public** — and the default stands for any attribute added later. **Filled by `OQ-7`:** see *Field classification* above. **Only the designation is fixed — the enforcement mechanism remains `DDM-6`.** | ~~`OQ-7`~~ — **Decided** |
 | `S-3` | Category cardinality and curation; whether the set is configuration or data. | `OQ-5` |
 | `S-4` | Searchable attribute set and matching mode. | `OQ-4` |
 | `S-5` | Edit-after-approval and removal — whether `E7` and a fourth status state exist. | `OQ-10`, `OQ-11` |
@@ -735,7 +786,7 @@ above: an open question is a *product* decision someone must make; a deferred de
 | `DDM-3` | **Category representation** — enumeration, reference table, or configuration. | Depends on whether administrators curate the set at runtime. | `OQ-5` |
 | `DDM-4` | **Indexing and text-search strategy.** | Physical. Depends on corpus size and search scope. | `OQ-4`, `NOQ-4` |
 | `DDM-5` | **Normalization of location** — locality, administrative area, country, and postal code as free text, a reference table, or a standardised list. | **Still open.** `OQ-6` fixed *which* location attributes exist and their obligations; it selected **no** country list, format library, validation expression, storage type, or external service. | — (open; physical) |
-| `DDM-6` | **Physical separation of non-public attributes** — same record, or a separate related structure. | An implementation of the `S-2` boundary; the *boundary* is logical, the *mechanism* is not. | `OQ-7` |
+| `DDM-6` | **Physical separation of non-public attributes, and the representation of per-contact public-display designations** — same record, separate related structure, flags, or otherwise. | **Still open.** An implementation of the `S-2` boundary; `OQ-7` fixed the *boundary* and the designation *obligation*, not the *mechanism*. | — (open; physical) |
 | `DDM-7` | **Audit-entry storage** — same store, separate store, or append-only log. | Only meaningful once `E5` is known to exist. | `OQ-14` |
 | `DDM-8` | **Revision storage**, if `E7` exists. | Only meaningful once `OQ-10` resolves. | `OQ-10` |
 | `DDM-9` | **Soft-delete vs. hard-delete** representation. | Presupposes that removal exists at all. | `OQ-11`, `OQ-13` |
@@ -759,7 +810,7 @@ actually withheld.
 | `FR-DATA-01..08` (listing content, incl. `FR-DATA-06b/06c`) | `E1` attributes — name, category, description, locality, administrative area, country, postal code, phone, email, website; **no street address** (`FR-DATA-06c`) |
 | `FR-DATA-09` (administrative fields) | `E1` administrative attributes; `DI-4`; **P3** |
 | `FR-DATA-10` (predefined category set) | `E2`; `DI-9`; `VR-2` |
-| `FR-DATA-11` (public exposure limits) | *Public versus private data*; `S-2`; `DI-5` |
+| `FR-DATA-11`, `FR-DATA-11b`, `FR-DATA-11c` (public projection, field classification, contact visibility) | *Public versus private data*; *Field classification*; `S-2` (resolved); `DI-5` |
 | `FR-AUD-01` (three statuses, defined transitions) | *Status model*; `DI-1`, `DI-2` |
 | `FR-AUD-02/03` (timestamps) | `E1`; `DI-6` |
 | `FR-AUD-04` (admin data not public-editable) | `DI-4`; `VR-3` |
