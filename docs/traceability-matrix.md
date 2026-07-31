@@ -96,8 +96,8 @@ its own.
 | **FR-VIS-01…10** (visitor browse/view) | V1, V5, V6, V7 | Public read · **P2** | `OQ-3` (ordering), `OQ-7` (public fields), `OQ-11` (removal) | **VIS-10 Deferred** (`OQ-1`); rest Committed | pending |
 | **FR-SUB-01…09** (listing submission) | L1–L4 | Public write · **P3** | `OQ-8`/`OQ-8b` (required fields), `OQ-9` (anti-spam) | **SUB-08 Deferred** (`OQ-2`); **SUB-09 Blocked** (`OQ-9`); rest Committed | pending |
 | **FR-ADM-01…13** (administrator actions) | A1–A7 | Administrative · **P4** | `OQ-10` (edit-after-approval), `OQ-11` (removal), `OQ-12` (duplicates) | **ADM-10/12/13 Blocked/Conditional**; rest Committed | pending |
-| **FR-SRCH-01…09** (search & filter) | V2, V3, V4, V6 | Public read · **P2** | `OQ-4` (search scope), `OQ-5` (category model), `OQ-6` (location granularity) | **SRCH-02/09 Blocked** (`OQ-4`,`OQ-5`); rest Committed | pending |
-| **FR-DATA-01…11** (listing data) | Data; V3–V5 | Data · **P1** | `OQ-5`, `OQ-6`, `OQ-7`, `OQ-8b` | **DATA-06/08 Blocked**; rest Committed | pending |
+| **FR-SRCH-01…09** (search & filter) | V2, V3, V4, V6 | Public read · **P2** | `OQ-4` (search scope), `OQ-5` (category model); ~~`OQ-6`~~ **Decided** (location granularity) | **SRCH-02/09 Blocked** (`OQ-4`,`OQ-5`); rest Committed | pending |
+| **FR-DATA-01…11** (listing data, incl. `FR-DATA-06b`, `FR-DATA-06c`) | Data; V3–V5 | Data · **P1** | `OQ-5`, `OQ-7`, `OQ-8b`; ~~`OQ-6`~~ **Decided** | **Location fields Committed** (`OQ-6`): `FR-DATA-04` locality **required**, `FR-DATA-06` country **required**, `FR-DATA-05` administrative area **optional**, `FR-DATA-06b` postal code **optional**, `FR-DATA-06c` street address **not collected**. **DATA-08 Blocked** (`OQ-8b`); public exposure of these fields still **Blocked** by `OQ-7`; rest Committed | pending |
 | **FR-VAL-01…06** (validation) | L2, L3, A3, A6 | Public write / admin · **P3** | `OQ-8`/`OQ-8b` (rule set only) | Committed (behavior); **rule set Blocked** (`OQ-8`) | pending |
 | **FR-MOD-01…08** (moderation) | A4, A5, A7; boundaries | Administrative · **P4** | `OQ-11` (removal), `OQ-15` (escalation) | **MOD-06 Blocked**, **MOD-08 Deferred** (`OQ-15`); rest Committed | pending |
 | **FR-AUTH-01…04** (access control) | Cross-cutting; A1–A7 | Boundary · **P1/P4** | mechanism deferred (`DD-4`, `NOQ-9`) | Committed (boundary); mechanism → `ADR-004` | pending |
@@ -110,7 +110,7 @@ its own.
 a decision, per acceptance criterion): `FR-VIS-10` (deferred — `OQ-1`), `FR-SUB-08` (deferred —
 `OQ-2`), `FR-SUB-09` (blocked — `OQ-9`), `FR-ADM-10` (blocked — `OQ-10`), `FR-ADM-12` (blocked —
 `OQ-11`), `FR-ADM-13` (blocked — `OQ-12`), `FR-SRCH-02` (shaped — `OQ-4`), `FR-SRCH-09` (blocked
-— `OQ-5`), `FR-DATA-06` (blocked — `OQ-6`), `FR-DATA-08` (blocked — `OQ-8b`), `FR-MOD-06`
+— `OQ-5`), `FR-DATA-08` (blocked — `OQ-8b`), `FR-MOD-06`
 (blocked — `OQ-11`), `FR-MOD-08` (deferred — `OQ-15`), `FR-AUD-05` (conditional — `OQ-14`/
 `NOQ-8`), `FR-AUD-06` (blocked — `OQ-13`).
 
@@ -245,7 +245,7 @@ work, and a shaping input is not overstated into a block.
 
 | Question | Gate | Class | Blocks / shapes | Status | Lands in |
 |---|---|---|---|---|---|
-| `OQ-6` location granularity | `DG-1` | **Hard blocker** | All of `P1` (backfill risk) | Unresolved | `S-6`, `ADR-006` |
+| `OQ-6` location fields & granularity | `DG-1` | **Hard blocker** | All of `P1` (backfill risk) | **Decided (2026-07-31)** — locality **required**, country **required** (multi-country from launch), administrative area **optional**, postal code **optional** (international text), street address **not collected** | `S-6` (**resolved**), `ADR-006`; `docs/13` `DG-1`; `docs/03`, `docs/05` `FR-DATA-04/05/06/06b/06c`, `docs/08` `E1` |
 | `OQ-7` public vs private fields | `DG-1` | **Hard blocker** | `P1`, `P2` — the public projection | Unresolved | `S-2`, `ADR-006` |
 | `OQ-8` / `OQ-8b` required fields; contact minimum | `DG-1` | **Hard blocker** | `P3` validation *rules* | Unresolved | `S-1`, `ADR-006` |
 | `OQ-10` edit-after-approval | `DG-1` | **Hard blocker** | `P1` (`E7`, lifecycle state), `OP-10` | Unresolved | `S-5`, `ADR-006` |
@@ -341,7 +341,7 @@ gate is the first maintenance action the decision log requires.
 
 `S-1` submission obligations (`OQ-8/8b`) · `S-2` public/private field designation (`OQ-7`) ·
 `S-3` category cardinality/curation (`OQ-5`) · `S-4` searchable attributes & matching (`OQ-4`) ·
-`S-5` edit-after-approval / removal (`OQ-10`, `OQ-11`) · `S-6` location attributes (`OQ-6`) ·
+`S-5` edit-after-approval / removal (`OQ-10`, `OQ-11`) · ~~`S-6` location attributes (`OQ-6`)~~ **resolved — `OQ-6` Decided** ·
 `S-7` review-data shape (`OQ-14` dependency) · `S-8` audit entries (`OQ-14`, `NOQ-8`) ·
 `S-9` anti-spam data (`OQ-9`) · `S-10` duplicate representation (`OQ-12`) ·
 `S-11` rejected retention & purge (`OQ-13`). **A cell that fills a seam with a guessed field

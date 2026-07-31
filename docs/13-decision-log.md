@@ -109,7 +109,7 @@ hard blockers outright: they **must be answered before data design starts.**
 
 | ID | Question | Class | Status | Needed by | Blocks or shapes | Source | Outcome |
 |---|---|---|---|---|---|---|---|
-| `OQ-6` | **Location granularity?** | **Hard blocker** | Unresolved | **Before `P1` starts** | **All of `P1`.** Retrofitting means **backfilling every record** | `docs/08`; `docs/07` `DD-1` | — |
+| `OQ-6` | **Location granularity?** | **Hard blocker** | **Decided** | **Before `P1` starts** | **All of `P1`.** Retrofitting means **backfilling every record** | `docs/08` `S-6`; `docs/07` `DD-1` | **Decided 2026-07-31 (Joe S.):** the MVP location-field set is **locality — required** (the town, city, village, municipality, or comparable named place; user-facing label "City, town, or locality"), **country — required on every listing**, drawn where practical from a **standardised country list**, represented consistently, **multi-country capable from launch** and **never silently defaulted to the United States**; **administrative area — optional** (state, province, region, county, district, or parish; not required where no such subdivision meaningfully applies); **postal code — optional** for every listing and country, held as **text** admitting letters, digits, spaces, and hyphens, supporting **international formats**, with **no universal United States five-digit rule**, omittable by home-based or privacy-sensitive businesses, and **never used to infer or expose a residential street address**; and **no precise business or residential street address is collected in the MVP**. Recorded in `docs/03` *Data required for a listing*, `docs/05` `FR-DATA-04`, `FR-DATA-05`, `FR-DATA-06`, `FR-DATA-06b`, `FR-DATA-06c` (and `FR-SRCH-05`), and `docs/08` `E1` attributes, the required/optional classification, `VR-S4`, and seam **`S-6` (resolved)**. **Scope limits:** this decides only *which location fields exist and their obligations*. **`OQ-7` (public versus private projection) remains Unresolved** and is decided separately; `OQ-8`/`OQ-8b` are untouched; location normalisation and representation remain open (`DDM-5`), and **no store, country list, validation library, format expression, or technology is selected**. **`DG-1` remains Unresolved** — `OQ-7`, `OQ-8`/`OQ-8b`, `OQ-10`, `OQ-11`, and `OQ-13` are still open. |
 | `OQ-7` | **Public versus private fields?** | **Hard blocker** | Unresolved | **Before `P1` starts** | `P1` and `P2`. The **public projection** — the control `BI-6` and `NFR-PRIV-01/02` rest on. **Until it is answered, the privacy commitment is an empty promise** (`docs/07` `R-2`) | `docs/08` `S-2`; `docs/07` `DD-1` | — |
 | `OQ-8` / `OQ-8b` | **Required submission fields; contact minimum?** | **Hard blocker** | Unresolved | **Before `P1` starts** | `P3` validation **rules** (`S-1`). The validation *behavior* is built regardless | `docs/08` `S-1`; `docs/07` `DD-1` | — |
 | `OQ-10` | **Edit after approval — immediate, or secondary review?** | **Hard blocker** | Unresolved | **Before `P1` starts** | `P1` (`S-5` — may add **a lifecycle state and a revision entity**) and `OP-10`. **The largest architectural consequence of any open question** | `docs/08` `S-5`; `docs/07` `DD-1` | — |
@@ -247,9 +247,10 @@ document nobody is obliged to touch.
 `IR-1` — **gates bypassed under delivery pressure**: *"we'll assume and adjust."* The plan
 names it **the most likely failure, by a wide margin.**
 
-**The adjustments are not adjustments.** `OQ-6` answered late means **backfilling every
-record**. `OQ-10` answered late means **retrofitting a lifecycle state into a live moderation
-workflow**. `OQ-14`/`NOQ-8` answered late is **irreversible** — the history was never captured.
+**The adjustments are not adjustments.** `OQ-6` answered late would have meant **backfilling
+every record** — it was instead answered on time, before `P1`, through the workflow. `OQ-10`
+answered late means **retrofitting a lifecycle state into a live moderation workflow**.
+`OQ-14`/`NOQ-8` answered late is **irreversible** — the history was never captured.
 
 > **The gates, the `blocked` label, and this log exist for exactly one purpose: to make sure
 > the answers come from the people whose answers they are.**
