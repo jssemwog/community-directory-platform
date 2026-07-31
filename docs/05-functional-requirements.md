@@ -184,7 +184,7 @@ filtering, location filtering.
 | FR-SRCH-02 | The system shall apply a defined keyword-search scope (which listing fields are searched) and a defined matching mode (exact, partial, or fuzzy). | System | V2 | Should | The specific fields and matching mode are not yet approved; the requirement does not select them. Decision pending: OQ-4. |
 | FR-SRCH-03 | The system shall treat an empty or whitespace-only keyword as a request to browse all approved listings (or prompt for input) rather than as a failed search. | Visitor | V2 (exception) | Should | Prevents spurious no-results. |
 | FR-SRCH-04 | The system shall allow a visitor to filter approved listings by a predefined category. | Visitor | V3; category filtering | Must | Category set per FR-DATA; curation is **OQ-5**. |
-| FR-SRCH-05 | The system shall allow a visitor to filter approved listings by a location value. | Visitor | V4; location filtering | Must | Granularity (city vs. region/country) is **OQ-6**. |
+| FR-SRCH-05 | The system shall allow a visitor to filter approved listings by a location value. | Visitor | V4; location filtering | Must | Granularity decided by **OQ-6**: locality and country are required, administrative area and postal code optional (FR-DATA-04, FR-DATA-05, FR-DATA-06, FR-DATA-06b). *Which* location fields a visitor may filter on remains bounded by the public projection (**OQ-7**). |
 | FR-SRCH-06 | The system shall allow a visitor to combine keyword, category, and location criteria, returning approved listings that satisfy all applied criteria. | Visitor | V2–V4 | Should | Combined narrowing per journeys' alternate paths. |
 | FR-SRCH-07 | The system shall allow a visitor to clear or reset any applied search or filter criterion and return to browsing all approved listings. | Visitor | V3, V4, V6 | Should | Supports recovery from no-results. |
 | FR-SRCH-08 | The system shall show a distinct no-results message when a search or filter matches zero approved listings, and offer a way to adjust or clear the criteria. | Visitor | V6; empty states | Must | Distinct from empty directory and errors. See FR-ERR-02. |
@@ -202,9 +202,11 @@ information a listing record holds — **not** any storage technology or schema.
 | FR-DATA-01 | The system shall represent each listing with a business or organization name. | System | Scope: data | Must | Required core identity. |
 | FR-DATA-02 | The system shall represent each listing with a single category drawn from a predefined set. | System | Scope: data; V3 | Must | Enables category filtering. Curation/source is **OQ-5**. |
 | FR-DATA-03 | The system shall represent each listing with a description. | System | Scope: data | Must | Required short descriptive text. |
-| FR-DATA-04 | The system shall represent each listing with a city. | System | Scope: data; V4 | Must | Supports location filtering at city level. |
-| FR-DATA-05 | The system shall support an optional state or region value on a listing. | System | Scope: data | Should | Optional; useful where cities are ambiguous. |
-| FR-DATA-06 | The system shall support a country value on a listing. | System | Scope: data | Should | Country is undecided and is **not** mandatory while multi-country scope is open. Decision pending: OQ-6. |
+| FR-DATA-04 | The system shall represent each listing with a locality — the town, city, village, municipality, or comparable named place associated with the business. | System | Scope: data; V4 | Must | Required. "Locality" is the neutral underlying concept (renamed from *city*); a user-facing label may read "City, town, or locality." Decided: OQ-6. |
+| FR-DATA-05 | The system shall support an optional administrative area on a listing — a state, province, region, county, district, parish, or comparable subdivision. | System | Scope: data | Must | Optional for every listing, and **not** required where no such subdivision meaningfully applies. A user-facing label may read "State, province, region, or district." Decided: OQ-6. |
+| FR-DATA-06 | The system shall represent each listing with a country, drawn where practical from a standardised country list and represented consistently across listings. | System | Scope: data; V4 | Must | **Required on every listing.** The MVP supports listings from more than one country from launch and shall **not** silently default a listing to the United States. No country-list source, representation, or provider is selected here. Decided: OQ-6. |
+| FR-DATA-06b | The system shall support an optional postal code on a listing, held as text that may contain letters, digits, spaces, and hyphens, and shall accept international postal-code formats. | System | Scope: data | Must | Optional for every listing and every country. The system shall **not** apply a universal United States five-digit rule. A user-facing label may read "Postal code or ZIP code." Decided: OQ-6. |
+| FR-DATA-06c | The system shall not collect a precise business street address or a residential street address on a listing in the MVP. | System | Scope: data | Must | Home-based and privacy-sensitive listings carry only locality, country, administrative area where provided, and postal code only where voluntarily provided. Postal code shall never be used to infer or expose a residential street address. Decided: OQ-6. |
 | FR-DATA-07 | The system shall support optional contact methods on a listing: phone, email, and website. | System | Scope: data | Should | Each individually optional at the field level. |
 | FR-DATA-08 | The system shall require at least one contact method (phone, email, or website) on every listing. | System | Scope: data | Should | Contact-minimum enforcement is not yet approved; not enforced by default. Decision pending: OQ-8b. |
 | FR-DATA-09 | The system shall maintain administrative fields on each listing — status, submission date, and last-updated date — that are set by the system or administrators and are never entered or edited by the public. | System | Scope: data | Must | See FR-AUD; never public content (FR-DATA-11). |
@@ -340,7 +342,7 @@ requirement.
 | Public browsing of approved listings | FR-VIS-01, FR-VIS-02, FR-VIS-06 |
 | Keyword search | FR-SRCH-01, FR-SRCH-02, FR-SRCH-03 |
 | Basic category filtering | FR-SRCH-04, FR-SRCH-09, FR-DATA-02, FR-DATA-10 |
-| Basic location filtering | FR-SRCH-05, FR-DATA-04, FR-DATA-05, FR-DATA-06 |
+| Basic location filtering | FR-SRCH-05, FR-DATA-04, FR-DATA-05, FR-DATA-06, FR-DATA-06b, FR-DATA-06c |
 | Listing details | FR-VIS-04, FR-VIS-05, FR-DATA-11 |
 | Public listing-request form | FR-SUB-01, FR-SUB-02, FR-SUB-03 |
 | Pending by default | FR-SUB-04, FR-MOD-01, FR-AUD-01 |
@@ -361,7 +363,7 @@ requirements.
 | V1 Browse approved listings | FR-VIS-01, FR-VIS-02, FR-VIS-03, FR-VIS-06, FR-ERR-01, FR-ERR-04 |
 | V2 Search by keyword | FR-SRCH-01, FR-SRCH-02, FR-SRCH-03 |
 | V3 Filter by category | FR-SRCH-04, FR-SRCH-07, FR-SRCH-09, FR-DATA-02 |
-| V4 Filter by location | FR-SRCH-05, FR-SRCH-07, FR-DATA-04, FR-DATA-06 |
+| V4 Filter by location | FR-SRCH-05, FR-SRCH-07, FR-DATA-04, FR-DATA-05, FR-DATA-06, FR-DATA-06b |
 | V5 View listing details | FR-VIS-04, FR-VIS-05, FR-VIS-07, FR-VIS-08, FR-DATA-11 |
 | V6 No-results search | FR-SRCH-08, FR-ERR-02, FR-SRCH-07 |
 | V7 Encounter inaccurate/outdated info | FR-VIS-10, FR-ADM-09, FR-MOD-06 |
@@ -399,8 +401,9 @@ requirements above. They are recorded, not newly decided.
 - **A-2.** Submission volume is low enough that manual administrator review is
   practical (`01-vision.md`, `03-mvp-scope.md`).
 - **A-3.** A small, predefined set of categories is sufficient for launch.
-- **A-4.** Initial geographic scope is limited enough that simple location
-  fields (e.g. city) support useful filtering.
+- **A-4.** Simple location fields — locality and country, with an optional
+  administrative area and postal code — support useful filtering, and the
+  directory is multi-country capable from launch (`OQ-6`).
 - **A-5.** A small number of trusted administrators operate the platform.
 - **A-6.** Administrators are authorized before performing any administrator
   action; *how* they authenticate is an architecture decision, not specified
@@ -426,7 +429,7 @@ committed.
 | OQ-3 | What is the default ordering of listings (alphabetical, newest, etc.)? | FR-VIS-03 | Journeys OQ-3; V1 |
 | OQ-4 | Which fields are searched, and is matching exact, partial, or fuzzy? | FR-SRCH-02 | Journeys OQ-4; V2 |
 | OQ-5 | Single vs. multiple category selection; who curates the category set and can admins manage it? | FR-SRCH-09, FR-DATA-02, FR-DATA-10 | Journeys OQ-5; Scope OQ-4; V3 |
-| OQ-6 | Location granularity — city only, or also state/region and country (and is launch multi-country)? | FR-SRCH-05, FR-DATA-05, FR-DATA-06 | Journeys OQ-6; Scope OQ-1, OQ-2; V4 |
+| ~~OQ-6~~ | ~~Location granularity — city only, or also state/region and country (and is launch multi-country)?~~ **Decided:** locality **required**, country **required** (multi-country from launch), administrative area **optional**, postal code **optional** (international text), street address **not collected**. See FR-DATA-04, FR-DATA-05, FR-DATA-06, FR-DATA-06b, FR-DATA-06c and `docs/13`. | FR-SRCH-05, FR-DATA-04, FR-DATA-05, FR-DATA-06, FR-DATA-06b, FR-DATA-06c | Journeys OQ-6; Scope OQ-1, OQ-2; V4 |
 | OQ-7 | Which listing/contact fields are ever shown publicly vs. withheld? | FR-VIS-04, FR-DATA-11 | Journeys OQ-7; V5, privacy |
 | OQ-8 | Which fields are required at submission (and format checks)? | FR-SUB-02, FR-SUB-05, FR-VAL-01, FR-VAL-05 | Journeys OQ-8; L2, L3 |
 | OQ-8b | Is at least one contact method enforced per listing? | FR-DATA-08, FR-VAL-05 | Scope OQ-3; Journeys OQ-8 |

@@ -158,15 +158,26 @@ included.
 | Business or organization name | **Required** | Core identity of the listing. |
 | Category | **Required** | Needed for category filtering; from a predefined set. |
 | Description | **Required** | Short text describing the listing. |
-| City | **Required** | Supports location filtering at city level. |
-| State or region | **Optional** | Useful where cities are ambiguous. |
-| Country | **Undecided** | Only needed if the directory spans countries; see open questions. |
+| Locality | **Required** | The town, city, village, municipality, or comparable named place. User-facing label: "City, town, or locality." Supports location filtering. Decided: `OQ-6`. |
+| Country | **Required** | Every listing carries a country; the directory is multi-country capable from launch. Decided: `OQ-6`. |
+| Administrative area | **Optional** | State, province, region, county, district, parish, or comparable subdivision. User-facing label: "State, province, region, or district." Not required where no such subdivision meaningfully applies. Decided: `OQ-6`. |
+| Postal code | **Optional** | Text, international formats; may be omitted by any listing. User-facing label: "Postal code or ZIP code." Decided: `OQ-6`. |
+| Precise or residential street address | **Not collected** | Deliberately excluded from the initial MVP. Decided: `OQ-6`. |
 | Phone | **Optional** | At least one contact method is expected (see below). |
 | Email | **Optional** | Contact method. |
 | Website | **Optional** | Contact method. |
 | Status | **Administrative** | e.g. pending / approved / rejected; not set by the public. |
 | Submission date | **Administrative** | Recorded by the system on submission. |
 | Last updated date | **Administrative** | Recorded by the system on change. |
+
+**Location fields (decided — `OQ-6`).** The MVP collects **no precise business street
+address and no residential street address**. For a home-based business the location
+information is limited to locality, country, the administrative area where provided, and a
+postal code only where voluntarily provided. Postal code is treated as text — letters,
+digits, spaces, and hyphens — with **no universal United States five-digit rule**, and is
+never used to infer or expose a residential street address. Which of these stored fields
+appear publicly is a **separate** decision (`OQ-7`) and is not settled here. No storage
+mechanism, normalisation approach, country list, or technology is chosen by this decision.
 
 **Contact rule (open question):** the intent is that a listing carry **at least
 one** contact method (phone, email, or website), but whether that minimum is
@@ -183,8 +194,9 @@ architecture work, deliberately excluded here.
 - Submission volume will be low enough that **manual administrative review** is
   practical (consistent with `01-vision.md`).
 - A small, predefined set of categories is sufficient for launch.
-- The initial geographic scope is limited enough that simple location fields
-  (e.g. city) support useful filtering.
+- Simple location fields (locality, country, and optionally administrative area) support
+  useful filtering; the directory is multi-country capable from launch and no listing is
+  silently defaulted to a single country.
 - A small number of trusted administrators operate the platform.
 
 ## MVP constraints
@@ -216,11 +228,11 @@ review turnaround time) define "success" for the first release.
 
 ## Risks and open questions
 
-1. **Location granularity** — Is filtering by **city** enough for the MVP, or are
-   state/region (and possibly country) needed? Affects required vs. optional
-   location fields.
-2. **Multi-country scope** — Is the launch single-country (making `Country`
-   unnecessary) or broader?
+1. ~~**Location granularity**~~ — **Decided (`OQ-6`)**: locality and country required,
+   administrative area and postal code optional, street address not collected. See *Data
+   required for a listing* above.
+2. ~~**Multi-country scope**~~ — **Decided (`OQ-6`)**: the MVP is multi-country capable from
+   launch; country is required on every listing.
 3. **Contact-method minimum** — Should the MVP *enforce* at least one contact
    method per listing, or leave all contact fields optional?
 4. **Category source** — Who defines the predefined category list, and can

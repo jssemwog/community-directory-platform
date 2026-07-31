@@ -104,7 +104,7 @@ indexed are implementation decisions, and all are deferred.
 
 **P7 — Distinguish structural rules from policy rules.**
 Some rules hold regardless of any open question ("a record has exactly one status").
-Others depend entirely on an unmade decision ("name, category, description and city
+Others depend entirely on an unmade decision ("name, category, description and locality
 are required at submission"). The first are stated as rules. The second are stated as
 **rule slots** — the rule's *shape* is fixed, its *content* is pending. Confusing the
 two is precisely how an open question gets silently closed.
@@ -209,9 +209,10 @@ resource proposed for, or present in, the directory.
 | **Name** | The business or organization name; the record's core identity to a reader. | Submitter, editable by administrator | `FR-DATA-01` |
 | **Category** | One classification drawn from the predefined set (E2). | Submitter, editable by administrator | `FR-DATA-02` |
 | **Description** | Short descriptive text. | Submitter, editable by administrator | `FR-DATA-03` |
-| **City** | The location value supporting location filtering. | Submitter, editable by administrator | `FR-DATA-04` |
-| **State or region** | Optional location refinement. | Submitter, editable by administrator | `FR-DATA-05` |
-| **Country** | Location value whose *existence* depends on `OQ-6`. | Submitter, editable by administrator | `FR-DATA-06` |
+| **Locality** | **Required.** The town, city, village, municipality, or comparable named place associated with the business; the neutral underlying concept for a place name, and the location value supporting location filtering. | Submitter, editable by administrator | `FR-DATA-04` (`OQ-6`) |
+| **Administrative area** | **Optional.** A state, province, region, county, district, parish, or comparable subdivision. Not required where no such subdivision meaningfully applies. | Submitter, editable by administrator | `FR-DATA-05` (`OQ-6`) |
+| **Country** | **Required on every record.** Drawn where practical from a standardised country list and represented consistently; the model is multi-country capable from launch and no record is defaulted to a single country. | Submitter, editable by administrator | `FR-DATA-06` (`OQ-6`) |
+| **Postal code** | **Optional.** Textual, not numeric: letters, digits, spaces, and hyphens, in international formats. Never subject to a universal United States five-digit rule, and never used to infer a street address. | Submitter, editable by administrator | `FR-DATA-06b` (`OQ-6`) |
 | **Phone** | Contact method. | Submitter, editable by administrator | `FR-DATA-07` |
 | **Email** | Contact method. | Submitter, editable by administrator | `FR-DATA-07` |
 | **Website** | Contact method. | Submitter, editable by administrator | `FR-DATA-07` |
@@ -391,8 +392,8 @@ and the model must not close it.
 
 | Attribute | Record-level | Field-level exposure |
 |---|---|---|
-| Name, category, description, city | Public only when approved | Public — implied by the browse/search/detail journeys (`FR-VIS-04`) |
-| State/region, country | Public only when approved | **Open — `OQ-7`** (and `OQ-6` decides whether they exist) |
+| Name, category, description, locality | Public only when approved | Public — implied by the browse/search/detail journeys (`FR-VIS-04`) |
+| Administrative area, country, postal code | Public only when approved | **Open — `OQ-7`.** `OQ-6` has settled that these attributes **exist** and whether they are required; **which of them appear in the public projection is decided separately and is not settled here.** |
 | Phone, email, website | Public only when approved | **Open — `OQ-7`.** The submitter's own contact details are the sharpest case: a phone number offered *so administrators can verify a listing* is not the same as a phone number offered *for publication.* |
 | Status, submitted at, last updated at | — | **Never public** (`FR-DATA-11`, `NFR-PRIV-01`) |
 | Reviewed by, reviewed at, moderation note | — | **Never public** (`NFR-PRIV-03`) |
@@ -419,11 +420,11 @@ Four classifications, plus a fifth the earlier documents force us to admit: **un
 
 | Classification | Meaning | Attributes |
 |---|---|---|
-| **Required** | Must hold a value for the record to be valid. | Name (`FR-DATA-01`), category (`FR-DATA-02`), description (`FR-DATA-03`), city (`FR-DATA-04`) |
-| **Optional** | May hold no value; the record is valid either way. | State/region (`FR-DATA-05`), phone, email, website (`FR-DATA-07`, each individually optional) |
+| **Required** | Must hold a value for the record to be valid. | Name (`FR-DATA-01`), category (`FR-DATA-02`), description (`FR-DATA-03`), locality (`FR-DATA-04`), country (`FR-DATA-06`) |
+| **Optional** | May hold no value; the record is valid either way. | Administrative area (`FR-DATA-05`), postal code (`FR-DATA-06b`), phone, email, website (`FR-DATA-07`, each individually optional) |
 | **Administrative** | Set by the system or an authorized administrator; **never** part of the public submittable surface. | Status, submitted at, last updated at (`FR-DATA-09`, `NFR-DATA-04`); reviewed by / at, moderation note (`S-7`) |
-| **Undecided** | The attribute's existence or obligation is genuinely open. | Country (`FR-DATA-06`, `OQ-6`); the contact-method minimum (`FR-DATA-08`, `OQ-8b`); the full required set at submission (`OQ-8`) |
-| **Deferred** | Deliberately absent from the MVP. | Owner/account reference, claim state, ratings, reviews, analytics, promotion, geocoordinates, hours, images, tags |
+| **Undecided** | The attribute's existence or obligation is genuinely open. | The contact-method minimum (`FR-DATA-08`, `OQ-8b`); the full required set at submission (`OQ-8`) |
+| **Deferred** | Deliberately absent from the MVP. | **Precise business street address and residential street address — not collected** (`FR-DATA-06c`, `OQ-6`); owner/account reference, claim state, ratings, reviews, analytics, promotion, geocoordinates, hours, images, tags |
 
 **The "Required" column above is narrower than it looks, and this must not be
 misread.** It states the fields `FR-DATA-01..04` mark **Must** — that is, the fields a
@@ -467,7 +468,7 @@ Following **P7**, rules that hold regardless of any open question are stated as
 | `VR-S1` | *The set of fields required at submission.* A required-field rule will be enforced; **which** fields it names is not decided. | `OQ-8` |
 | `VR-S2` | *The contact-method minimum.* The system will either enforce "at least one of phone/email/website" or not. Which, is not decided. | `OQ-8b`, `FR-DATA-08` |
 | `VR-S3` | *Format checks* (phone, email, URL shape). That formats will be checked is committed by `NFR-SEC-05`; the specific rules and their strictness are not. | `OQ-8` |
-| `VR-S4` | *Location obligations.* Whether state/region and country are required, optional, or absent. | `OQ-6` |
+| ~~`VR-S4`~~ | *Location obligations.* **Resolved by `OQ-6`** and now a rule, not a slot: locality **required**, country **required**, administrative area **optional**, postal code **optional**, street address **not collected**. Postal code is validated as international text, never against a fixed national format. | ~~`OQ-6`~~ — **Decided** |
 | `VR-S5` | *Category cardinality.* Whether exactly one category is enforced or several permitted. | `OQ-5` |
 | `VR-S6` | *Duplicate detection.* Whether the model must support identifying near-duplicate submissions, and on which attributes. | `OQ-12` |
 
@@ -622,14 +623,14 @@ listings only** (`FR-VIS-02`).
 |---|---|---|
 | Every query is scoped to approved records | Status must be efficiently selectable — it is a predicate on *every* public read, not an afterthought | `FR-VIS-02`, `NFR-PERF-02` |
 | Category filtering | Category must be a finite, referenceable value, not free text | `FR-DATA-02`, `FR-DATA-10` |
-| Location filtering | At least one location attribute must be filterable | `FR-SRCH-05` |
+| Location filtering | At least one location attribute must be filterable; locality and country are present on every record (`OQ-6`) | `FR-SRCH-05`, `FR-DATA-04`, `FR-DATA-06` |
 | Keyword search | At least one textual attribute must be searchable | `FR-SRCH-01` |
 | Combined criteria | The filterable attributes must be usable *together* in one query | `FR-SRCH-06` |
 
 **What the model refuses to commit — and this is deliberate.**
 
 - **Which fields are searched (`OQ-4` / `S-4`).** Name only? Name and description? Category
-  and city too? This is unresolved, and it is *not* a cosmetic choice: it determines which
+  and locality too? This is unresolved, and it is *not* a cosmetic choice: it determines which
   attributes need to be efficiently searchable, and — if withheld contact fields were ever
   searched — could leak the existence of data that `OQ-7` decided not to publish. **Search
   scope must never exceed publication scope.** That constraint is committed here even though
@@ -689,7 +690,7 @@ contribution to them.
 |---|---|---|---|
 | `OQ-4` | Which fields are searched, and is matching exact, partial or fuzzy? | Determines which attributes must be efficiently searchable. Search scope must never exceed publication scope. | `S-4` |
 | `OQ-5` | Single vs. multiple category; who curates the set; can administrators manage it? | Many-to-one vs. many-to-many is **structural**, not a field addition. If administrators curate the set, the category set becomes *mutable data*, not configuration. | `S-3` |
-| `OQ-6` | Location granularity — city only, or state/region and country too? Is launch multi-country? | Decides whether `country` and `state/region` exist at all, and whether they are required. | `S-6` |
+| ~~`OQ-6`~~ **Decided** | Location granularity and the location-field set. | **Answered:** locality and country **required**; administrative area and postal code **optional**; precise/residential street address **not collected**; multi-country capable from launch. The `E1` attributes and the required/optional classification above are updated accordingly. Normalisation remains open (`DDM-5`). | `S-6` — **resolved** |
 | `OQ-7` | Which listing/contact fields are public vs. withheld? | Fills the field-level exposure column. Must separate *collected* from *published*. | `S-2` |
 | `OQ-8` | Which fields are required at submission, and with what format checks? | Fills `VR-S1` and `VR-S3`. Distinct from "required on a valid record". | `S-1` |
 | `OQ-8b` | Is at least one contact method enforced per listing? | Fills `VR-S2`. A cross-field constraint that cannot be expressed as a per-field obligation. | `S-1` |
@@ -712,7 +713,7 @@ contribution to them.
 | `S-3` | Category cardinality and curation; whether the set is configuration or data. | `OQ-5` |
 | `S-4` | Searchable attribute set and matching mode. | `OQ-4` |
 | `S-5` | Edit-after-approval and removal — whether `E7` and a fourth status state exist. | `OQ-10`, `OQ-11` |
-| `S-6` | Location attributes — which exist, which are required. | `OQ-6` |
+| ~~`S-6`~~ **Resolved** | Location attributes — which exist, which are required. **Filled by `OQ-6`:** locality (required), country (required), administrative area (optional), postal code (optional); no street address. **Only the obligation is fixed — representation and normalisation remain `DDM-5`.** | ~~`OQ-6`~~ — **Decided** |
 | `S-7` | Review data shape — attributes on `E1`, or a separate `E4`. **Resolve with `S-8`.** | `OQ-14` (dependency) |
 | `S-8` | Audit entries — whether `E5` exists. | `OQ-14`, `NOQ-8` |
 | `S-9` | Anti-spam data — whether `E6` exists and what it holds. | `OQ-9` |
@@ -733,7 +734,7 @@ above: an open question is a *product* decision someone must make; a deferred de
 | `DDM-2` | **Identity strategy** — UUID, sequence, natural key. | Physical (**P6**). The logical requirement is only that identity be stable and content-independent (`DI-8`). | — |
 | `DDM-3` | **Category representation** — enumeration, reference table, or configuration. | Depends on whether administrators curate the set at runtime. | `OQ-5` |
 | `DDM-4` | **Indexing and text-search strategy.** | Physical. Depends on corpus size and search scope. | `OQ-4`, `NOQ-4` |
-| `DDM-5` | **Normalization of location** — city/region as free text or a reference table. | Depends on granularity and whether values must be constrained. | `OQ-6` |
+| `DDM-5` | **Normalization of location** — locality, administrative area, country, and postal code as free text, a reference table, or a standardised list. | **Still open.** `OQ-6` fixed *which* location attributes exist and their obligations; it selected **no** country list, format library, validation expression, storage type, or external service. | — (open; physical) |
 | `DDM-6` | **Physical separation of non-public attributes** — same record, or a separate related structure. | An implementation of the `S-2` boundary; the *boundary* is logical, the *mechanism* is not. | `OQ-7` |
 | `DDM-7` | **Audit-entry storage** — same store, separate store, or append-only log. | Only meaningful once `E5` is known to exist. | `OQ-14` |
 | `DDM-8` | **Revision storage**, if `E7` exists. | Only meaningful once `OQ-10` resolves. | `OQ-10` |
@@ -755,7 +756,7 @@ actually withheld.
 
 | Requirement group | Where it lands |
 |---|---|
-| `FR-DATA-01..08` (listing content) | `E1` attributes — name, category, description, city, state/region, country, phone, email, website |
+| `FR-DATA-01..08` (listing content, incl. `FR-DATA-06b/06c`) | `E1` attributes — name, category, description, locality, administrative area, country, postal code, phone, email, website; **no street address** (`FR-DATA-06c`) |
 | `FR-DATA-09` (administrative fields) | `E1` administrative attributes; `DI-4`; **P3** |
 | `FR-DATA-10` (predefined category set) | `E2`; `DI-9`; `VR-2` |
 | `FR-DATA-11` (public exposure limits) | *Public versus private data*; `S-2`; `DI-5` |
@@ -834,7 +835,8 @@ defensible and collectively fatal.
 Stated explicitly, because this document's chief risk is not that it models too little.
 
 **R-1 — Resolving an open question by drawing it.** The dominant risk. Adding a `country`
-attribute decides `OQ-6`. Adding a revisions relationship decides `OQ-10`. Adding
+attribute would once have decided `OQ-6`; it is drawn now only because `OQ-6` **was** decided
+through the workflow and recorded above. Adding a revisions relationship decides `OQ-10`. Adding
 `deleted_at` decides `OQ-11`. Adding "at least one contact" decides `OQ-8b`. None of these
 would feel like a decision at the time — each would feel like drawing an obvious box.
 **Mitigation:** the eleven named seams, and the rule-slot device (**P7**) that keeps a
