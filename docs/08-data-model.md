@@ -124,15 +124,24 @@ erDiagram
     REVIEW_ACTION }o--|| ADMINISTRATOR : "performed by"
     LISTING_RECORD ||--o{ AUDIT_ENTRY : "conditional (S-8)"
     LISTING_RECORD ||--o| SUBMISSION_SAFEGUARD : "conditional (S-9)"
-    LISTING_RECORD ||--o{ LISTING_REVISION : "conditional (S-5)"
+    LISTING_RECORD ||--o{ LISTING_REVISION : "committed (S-5, OQ-10)"
 ```
 
-**Read the diagram with its conditionals, or do not read it at all.** Only two
-entities are unconditionally required by the approved MVP: the **listing record** and
-the **category set** it draws from. **Administrator** is required but lives outside the
-listing store (`docs/07` `DD-4`). The remaining four exist *only if* the open question
-named on the relationship resolves in a particular direction. They are drawn so that
-their cost is visible — not because they are approved.
+**Read the diagram with its conditionals, or do not read it at all.** Three
+entities are unconditionally required by the approved MVP: the **listing record**, the
+**category set** it draws from, and — since `OQ-10` was decided — the **listing
+revision**. **Administrator** is required but lives outside the listing store
+(`docs/07` `DD-4`). The remaining entities exist *only if* the open question named on
+the relationship resolves in a particular direction. They are drawn so that their cost
+is visible — not because they are approved.
+
+**The listing-to-revision relationship is one-to-many, and stays one-to-many.** A
+listing may accumulate revisions over its life, and that history is not restricted by
+this decision. What *is* restricted is how many of them may be **pending** at once:
+**no more than one active pending revision per listing** (`DI-11`). The cardinality
+expresses history; the invariant expresses concurrency. They are different rules, and
+collapsing the relationship to one-to-one would destroy the first while enforcing the
+second.
 
 ---
 
@@ -146,7 +155,7 @@ their cost is visible — not because they are approved.
 | **E4** | **Review action** | **Seam S-7** | What an administrator did to a record, when, and any moderation note. May be attributes on E1 or a separate entity. | `FR-ADM-*`, `FR-CONF-02/03/04` |
 | **E5** | **Audit entry** | **Conditional — S-8** | An append-only record of an administrator action, for accountability. Exists only if `OQ-14`/`NOQ-8` commits audit logging to the MVP. | `FR-AUD-05`, `NFR-OBS-05` |
 | **E6** | **Submission safeguard data** | **Conditional — S-9** | Whatever an anti-abuse measure must retain. Exists only if `OQ-9` commits a safeguard, and its content depends entirely on which one. | `FR-SUB-09`, `NFR-SEC-06` |
-| **E7** | **Listing revision** | **Conditional — S-5** | A proposed change to an already-approved listing, held apart from the live content while it awaits review. Exists **only if** `OQ-10` requires secondary review of edits. | `FR-ADM-10` |
+| **E7** | **Listing revision** | **Required — `S-5` resolved for `OQ-10`** | A proposed change to an already-approved listing, held apart from the currently effective public version while it awaits review. **Never publicly visible** (`DI-10`). On approval its information becomes the effective public version; on rejection the approved listing is unchanged. **Committed by `OQ-10` (Decided 2026-08-02).** | `FR-ADM-10`, `FR-ADM-10b` |
 
 **E3 deserves a sentence of its own.** Administrator identity is required for the MVP
 to function, but it is deliberately *not* modeled here beyond its existence and its
@@ -187,8 +196,9 @@ committed, entries reference the listing they concern and are **append-only**: n
 updated, never deleted through the ordinary application path. An audit log that the
 audited thing can edit is not an audit log.
 
-**Listing record → listing revision (one-to-many; conditional — S-5).** Exists only
-under one resolution of `OQ-10`. Treated at length below, because it is the open
+**Listing record → listing revision (one-to-many; committed — S-5 / `OQ-10`).** A
+listing may have many revisions over its life, but **no more than one in the pending
+state at a time** (`DI-11`). Treated at length below, because `OQ-10` was the open
 question with the largest structural consequence in this document.
 
 **What is deliberately absent.** There is no owner, account, claim, customer review,
@@ -283,11 +293,12 @@ three entities.
 exposure**, and exposure is governed by status (**P1**) and enforced on the server
 (`docs/07`), not by which table a row sits in.
 
-**The one thing that would change this conclusion** is a resolution of `OQ-10`
-requiring secondary review of edits to *approved* listings. That would introduce a
-genuinely distinct thing — a *proposed change that is not yet live* — which cannot be
-the live record, because the public must keep seeing the old version while the new one
-awaits review. That is entity **E7**, and it is conditional. See `S-5`.
+**The one thing that changes this conclusion is `OQ-10`, and it has now been
+decided.** Secondary review of changes to *approved* listings introduces a genuinely
+distinct thing — a *pending revision, which is not the effective public version* —
+which cannot be the listing record itself, because the public must keep seeing the
+currently approved version while the pending revision awaits review. That is entity
+**E7**, and it is **committed**. See `S-5`.
 
 ---
 
@@ -338,7 +349,7 @@ stateDiagram-v2
     pending --> approved : administrator approves
     pending --> rejected : administrator rejects
     pending --> pending : administrator edits (content only)
-    approved --> approved : administrator edits (if OQ-10 = publish immediately)
+    approved --> approved : pending revision approved (content only - OQ-10)
     approved --> unpublished : administrator removes (CONDITIONAL - OQ-11)
     rejected --> [*] : purge (CONDITIONAL - OQ-13)
     unpublished --> [*] : purge (CONDITIONAL - OQ-11 + OQ-13)
@@ -349,10 +360,62 @@ system as *pending* — never as anything else, since nothing is public until an
 administrator approves it (`docs/03`, `FR-VIS-02`). From *pending*, an administrator
 may approve it (it becomes publicly visible) or reject it (it does not). An
 administrator may also edit a pending record without changing its status. An approved
-record may be edited by an administrator to keep it accurate.
+listing may be changed to keep it accurate — but **only through the revision lifecycle
+below**, never by writing over the effective public version.
 
-**Two transitions on that diagram are marked conditional, and neither may be treated
-as approved:**
+### The revision lifecycle (`OQ-10` — Decided 2026-08-02)
+
+**`OQ-10` adds no listing status.** The three values `FR-AUD-01` fixes are unchanged
+and remain sufficient: a listing carrying a pending revision **is still *approved***,
+and `DI-1` — exactly one status at all times — holds throughout. The pending revision
+is a **separate entity** (`E7`), not a fourth state of the listing.
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending_revision : change proposed to an approved listing
+    pending_revision --> approved_revision : administrator approves the revision
+    pending_revision --> rejected_revision : administrator rejects the revision
+    approved_revision --> [*] : its information is now the effective public version
+    rejected_revision --> [*] : approved listing unchanged (retention - OQ-13)
+```
+
+**In words.** A proposed change to an approved listing is recorded as a **pending
+revision**. Throughout its review:
+
+- The **approved listing remains publicly visible at its last approved version** — the
+  **effective public version**. It is never withdrawn from the directory because a
+  change is under review.
+- The **pending revision is not publicly visible** — not by browsing, search, direct
+  reference, or any other public read path (`DI-10`).
+- On **approval**, the revision's information becomes the **effective public version**.
+- On **rejection**, the **approved listing is unchanged** and stays public exactly as
+  it was. Rejection never removes, alters, or unpublishes the approved listing.
+- **At most one pending revision exists per listing at a time** (`DI-11`). Historical
+  revisions may still be retained — the constraint is on the *pending* state, not on
+  history.
+
+**The listing's identity is stable across the whole cycle** (`DI-8`): approving a
+revision updates what the listing publicly says, never which listing it is.
+
+**The administrator atomic path is part of this lifecycle, not an alternative to it**
+(`FR-ADM-10b`). An authorized administrator may create and approve a revision within
+**one atomic authorized operation**, but only where every validation, authorization,
+and publication safeguard that applies to a separately submitted revision is
+successfully enforced (`FR-VAL-04`, `VR-6`). No revised information becomes publicly
+visible before those checks succeed, and if any required check fails **the currently
+approved listing remains unchanged** — `DI-3` covers this: the operation completes
+fully or not at all, and is never partially public. **This is a safeguarded exception
+to the two-step sequence, not a bypass of the revision lifecycle and not a direct
+unvalidated overwrite.**
+
+**What this decision does not select.** Whether the effective public version is carried
+by updating a row, writing a version record, moving a pointer, copying content, keeping
+immutable history, or any other persistence mechanism is **`DDM-8`, which remains
+open**. "Becomes the effective public version" is policy language about *which
+information the public sees*, and nothing more.
+
+**Two transitions on the listing-status diagram are marked conditional, and neither may
+be treated as approved:**
 
 - **`approved → unpublished`** exists **only if `OQ-11`** confirms that administrators
   may unpublish or remove an approved listing in the MVP. This is not settled.
@@ -368,10 +431,12 @@ as approved:**
 and **only** as part of a single all-or-nothing write (`NFR-DATA-03`). No other path
 may alter status — not a public form, not a bulk import, not a direct store write.
 
-**What the model does *not* decide.** It does not decide whether an edit to an approved
-listing keeps that listing publicly visible while the edit is reviewed (`OQ-10` /
-`S-5`), whether a rejected record may be resubmitted, or what ordering or precedence
-statuses have. Those are open.
+**What the model now decides, and what it still does not.** Whether an approved listing
+keeps its public visibility while a change is reviewed **is decided**: it does, at its
+last approved version (`OQ-10`; `S-5` resolved for `OQ-10`). Still open: whether a
+rejected record may be resubmitted; what ordering or precedence statuses have; whether
+an approved listing may be unpublished or removed at all (`OQ-11` — the other half of
+`S-5`); and the retention of rejected submissions and rejected revisions (`OQ-13`).
 
 ---
 
@@ -451,14 +516,16 @@ by `OQ-7` (2026-07-31), against the field inventory settled by `OQ-6`.
 | **Moderation / workflow** | Record status | **Administrator-visible** | `FR-DATA-09`, `NFR-PRIV-01` |
 | **Moderation / workflow** | Submitted-at, last-updated-at | **Administrator-visible** | `FR-AUD-02/03`, `NFR-PRIV-01` |
 | **Moderation / workflow** | Reviewer identity, reviewed-at, moderation note, rejection reason | **Administrator-visible** | Where they exist — shape is `S-7`. `NFR-PRIV-03` |
-| **Moderation / workflow** | Approval history, unpublishing history, other internal workflow information | **Administrator-visible** | Where they exist — governed by `OQ-10`, `OQ-11`, `OQ-13`. `NFR-PRIV-03` |
+| **Moderation / workflow** | Approval history, unpublishing history, other internal workflow information | **Administrator-visible** | Where they exist — governed by `OQ-11`, `OQ-13`. `NFR-PRIV-03` |
+| **Moderation / workflow** | Pending revision content and revision workflow information (`E7`) | **Administrator-visible; never public** | A pending revision is never returned by any public read path (`DI-10`). Only the currently effective public version is public, and it is projected by the `OQ-7` field classification above — **which this decision does not change**. `FR-ADM-10`, `NFR-PRIV-01/03` |
 | **Audit / security** | Audit entries (`E5`) | **Audit-only; never public** | Existence and content governed by `OQ-14`/`NOQ-8`. `NFR-OBS-05` |
 | **Audit / security** | Security-event records, safeguard data (`E6`), addresses of network origin, device information, provider or infrastructure metadata | **Audit-only; never public** | Where they exist — `OQ-9`, `NOQ-7`. `NFR-PRIV-03/04`, `NFR-OBS-02` |
 
 **What this table does not do.** It does not decide **whether** an administrator-visible
 or audit-only field is collected or retained at all — that remains `OQ-8`/`OQ-8b`
-(submission obligations), `OQ-10`, `OQ-11`, `OQ-13` (lifecycle and retention), and
-`OQ-14`/`NOQ-8` (audit). It adds no business-profile field, no contact form, no messaging
+(submission obligations), `OQ-11`, `OQ-13` (lifecycle and retention), and
+`OQ-14`/`NOQ-8` (audit). **`OQ-10` is Decided and adds no field:** a revision changes
+the *values* of already-approved fields and the public field set is unchanged. It adds no business-profile field, no contact form, no messaging
 service, and no social-media field. And it selects **no mechanism**: whether the
 public/withheld boundary and the per-contact visibility designation are expressed as
 flags, a separate structure, or otherwise remains `DDM-6`.
@@ -715,6 +782,20 @@ The invariants. Each must hold at every moment, not merely after a successful op
 | `DI-7` | Stored data reflects the last successful action, with no silent loss or alteration. | `NFR-DATA-06` |
 | `DI-8` | A record's identity is stable for its entire life and survives every content edit and status change. | **P2** |
 | `DI-9` | A category value on a listing always references a member of the predefined set. | `FR-DATA-02`, `FR-DATA-10` |
+| `DI-10` | **Public read paths expose only the currently approved listing version.** A pending revision is **not** returned, rendered, indexed, searched, or otherwise exposed through any public read path. | `FR-ADM-10`, `FR-VIS-02`, `NFR-PRIV-01/03` |
+| `DI-11` | An approved listing has **no more than one pending revision at a time.** Another revision request does not enter the pending state until the existing pending revision has been approved, rejected, or otherwise resolved through an already-authorized lifecycle outcome. **This constrains the pending state, not revision history** — a listing may retain many revisions over time. | `FR-ADM-10` |
+
+**`DI-10` extends `DI-5`'s guarantee to a thing that has no listing status.** `DI-5` is
+stated over records *by status*; a pending revision is not a listing record and carries
+no listing status, so `DI-5` does not reach it on its own terms. `DI-10` closes that gap
+explicitly rather than leaving it to inference — and it is stated over **paths**, for
+the same reason `DI-5` is.
+
+**`DI-11` is a concurrency rule, not a history rule.** It says nothing about how many
+revisions a listing may accumulate, and it must not be implemented by restricting the
+listing-to-revision relationship to one-to-one. What it forbids is two proposals
+competing to become the effective public version at the same time — an ambiguity with no
+correct resolution.
 
 **`DI-5` is the one to defend hardest.** It is the single invariant whose violation is a
 *trust* failure rather than a *correctness* failure — and the vision's first principle is
@@ -746,7 +827,7 @@ contribution to them.
 | `OQ-8` | Which fields are required at submission, and with what format checks? | Fills `VR-S1` and `VR-S3`. Distinct from "required on a valid record". | `S-1` |
 | `OQ-8b` | Is at least one contact method enforced per listing? | Fills `VR-S2`. A cross-field constraint that cannot be expressed as a per-field obligation. | `S-1` |
 | `OQ-9` | Any anti-spam safeguard on the unauthenticated form? | Decides whether `E6` exists and what it holds. Most safeguards retain data about a non-consenting person. | `S-9` |
-| `OQ-10` | Does an edit to an approved listing publish immediately, or need secondary review? | **The largest structural consequence in this document.** Secondary review requires entity `E7` and a new lifecycle state. | `S-5` |
+| ~~`OQ-10`~~ **Decided** | Does a change to an approved listing publish immediately, or need secondary review? | **Answered:** secondary review. The approved listing stays public at its last approved version; the change is held as a **pending revision** that is never public (`DI-10`); approval makes it the effective public version; rejection leaves the approved listing unchanged. At most one pending revision per listing (`DI-11`). Entity **`E7` is committed**; **no listing status was added**. Storage mechanism remains `DDM-8`. | `S-5` — **resolved for `OQ-10`** |
 | `OQ-11` | Can administrators unpublish or remove an approved listing? | If yes, the three-value status set of `FR-AUD-01` is **no longer sufficient**. | `S-5` |
 | `OQ-12` | How are duplicate/near-duplicate submissions resolved? | Fills `VR-S6`; may require attributes or a relationship to express "duplicate of". | `S-10` |
 | `OQ-13` | Are rejected submissions retained or discarded? | Resolves the `FR-AUD-06` / `NFR-PRIV-05` contradiction. If retained: a purge capability becomes mandatory. | `S-11` |
@@ -763,7 +844,7 @@ contribution to them.
 | ~~`S-2`~~ **Resolved** | Field-level public/private designation. **Default: not public** — and the default stands for any attribute added later. **Filled by `OQ-7`:** see *Field classification* above. **Only the designation is fixed — the enforcement mechanism remains `DDM-6`.** | ~~`OQ-7`~~ — **Decided** |
 | `S-3` | Category cardinality and curation; whether the set is configuration or data. | `OQ-5` |
 | `S-4` | Searchable attribute set and matching mode. | `OQ-4` |
-| `S-5` | Edit-after-approval and removal — whether `E7` and a fourth status state exist. | `OQ-10`, `OQ-11` |
+| `S-5` **— half resolved** | Edit-after-approval and removal. **Resolved for `OQ-10`:** `E7` exists and is committed; the revision lifecycle is defined above; **no fourth listing status was introduced**. **Still open for `OQ-11`:** whether an approved listing may be unpublished or removed, and whether *that* requires a fourth status state. **The seam is not closed.** | ~~`OQ-10`~~ — **Decided**; `OQ-11` — **open** |
 | ~~`S-6`~~ **Resolved** | Location attributes — which exist, which are required. **Filled by `OQ-6`:** locality (required), country (required), administrative area (optional), postal code (optional); no street address. **Only the obligation is fixed — representation and normalisation remain `DDM-5`.** | ~~`OQ-6`~~ — **Decided** |
 | `S-7` | Review data shape — attributes on `E1`, or a separate `E4`. **Resolve with `S-8`.** | `OQ-14` (dependency) |
 | `S-8` | Audit entries — whether `E5` exists. | `OQ-14`, `NOQ-8` |
@@ -788,7 +869,7 @@ above: an open question is a *product* decision someone must make; a deferred de
 | `DDM-5` | **Normalization of location** — locality, administrative area, country, and postal code as free text, a reference table, or a standardised list. | **Still open.** `OQ-6` fixed *which* location attributes exist and their obligations; it selected **no** country list, format library, validation expression, storage type, or external service. | — (open; physical) |
 | `DDM-6` | **Physical separation of non-public attributes, and the representation of per-contact public-display designations** — same record, separate related structure, flags, or otherwise. | **Still open.** An implementation of the `S-2` boundary; `OQ-7` fixed the *boundary* and the designation *obligation*, not the *mechanism*. | — (open; physical) |
 | `DDM-7` | **Audit-entry storage** — same store, separate store, or append-only log. | Only meaningful once `E5` is known to exist. | `OQ-14` |
-| `DDM-8` | **Revision storage**, if `E7` exists. | Only meaningful once `OQ-10` resolves. | `OQ-10` |
+| `DDM-8` | **Revision storage and the representation of the effective public version** — row update, version record, pointer, copy, immutable history, or otherwise. | **Still open, and now meaningful.** `OQ-10` committed `E7` and fixed *which information the public sees and when*; it selected **no** persistence mechanism. "Becomes the effective public version" is policy language, not a storage design. | — (open; physical) |
 | `DDM-9` | **Soft-delete vs. hard-delete** representation. | Presupposes that removal exists at all. | `OQ-11`, `OQ-13` |
 | `DDM-10` | **Migration and schema-evolution tooling.** | Out of scope for a logical model entirely. | — |
 
@@ -821,7 +902,8 @@ actually withheld.
 | `FR-VIS-04/05` (listing details) | Field-level exposure — `S-2` |
 | `FR-SRCH-01..09` (search and filter) | *Search and filtering data needs*; `S-4` |
 | `FR-SUB-06`, `FR-ERR-05` (no partial/public record on failure) | `VR-7`; `DI-3` |
-| `FR-ADM-10` (edit after approval) | `E7` — **conditional**, `S-5` |
+| `FR-ADM-10` (revision lifecycle after approval) | `E7` — **committed**; *Status model → The revision lifecycle*; `DI-10`, `DI-11`; `S-5` (resolved for `OQ-10`) |
+| `FR-ADM-10b` (administrator atomic operation) | *The revision lifecycle*; `DI-3`, `DI-10`; `VR-6` |
 | `FR-ADM-12` (removal) | *Status model*, conditional transition — `S-5` |
 | `FR-ADM-13`, `FR-MOD-04` (duplicates) | `VR-S6`; `S-10` |
 
@@ -887,7 +969,8 @@ Stated explicitly, because this document's chief risk is not that it models too 
 
 **R-1 — Resolving an open question by drawing it.** The dominant risk. Adding a `country`
 attribute would once have decided `OQ-6`; it is drawn now only because `OQ-6` **was** decided
-through the workflow and recorded above. Adding a revisions relationship decides `OQ-10`. Adding
+through the workflow and recorded above. The same applies to the revisions relationship: it is
+drawn now only because `OQ-10` **was** decided through the workflow and recorded above. Adding
 `deleted_at` decides `OQ-11`. Adding "at least one contact" decides `OQ-8b`. None of these
 would feel like a decision at the time — each would feel like drawing an obvious box.
 **Mitigation:** the eleven named seams, and the rule-slot device (**P7**) that keeps a
@@ -929,11 +1012,11 @@ That single decision is what makes the model both **small** and **safe**, and th
 in tension: there is exactly one place where "public" is decided, exactly one identity per
 record for its whole life, and no window in which a record is half-published.
 
-Everything genuinely undecided stays undecided, behind **eleven named seams**. Two deserve
-attention before data design begins, because both are cheap now and expensive later:
-**`OQ-10`** (edit-after-approval), which is the only open question that would add an entity
-and a lifecycle state; and **`OQ-14`** (audit logging), which is the only one whose "no"
-answer destroys information permanently.
+Everything genuinely undecided stays undecided, behind **eleven named seams** — one of
+which, `S-5`, is now half resolved. **`OQ-10`** — the only open question that would add an
+entity — was answered before data design began, at zero data volume, and entity `E7` is
+committed with no listing status added. **`OQ-14`** (audit logging) still deserves attention
+first, because it is the one whose "no" answer destroys information permanently.
 
 The model introduces no schema, no SQL, no store product, and no deployment resource — and it
 resolves none of the product questions that are not its to resolve.

@@ -374,12 +374,21 @@ requires an authorized administrator identity supplied by C8; the check is not
 delegated to the caller.
 
 - **Serves:** FR-ADM-04..13, FR-MOD-01..06, FR-AUD-01/03, NFR-DATA-01..03/05.
-- **Owns the deferred lifecycle seams.** Whether an edit to an approved listing
-  publishes immediately or requires secondary review (OQ-10, FR-ADM-10), whether
-  unpublish or remove exists (OQ-11, FR-ADM-12), and whether rejected records are
-  retained (OQ-13, FR-AUD-06) are all state-machine questions, and the state
-  machine lives here. Answering them changes C6 and the data design, and nothing
-  else.
+- **Owns the lifecycle, including the decided revision rule.** OQ-10 is
+  **Decided (2026-08-02)**: a change to an approved listing is recorded as a
+  **pending revision** that is never publicly visible (DI-10); the approved
+  listing stays publicly visible at its last approved version; approving the
+  revision makes its information the effective public version; rejecting it
+  leaves the approved listing unchanged; at most one pending revision per
+  listing (DI-11). **No listing status was added** — the record stays *approved*
+  throughout, so FR-AUD-01's three-value set is intact. C6 also enforces the
+  FR-ADM-10b atomic administrator operation, applying every validation,
+  authorization, and publication safeguard before anything becomes public, and
+  leaving the approved listing unchanged on any failure.
+- **Still owns two deferred lifecycle seams.** Whether unpublish or remove
+  exists (OQ-11, FR-ADM-12) and whether rejected records are retained (OQ-13,
+  FR-AUD-06) remain state-machine questions, and the state machine lives here.
+  Answering them changes C6 and the data design, and nothing else.
 
 ### C7 — Validation Rules
 
@@ -699,16 +708,26 @@ sequenceDiagram
     C6-->>C6: record audit entry (conditional — OQ-14)
 ```
 
-**Edit after approval (OQ-10) is deliberately not drawn as resolved.** FR-ADM-10
-requires a *defined publication rule* for an administrator edit of an
-already-approved listing: either it publishes immediately, or it requires
-secondary review. **The architecture supports both and commits to neither.**
+**Edit after approval (OQ-10) is now decided, and is drawn as decided.**
+FR-ADM-10 fixes the publication rule for a change to an already-approved
+listing: **secondary review**.
 
-- *Publish immediately* — C6 writes the content and the record stays approved. No
-  new state is needed.
-- *Secondary review* — the lifecycle needs an additional state (an approved record
-  carrying a pending revision), which means a **data-design change**: a revision
-  must be storable separately from the live published content.
+- C6 records the change as a **pending revision**, stored separately from the
+  effective public version. The revision is never returned by any public read
+  path (DI-10).
+- The approved listing **remains publicly visible at its last approved version**
+  throughout. It is never withdrawn from the directory because a change is under
+  review.
+- On approval, the revision's information becomes the **effective public
+  version**; on rejection, the approved listing is **unchanged**.
+- **No additional listing status was required.** The record stays *approved*
+  while carrying a pending revision, so FR-AUD-01's three-value set and DI-1 both
+  hold. The revision is a separate entity (E7), not a fourth state.
+- **FR-ADM-10b** permits an authorized administrator to create and approve a
+  revision in **one atomic authorized operation** — through the lifecycle, not
+  around it, with every safeguard enforced and no partial publication (DI-3).
+- **No persistence mechanism is selected.** How the effective public version is
+  carried is DDM-8, and DDM-8 is open.
 
 This is the single open question with the largest architectural consequence, which
 is why it is raised here and again under *Risks*. It should be answered **before
@@ -1359,7 +1378,7 @@ is visible.
 
 | ID | Deferred decision | Why deferred | Blocked by / must precede |
 |---|---|---|---|
-| **DD-1** | **Detailed data design** — fields, types, keys, indexes, and how the category set is represented | It depends on unresolved product decisions; guessing now would silently resolve them | **Blocked by OQ-6** (location granularity), **OQ-7** (public fields), **OQ-8/8b** (required fields), **OQ-10** (approved-edit rule — may need a revision state), **OQ-11** (removal), **OQ-13** (rejected retention). **These must be answered before data design starts.** |
+| **DD-1** | **Detailed data design** — fields, types, keys, indexes, and how the category set is represented | It depends on unresolved product decisions; guessing now would silently resolve them | **Blocked by OQ-8/8b** (required fields), **OQ-11** (removal), **OQ-13** (rejected retention). **OQ-6**, **OQ-7**, and **OQ-10** are now **Decided** — OQ-10 committed entity E7 and the revision lifecycle without adding a listing status. **The remainder must still be answered before data design starts.** |
 | **DD-2** | Language and application framework | Technology selection; needs the criteria above applied deliberately | Must satisfy hard requirements 1, 2, and 6 |
 | **DD-3** | Data-store product | Same. The *storage properties* are fixed; the product is not | Must satisfy hard requirements 3, 4, and 5. **Cannot be responsibly chosen until NOQ-2 and NOQ-3** (availability, RPO/RTO) are answered |
 | **DD-4** | Administrator authentication mechanism | The *boundary* is architecture and is settled (C8 gates everything, server-side). The *mechanism* is a technology choice | NFR-SEC-07, NOQ-9 (credential and session strength) |
@@ -1379,9 +1398,10 @@ is visible.
 **The pattern.** Every deferred decision has a **seam** — one component or one
 configuration point where the answer lands. None requires restructuring the
 architecture, which is precisely what makes deferring them responsible rather than
-negligent. **Two exceptions are worth watching: OQ-10**, which may require a new
-lifecycle state and a data-design change, **and OQ-4**, which may at the extreme
-require an entirely new component. Those are the deferred decisions with real
+negligent. **Two exceptions were worth watching: OQ-10**, which required a
+data-design change (entity E7 — though, as decided, **no new lifecycle state**), **and
+OQ-4**, which may at the extreme require an entirely new component. **OQ-10 has since
+been answered**, before data design and at zero data volume. Those are the deferred decisions with real
 architectural teeth.
 
 ---
@@ -1405,7 +1425,8 @@ architectural teeth.
 |---|---|---|---|---|
 | **R-1** | **OQ-9 (anti-spam) stays unanswered into implementation.** An unauthenticated public form with no safeguard is the most exposed surface in the system | **High.** Bulk automated submissions do not merely create noise — they overwhelm the manual review capacity that **assumption A-1 depends on**. This is an attack on the operating model, not just on the data | **Medium–High** | Answer **OQ-9 before build**. The C11 seam is reserved for it. Note that the accessible answers (rate limiting, a honeypot, throttled review) are *not* the obvious ones — a visual challenge would collide with NFR-ACC-01/02 |
 | **R-2** | **OQ-7 (public versus withheld fields) stays unanswered.** The public-field projection in C4 is the control that enforces NFR-PRIV-01/02 — and it is currently **empty** | **High.** A submitter private phone number published without intent is exactly the kind of trust failure `01-vision.md` exists to prevent | **Medium** | Answer **OQ-7 before data design (DD-1)**. Until then the safe default is to treat *nothing* as public until it is explicitly listed |
-| **R-3** | **OQ-10 (edit-after-approval) resolves to "secondary review".** That needs a new lifecycle state and a revision stored separately from live content | **Medium.** A genuine data-design and C6 change — cheap now, expensive once data exists | **Medium** | Answer it **before DD-1**. This is the open question with the largest architectural consequence |
+| **R-3** | ~~**OQ-10 (edit-after-approval) resolves to "secondary review".**~~ **Realised and accepted — OQ-10 Decided 2026-08-02.** It did resolve to secondary review. A revision (E7) is stored separately from the effective public version; **no new lifecycle state was needed** — the listing stays *approved* while carrying a pending revision | **Retired as a risk.** The data-design and C6 change was taken **before DD-1 and before any record exists**, which is the cheap end of the asymmetry this row was written to protect | — | **Closed.** The structural cost was paid deliberately at zero data volume. Superseded by **R-3b** below, which carries the residual risk the decision introduces |
+| **R-3b** | **The FR-ADM-10b atomic administrator operation weakens the two-step protection it is an exception to.** Creating and approving a revision in one action removes the pause between "typed" and "publicly visible", and with a sole maintainer the proposing and approving party are the same person — so the second review is procedural, not independent | **Medium.** The realistic failure is an accidental or unreviewed change to live public information — the same failure the revision lifecycle exists to prevent, reachable through the sanctioned path rather than around it | **Medium** *(rises with administrator count and edit volume)* | **The safeguards are mandatory and are the mitigation, not the intent:** every validation and authorization check that applies to a separately submitted revision applies here (FR-VAL-04, VR-6) — **no privileged bypass and no direct unvalidated overwrite**; **nothing becomes publicly visible before those checks succeed** (DI-10); **any failure leaves the currently approved listing unchanged** (DI-3, NFR-DATA-03). The operation must be a **distinct deliberate action**, never the incidental result of saving (docs/09 OP-6, docs/10 S7). **Revisit when a second administrator joins** — the exception exists because independent review is currently unavailable, not because it is unwanted |
 | **R-4** | **There are no numbers.** NOQ-1 (thresholds), NOQ-2 (availability), NOQ-3 (RPO/RTO), and NOQ-4 (load) are all open, so NFR-PERF-*, NFR-REL-*, NFR-BACK-*, and NFR-SCALE-01 are currently **not testable** — and DD-3 cannot be responsibly closed | **Medium–High.** An architecture cannot be validated against targets that do not exist, and a store product cannot be chosen against an unknown recovery point objective | **High** (they are open today) | Answer NOQ-1 through NOQ-4 before technology selection. Meanwhile the design deliberately assumes "small" (A-5, A-6) and **says so** rather than hiding it |
 | **R-5** | **A-5 and A-6 are wrong** — the corpus or the traffic is materially larger than assumed | **Medium.** Search and browse are the first things to degrade (NFR-PERF-06) | **Low–Medium** | Statelessness allows scaling out; C4 isolates search, so a store-level full-text index or (as a last resort) a dedicated index is an additive change. **Measure before adding** (DD-14) |
 | **R-6** | **The administrative surface is the likeliest place for a security mistake** (TB-3), because it lives inside the same application as the public surface | **High** if breached: every pending and rejected submission | **Low** *(if tested)* | C8 gates server-side on **every** request, including direct-URL and non-browser access. **This boundary must carry explicit automated test coverage** (NFR-MAINT-03) — it is the single highest-value test in the suite |
@@ -1467,7 +1488,7 @@ table above. That table is the primary driver-to-requirement trace.
 |---|---|---|---|
 | **FR-VIS-01..10** (visitor) | C1, C4, C9 | F1 | FR-VIS-02 is guaranteed *by construction* in C4. FR-VIS-10 (report a problem) is **decision-pending on OQ-1** — no component is built for it |
 | **FR-SUB-01..09** (submission) | C2, C5, C7, C9; C11 *(conditional)* | F2 | FR-SUB-04 holds by construction (C5 can only write pending). FR-SUB-08 depends on **OQ-2 / DD-16**; FR-SUB-09 on **OQ-9 / DD-6** |
-| **FR-ADM-01..13** (administrator) | C3, C8, C6, C7, C9 | F3 | FR-ADM-10 depends on **OQ-10** (C6 supports either rule). FR-ADM-12 on **OQ-11**. FR-ADM-13 on **OQ-12** |
+| **FR-ADM-01..13** (administrator, incl. FR-ADM-10b) | C3, C8, C6, C7, C9 | F3 | FR-ADM-10 and FR-ADM-10b are **settled by OQ-10** — C6 implements the revision lifecycle. FR-ADM-12 depends on **OQ-11**. FR-ADM-13 on **OQ-12** |
 | **FR-SRCH-01..09** (search and filter) | C1, C4, C9 | F1 | FR-SRCH-02 depends on **OQ-4 / DD-14** (seam in C4). FR-SRCH-05 on **OQ-6**. FR-SRCH-09 on **OQ-5** |
 | **FR-DATA-01..11** (listing data) | C7, C9, and the data design | — | The detailed shape is **DD-1**, blocked by OQ-6, OQ-7, OQ-8/8b. FR-DATA-11 maps to the public projection in C4 (**OQ-7**) |
 | **FR-VAL-01..06** (validation) | **C7** (shared), C2, C3 | F2, F3 | FR-VAL-04 is satisfied *because* C5 and C6 share C7. FR-VAL-05 depends on **OQ-8/8b** |
@@ -1491,7 +1512,7 @@ table above. That table is the primary driver-to-requirement trace.
 | **Responsive** (RESP-01..04) | Responsive layout in C1 and C2; the administrative interface usable at tablet size and above (C3) | **Device matrix: NOQ-6 (DD-11)** |
 | **Maintainability** (MAINT-01..05) | Enforced layering; one codebase; a domain testable in-process; the category set and rules held as configuration (MAINT-04) | The coding standard is a project decision |
 | **Observability** (OBS-01..06) | C12: structured logs including denied access; a health check; non-technical user errors; the sensitive-data exclusion | **Audit log: OQ-14 (DD-7). Retention: NOQ-7 (DD-13)** |
-| **Data integrity** (DATA-01..06) | A single transactional store; C6 as sole status writer; atomic writes; system-set administrative fields | **Lifecycle completion: OQ-10, OQ-11 (R-3)** |
+| **Data integrity** (DATA-01..06) | A single transactional store; C6 as sole status writer; atomic writes; system-set administrative fields | **Lifecycle completion: OQ-11.** OQ-10 is Decided — the revision lifecycle is defined and adds no listing status; residual risk is **R-3b** |
 | **Backup and recovery** (BACK-01..05) | Scheduled backups to separate, equally protected storage; a documented and **tested** restore | **RPO, RTO, and frequency: NOQ-3 (DD-9)** — and this **gates DD-3** |
 | **Scalability** (SCALE-01..04) | Stateless (so it can scale out); a small corpus; C4 isolating search so that growth is additive. The SCALE-04 warning is honored explicitly: R-1 names review capacity as an attack surface | **Expected load: NOQ-4 (DD-12)** |
 | **Compatibility** (COMP-01..04) | Server-rendered, progressively enhanced, no plug-in required, degrades usably | **Supported matrix: NOQ-6 (DD-11)** |
@@ -1521,7 +1542,7 @@ because a deferred decision without a visible cost is just a decision nobody mad
 | **OQ-7** | Which fields are public versus withheld | **The public projection in C4 — the control that enforces NFR-PRIV-01/02.** Until it is answered, that control is an empty promise (**R-2**) | **Before data design** |
 | **OQ-8 / OQ-8b** | Required submission fields; the contact-method minimum | **The rule set in C7.** Configuration, not structure | Before build |
 | **OQ-9** | The anti-spam safeguard for the public form | **C11.** The seam is fixed; the mechanism is open. Bulk submissions attack the manual-review capacity that A-1 assumes (**R-1**) | **Before build** |
-| **OQ-10** | Edit after approval: publish immediately, or require secondary review? | **C6 and DD-1.** "Secondary review" adds a lifecycle state and a revision stored separately from live content (**R-3**) — the largest architectural consequence of any open question | **Before data design** |
+| ~~**OQ-10**~~ **Decided 2026-08-02** | Edit after approval: publish immediately, or require secondary review? | **Answered: secondary review.** A pending revision (E7) is stored separately from the effective public version and is never public (DI-10); the approved listing stays public at its last approved version; at most one pending revision per listing (DI-11). **No lifecycle state was added.** FR-ADM-10b permits a safeguarded atomic administrator operation (**R-3b**). Storage mechanism remains **DDM-8, open** | ~~Before data design~~ — **answered before DD-1** |
 | **OQ-11** | Can an administrator unpublish or remove an approved listing? | **The C6 state machine** (FR-ADM-12, FR-MOD-06, NFR-DATA-02) | Before data design |
 | **OQ-13** | Retention of rejected submissions | **Data design plus a purge capability.** The tension with NFR-PRIV-05 must resolve *both* — retention **and** a period (**R-9**) | Before data design |
 | **OQ-14** | Audit logging of administrator actions | **C10.** Cheap to add (principle 9). Answering "no" carries a real stakeholder cost (`02`: administrators need audit trails) | Before build |
@@ -1543,10 +1564,18 @@ plus configuration), **OQ-12** (duplicate resolution — an administrator proced
 supported by the existing C6 actions), and **OQ-15** (abuse escalation — a human
 process, not a component).
 
-> **The shortest useful summary of this section.** Five open questions — OQ-6, OQ-7,
-> OQ-10, OQ-13, and NOQ-3 — block work that is about to start: data design and store
-> selection. Two more (OQ-9 and NOQ-5) are cheap now and expensive later. Those seven
-> are the ones to take to the product owner **first**.
+> **The shortest useful summary of this section.** Of the seventeen questions in the
+> table above, **five are Decided** — OQ-6, OQ-7, OQ-10, NOQ-2, and NOQ-3. **Twelve
+> remain open.**
+>
+> **Data design (DD-1) waits on OQ-8/8b, OQ-11, and OQ-13**, and those three are what
+> keep **ADR-006 Blocked**. The store-selection preconditions this document set — NOQ-2
+> and NOQ-3, via DD-3 — are answered; the technology selection itself is not.
+>
+> **Two are cheap now and expensive later, and should be answered early: NOQ-5**
+> (conformance is unverifiable against an unnamed standard) **and OQ-9** (answered late
+> it gets chosen hastily, and a mechanism chosen under pressure can collide with
+> NFR-ACC-01/02). Those are the ones to take to the product owner **next**.
 
 ---
 
@@ -1562,7 +1591,7 @@ applied — judged against *Technology-selection criteria* above.
 | **ADR-003** | Data-store product | Hard requirements 3, 4, 5; DD-3. **Blocked by NOQ-2 and NOQ-3** |
 | **ADR-004** | Administrator authentication mechanism | DD-4, NOQ-9 |
 | **ADR-005** | Hosting platform and runtime model | DD-5. Must not reopen the rejected decomposition of Option D |
-| **ADR-006** | Listing data model and lifecycle states | DD-1. **Blocked by OQ-6, OQ-7, OQ-8/8b, OQ-10, OQ-11, OQ-13** |
+| **ADR-006** | Listing data model and lifecycle states | DD-1. **Still Blocked by OQ-8/8b, OQ-11, OQ-13** (OQ-6, OQ-7, OQ-10 Decided) |
 | **ADR-007** | Search approach | DD-14. **Blocked by OQ-4.** A dedicated index requires *measured* justification |
 | **ADR-008** | Anti-spam approach | DD-6. **Blocked by OQ-9.** Must be weighed against NFR-ACC-01/02 |
 | **ADR-009** | Audit-logging approach | DD-7. **Blocked by OQ-14** |
@@ -1597,8 +1626,12 @@ rejected on the requirements rather than on taste, while the genuinely useful le
 of the mini lab are carried forward in full: moderation-first works, the core loop is
 small, and a pending status plus an approved-only read filter is the whole trick.
 
-**Sixteen decisions are deliberately deferred, each behind a named seam.** Seven of
-them (OQ-6, OQ-7, OQ-9, OQ-10, OQ-13, NOQ-3, and NOQ-5) should be answered before
-data design and technology selection begin — not because the architecture cannot
-proceed without them, but because answering them *later* is what would make them
-expensive.
+**Sixteen implementation decisions (DD-1–DD-16) are deliberately deferred, each behind
+a named seam.** They wait on product and non-functional questions that are the product
+owner's to answer.
+
+**Of those questions, OQ-6, OQ-7, OQ-10, NOQ-2, and NOQ-3 are Decided.** **OQ-8/8b,
+OQ-11, and OQ-13 are outstanding, and they block data design (DD-1) and ADR-006.**
+**OQ-9 and NOQ-5 are cheap now and expensive later**, and should be answered early —
+not because the architecture cannot proceed without them, but because answering them
+*later* is what would make them expensive.

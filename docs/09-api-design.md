@@ -55,8 +55,9 @@ a response body.
   boundary, the trust boundaries, and the rule that the public path cannot express a
   non-approved query.
 - [`docs/08-data-model.md`](./08-data-model.md) — entities `E1`–`E7`, invariants
-  `DI-1`–`DI-9`, validation rules `VR-1`–`VR-7` and slots `VR-S1`–`VR-S6`, and the
-  **eleven seams `S-1`–`S-11`** this document must not close.
+  `DI-1`–`DI-11`, validation rules `VR-1`–`VR-7` and slots `VR-S1`–`VR-S6`, and the
+  **eleven seams `S-1`–`S-11`** this document must not close. `S-5` is **resolved for
+  `OQ-10`** and **still open for `OQ-11`**.
 
 ---
 
@@ -366,28 +367,48 @@ together with `S-8` (`OQ-14`), since choosing the lossy shape discards history t
 | **Errors / empty states** | *Validation failure* (field-level); *save failure* (safe retry, input preserved); *not found*; *unauthorized*. |
 
 **`OP-6` changes content, never status.** Editing a pending record leaves it pending;
-editing an approved record leaves it approved. Status changes belong exclusively to
-`OP-7` and `OP-8`. Collapsing "edit" and "approve" into one operation — "save and
-publish" — would make it possible to publish by accident while correcting a typo, and
-would put two decisions behind one action. They stay separate.
+editing an approved listing leaves it approved. Status changes belong exclusively to
+`OP-7` and `OP-8`. **The general safety rule stands: publication is never accidental
+or implicit.** Collapsing "edit" and "approve" into one operation — "save and publish"
+— as an *ordinary* editing behavior would make it possible to publish by accident while
+correcting a typo, and would put two decisions behind one action. For ordinary editing
+they stay separate.
 
-**The seam this operation must not close (`S-5` / `OQ-10`).** What happens when an
-administrator edits an **already-approved** listing? Two answers are live, and they
-produce *different APIs*:
+**What `OP-6` writes when the target is an approved listing (`S-5` / `OQ-10` —
+Decided 2026-08-02).** It writes a **pending revision**, never the effective public
+version. The approved listing remains publicly visible at its last approved version
+throughout; the pending revision is never returned by any public read path (`DI-10`);
+approving the revision makes its information the effective public version (`OP-10`);
+rejecting it leaves the approved listing unchanged. A listing has **at most one pending
+revision at a time** (`DI-11`) — `OP-6` against a listing that already has one is
+rejected, not queued, and does not disturb the pending revision or the approved
+listing.
 
-- **Publish immediately** — `OP-6` writes the live record; the public sees the change at
-  once. No new operation, no new entity.
-- **Secondary review** — the edit becomes a *proposed change* that is not yet live. The
-  public must keep seeing the old version while the new one awaits review. That requires
-  `docs/08`'s conditional entity `E7`, **a new lifecycle state**, and **at least one new
-  operation** (approve-a-revision) — plus an administrative projection that can show both
-  the live and proposed versions of the same record.
+**The named exception — `FR-ADM-10b`, and it is narrow.** An authorized administrator
+may create and approve a revision within **one atomic authorized operation**. This is a
+path *through* the revision lifecycle, not around it, and it is permitted only on these
+terms:
 
-**This document does not choose, and it does not hedge by building the general case.**
-Building revision support "just in case" would resolve `OQ-10` in the expensive direction
-by default. `OP-6` is specified for the *approved-listing-edit-publishes-immediately*
-reading **only as far as `FR-ADM-10` already permits**, and the alternative is recorded
-as a conditional operation `OP-10` below.
+- **Only an authorized administrator may use it.** No other actor has any edit path
+  (`FR-AUTH-01`, `FR-VIS-09`).
+- **Revision creation and approval may occur in one atomic operation** — one authorized
+  action, deliberately taken.
+- **Every applicable validation and authorization check remains mandatory**, exactly as
+  for a separately submitted revision (`FR-VAL-04`, `VR-6`, `AV-4`). There is no laxer
+  path and no privileged bypass.
+- **No revised information becomes publicly visible before those checks succeed**
+  (`DI-10`).
+- **If any required check fails, the currently approved listing remains unchanged** —
+  the operation completes fully or not at all, and is never partially public (`DI-3`,
+  `NFR-DATA-03`).
+- **The exception does not permit direct unvalidated overwriting** of the effective
+  public version, and it does not make publication implicit: the combined action is
+  itself the deliberate publication decision.
+
+**This document selects no persistence mechanism.** Whether the effective public version
+is carried by updating a record, writing a version record, moving a pointer, copying
+content, or retaining immutable history is **`DDM-8`, which remains open**. `OP-10` is
+specified below as a committed operation.
 
 ---
 
@@ -455,11 +476,28 @@ designed without also changing the lifecycle, which is an approved requirement. 
 recorded as conditional, and the consequence is stated so that whoever decides `OQ-11`
 knows it is not a permissions toggle.
 
-### OP-10 *(conditional — `S-5` / `OQ-10`)* — Approve a proposed revision
+### OP-10 *(committed — `S-5` resolved for `OQ-10`)* — Approve a pending revision
 
-Exists **only if** `OQ-10` resolves to *secondary review*. Would accept a revision
-identity and transition the proposed change to live. Requires `docs/08` entity `E7`.
-**Not designed here.**
+**Committed by `OQ-10` (Decided 2026-08-02).** Accepts a revision identity and makes
+that revision's information the **effective public version** of its listing. Requires
+`docs/08` entity `E7`.
+
+| | |
+|---|---|
+| **Who** | Administrator (authenticated) |
+| **Journeys** | A6 (update an existing listing) |
+| **Provides** | The revision identity. |
+| **Returns** | Confirmation of the **resulting state** (`FR-CONF-04`) — that the revision's information is now the effective public version. |
+| **Validation** | The revision content must satisfy the same rules as a public submission (`FR-VAL-04`, `VR-6`) — approving invalid content would publish it. |
+| **Authorization** | **Required.** |
+| **Errors / empty states** | *Validation failure*; *not found*; *unauthorized*; *no pending revision*; *save failure* (the approved listing is left unchanged). |
+
+**Rejecting a pending revision leaves the approved listing unchanged** and still
+public — it is not a removal, an unpublishing, or a content change. Retention of a
+rejected revision is **`OQ-13`**, which remains open and is not decided here.
+
+**Not designed in detail here:** the request and response shapes, and the persistence
+mechanism by which the effective public version changes (**`DDM-8`, open**).
 
 ### "Read allowed status values" — evaluated, and *not* included
 
@@ -839,7 +877,7 @@ prefixed `AQ`.
 | `OQ-7` | Which fields are public vs. withheld? | **The public projection's membership.** The single largest open question in this document. | `S-2` |
 | `OQ-8` / `OQ-8b` | Required submission fields; contact-method minimum? | `OP-3`'s validation rules (`VR-S1`–`VR-S3`). | `S-1` |
 | `OQ-9` | Anti-spam safeguard? | Whether `OP-3` has an abuse-refusal outcome and what it retains. | `S-9` |
-| `OQ-10` | Edit-after-approval: publish immediately, or secondary review? | Whether `OP-10` exists, and whether `OP-6` writes live content or a proposed revision. | `S-5` |
+| ~~`OQ-10`~~ **Decided** | Edit-after-approval: publish immediately, or secondary review? | **Answered:** secondary review. `OP-10` **exists and is committed**; `OP-6` writes a **pending revision** when the target is an approved listing. The approved listing stays publicly visible at its last approved version; the pending revision is never public (`DI-10`); at most one pending revision per listing (`DI-11`). `FR-ADM-10b` permits an authorized administrator to create and approve a revision in one atomic authorized operation, with every safeguard enforced. | `S-5` — **resolved for `OQ-10`**; **open for `OQ-11`** |
 | `OQ-11` | May administrators unpublish or remove? | Whether `OP-9` exists — **and whether `FR-AUD-01`'s three-status set survives**. | `S-5` |
 | `OQ-12` | How are duplicates resolved at review? | Whether any "duplicate of" concept enters the API; interacts with idempotency. | `S-10` |
 | `OQ-13` | Are rejected submissions retained or purged? | Whether any purge-triggering operation exists, and who may invoke it. | `S-11` |
@@ -952,9 +990,12 @@ belongs to a later specification.
 | `E1` listing record | The entity behind every operation |
 | `E2` category set | `OP-11` |
 | `E3` administrator | The authenticated identity; **never a request field** |
-| `E4`–`E7` conditional entities | Conditional operations and obligations only |
+| `E4`, `E5`, `E6` conditional entities | Conditional operations and obligations only |
+| `E7` listing revision | **Committed** — `OP-6` writes it; `OP-10` approves it (`OQ-10`) |
 | `S-7` review-data shape | Whether the administrative projection exposes review **history** — `OP-5`. Not committed. |
 | `DI-5` (non-approved unreachable publicly) | **P2**; `AP-1`; `AP-6`; `OP-2` |
+| `DI-10` (pending revision never public) | **P2**; `AP-1`; `OP-1`, `OP-2`; never returned by any public read path |
+| `DI-11` (at most one pending revision) | `OP-6` — a second concurrent revision is rejected, not queued |
 | `DI-1`/`DI-2` (one status; defined transitions) | `OP-7`/`OP-8`; administrative idempotency |
 | `DI-3` (atomic) | **P7** |
 | `VR-1..VR-7` | `AV-1`–`AV-8` |
@@ -1026,9 +1067,9 @@ conditional on open questions.
 The public read surface (`OP-1` retrieve approved listings, `OP-2` retrieve one approved
 listing, `OP-11` retrieve the category set) cannot write and **cannot express a
 non-approved query**. The submission surface (`OP-3`) cannot read and **cannot express an
-approved record**. The administrative surface (`OP-4`–`OP-8`, plus conditional `OP-9`
-remove/unpublish and `OP-10` approve-a-revision) is the only one that spans both, and the
-only one behind authentication.
+approved record**. The administrative surface (`OP-4`–`OP-8` and `OP-10` approve-a-revision, plus conditional
+`OP-9` remove/unpublish) is the only one that spans both, and the only one behind
+authentication.
 
 That asymmetry is the security argument in one line: **a defect in the public surface
 cannot publish anything, and a defect in the submission surface cannot expose anything.**

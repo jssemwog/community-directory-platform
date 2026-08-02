@@ -49,7 +49,7 @@ requirement, and removes none.
 | `docs/05-functional-requirements.md` | `FR-*` — every issue traces to at least one. |
 | `docs/06-non-functional-requirements.md` | `NFR-*` — and the `NOQ-*` questions that block several of them. |
 | `docs/07-system-architecture.md` | Components `C1`–`C12`; the recommended shape (Option A); deferred decisions `DD-1`–`DD-16`; the ADRs to write. |
-| `docs/08-data-model.md` | Entities `E1`–`E7`; integrity invariants `DI-1`–`DI-9`; **the named seams `S-1`–`S-11`**; deferred decisions `DDM-1`–`DDM-10`. |
+| `docs/08-data-model.md` | Entities `E1`–`E7`; integrity invariants `DI-1`–`DI-11`; **the named seams `S-1`–`S-11`**; deferred decisions `DDM-1`–`DDM-10`. |
 | `docs/09-api-design.md` | Operations `OP-1`–`OP-11`; the three surfaces; `AQ-*`. |
 | `docs/10-ui-design.md` | Screens `S1`–`S7`; empty, error, validation, loading, and confirmation states. |
 | `docs/11-test-strategy.md` | **Boundary invariants `BI-1`–`BI-9`**; test levels; the three release-readiness categories; the cannot-test-yet register. |
@@ -153,13 +153,13 @@ the cost written down*. The distinction is marked in every row below.
 | Gate | Questions | Blocks | Why it cannot be worked around |
 |---|---|---|---|
 | **`DG-0`** — process | None (no product decision required) | Nothing | The stack-neutral half of `P0` can start **today**. |
-| **`DG-1`** — **data design** | **Hard blockers:** **`OQ-6`** location granularity · **`OQ-7`** public vs. private fields · **`OQ-8` / `OQ-8b`** required fields and contact minimum · **`OQ-10`** edit-after-approval · **`OQ-11`** removal/unpublish · **`OQ-13`** rejected retention.<br>**Shaping inputs:** **`OQ-4`** searchable fields and matching mode (`S-4`, `DDM-4`) · **`OQ-5`** category model — cardinality and curation (`S-3`, `DDM-3`) | **All of `P1`.** Transitively `P2`, `P3`, `P4`. | `docs/07` `DD-1` states the six hard blockers outright: they **must be answered before data design starts**. `OQ-6` retrofitted onto a populated directory means backfilling every record; `OQ-10` may add a lifecycle state and a revision entity (`S-5`); `OQ-7` is the control that `BI-6` and `NFR-PRIV-01` rest on — **until it is answered, the privacy commitment is an empty promise** (`docs/07` `R-2`).<br>**`OQ-4` and `OQ-5` shape rather than block:** each lands on a named data-model seam (`S-4`, `S-3`), so the *rule* can be built and the *representation* deferred — but a model built without considering them will be retrofitted, not merely configured. |
+| **`DG-1`** — **data design** | **Hard blockers:** ~~**`OQ-6`**~~ **Decided** · ~~**`OQ-7`**~~ **Decided** · **`OQ-8` / `OQ-8b`** required fields and contact minimum · ~~**`OQ-10`**~~ **Decided** (edit-after-approval) · **`OQ-11`** removal/unpublish · **`OQ-13`** rejected retention.<br>**Shaping inputs:** **`OQ-4`** searchable fields and matching mode (`S-4`, `DDM-4`) · **`OQ-5`** category model — cardinality and curation (`S-3`, `DDM-3`) | **All of `P1`.** Transitively `P2`, `P3`, `P4`. | `docs/07` `DD-1` states the six hard blockers outright: they **must be answered before data design starts**. `OQ-6` retrofitted onto a populated directory means backfilling every record; `OQ-10` **added a revision entity (`E7`) and no lifecycle state** (`S-5`, resolved for `OQ-10`), decided before `P1` and at zero data volume; `OQ-7` is the control that `BI-6` and `NFR-PRIV-01` rest on — **until it is answered, the privacy commitment is an empty promise** (`docs/07` `R-2`).<br>**`OQ-4` and `OQ-5` shape rather than block:** each lands on a named data-model seam (`S-4`, `S-3`), so the *rule* can be built and the *representation* deferred — but a model built without considering them will be retrofitted, not merely configured. |
 | **`DG-2`** — **technology** | **Hard blockers (store selection, `ADR-003`):** **`NOQ-2`** availability · **`NOQ-3`** backup / RPO / RTO.<br>**Shaping inputs (technology selection, `ADR-002`, `ADR-005`):** **`NOQ-1`** performance thresholds · **`NOQ-4`** expected first-release load | **The `P0` scaffold** and all of `P1`. | **The store cannot be chosen against `NOQ-2` / `NOQ-3`** — `docs/07` `DD-3` is explicit that a store **cannot be responsibly chosen against an unknown recovery point objective**, because the objective determines the store's required *capability*, not merely a schedule. **`NOQ-1` and `NOQ-4` do not block the choice; they inform it** (`docs/07` files both under *before technology selection*). They must be **considered and carried as a stated assumption** — `PA-1` is exactly that assumption — because everything here assumes "small," and if that is wrong, this is the first decision to revisit (`DD-12`). |
 | **`DG-3`** — **build-time** | **Hard blockers:** **`OQ-9`** anti-spam · **`OQ-14` + `NOQ-8`** audit logging — *one decision, taken together* · **`NOQ-9`** administrator credential and session strength.<br>**Shaping inputs:** **`NOQ-5`** accessibility standard *(early — cheap now, expensive later)* · **`NOQ-6`** browser/device matrix | `P3` (`OQ-9`), `P4` (`NOQ-9`, `OQ-14`/`NOQ-8`), and the *verifiability* — not the building — of `P2` (`NOQ-5`, `NOQ-6`) | **`OQ-14` / `NOQ-8` is the asymmetric one.** Audit history not captured cannot be reconstructed later — every administrative action taken before a "yes" is permanently unlogged (`docs/11`). **`NOQ-5` and `NOQ-6` shape rather than block:** the accessibility *behaviors* and responsive behavior are built and tested regardless; only the **conformance claim** and the **support matrix** wait. |
 | **`DG-4`** — **release** | **`NOQ-7`** log retention · **testing depth** · written acceptance of every Category 3 blocked item | The release decision, not the build. | `docs/11` Category 3: these are **unmeasurable, not optional**. Each is a risk a person accepts **in writing**, or resolves. |
 
 > **The shortest useful summary.** `docs/07` already identified the seven questions to take
-> to the product owner first — **`OQ-6`, `OQ-7`, `OQ-10`, `OQ-13`, `NOQ-3`, `OQ-9`,
+> to the product owner first — **~~`OQ-6`~~, ~~`OQ-7`~~, ~~`OQ-10`~~, `OQ-13`, ~~`NOQ-3`~~, `OQ-9`,
 > `NOQ-5`**. This plan adds only the consequence: **until `DG-1` and `DG-2` clear, the only
 > implementation work that can honestly proceed is the stack-neutral half of Phase 0.**
 > That is not a scheduling inconvenience to route around. It is the plan telling the truth.
@@ -228,8 +228,8 @@ every gate owned and dated.
 > scaffolded, and `P1` cannot be started, until the product owner answers `DG-1` and
 > `DG-2`. Teams under delivery pressure will be tempted to "start on the model and adjust
 > later." **Adjusting a location field later means backfilling every record** (`OQ-6`), and
-> adjusting `OQ-10` later means introducing a lifecycle state and a revision entity into a
-> live moderation workflow (`S-5`). The temptation is exactly what the gates exist to
+> adjusting `OQ-10` later would have meant introducing a revision entity into a live
+> moderation workflow (`S-5`) — both were instead answered before `P1`. The temptation is exactly what the gates exist to
 > resist.
 
 ---
@@ -239,7 +239,7 @@ every gate owned and dated.
 **Goal.** The entities, the status model, and the integrity invariants — the layer every
 other phase stands on. **Hard-blocked by `DG-1` and `DG-2`.**
 
-**Sources.** `docs/08` (entities `E1`–`E7`, integrity invariants `DI-1`–`DI-9`, seams
+**Sources.** `docs/08` (entities `E1`–`E7`, integrity invariants `DI-1`–`DI-11`, seams
 `S-1`–`S-11`); `docs/07` `C9`; `docs/11` (`BI-7`, `BI-8`).
 
 | Work | Delivers | Notes |
@@ -250,13 +250,14 @@ other phase stands on. **Hard-blocked by `DG-1` and `DG-2`.**
 | Identity, timestamps, integrity rules | `DI-6`–`DI-9` | Identity is stable and content-independent (`DDM-2` stays open — that is a physical choice). |
 | The **public/private field boundary as a projection**, enforced server-side | `S-2`, `DI-5` | **The mechanism (`DDM-6`) stays open**; the *obligation* does not. Whether withheld fields live on the same record or a separate structure is not decided here. |
 | Category set representation | `S-3` | Follows `OQ-5`. Configuration or data — `DDM-3` decides *after* the product answer. |
-| Seams left **unbuilt**, and recorded as unbuilt | `S-5`, `S-7`, `S-8`, `S-9`, `S-10`, `S-11` | Revision, audit, anti-spam, duplicate, and retention structures exist **only if** the corresponding question resolves to "yes." `IP-7`. |
+| The **revision lifecycle** — entity `E7`, `DI-10`, `DI-11` | `FR-ADM-10`, `FR-ADM-10b`, `S-5` (resolved for `OQ-10`) | **Committed by `OQ-10`.** A pending revision is never publicly visible; the approved listing stays public at its last approved version; at most one pending revision per listing. **The storage mechanism is `DDM-8` and stays open.** |
+| Seams left **unbuilt**, and recorded as unbuilt | `S-5` (**`OQ-11` half only**), `S-7`, `S-8`, `S-9`, `S-10`, `S-11` | Removal, audit, anti-spam, duplicate, and retention structures exist **only if** the corresponding question resolves to "yes." `IP-7`. |
 
 **Test focus** (`docs/11`, unit and integration levels): every `DI-*` invariant; transition
 legality, including **illegal transitions rejected**; atomicity; the projection — *which
 fields leave the system, for whom*.
 
-**Exit criteria.** `DI-1`–`DI-9` proven. `BI-7` and `BI-8` proven at the level they are
+**Exit criteria.** `DI-1`–`DI-11` proven. `BI-7` and `BI-8` proven at the level they are
 enforced. No entity or field exists that a `DG-1` answer did not authorise.
 
 ---
@@ -356,7 +357,8 @@ resulting state honestly — *pending*, not *published*.
 | `OP-6` (edit content) | `A3` | |
 | `OP-7` (approve), `OP-8` (reject) | `A4`, `A5` | The transition through `C6`, atomic (`BI-7`). |
 | `S5`, `S6`, `S7` | The administrative screens, with their states | |
-| `OP-9` (remove/unpublish), `OP-10` (approve a revision) | **Conditional — built only if `OQ-11` / `OQ-10` say so** | `S-5`. **`OP-9` does not exist today.** Do not build it speculatively. |
+| `OP-10` (approve a pending revision) | **Committed — `OQ-10` Decided** | `S-5` resolved for `OQ-10`. Built in `P4` with `S7`'s two-version view. |
+| `OP-9` (remove/unpublish) | **Conditional — built only if `OQ-11` says so** | `S-5`. **`OP-9` does not exist today.** Do not build it speculatively. |
 | Audit emission (`C10`) | **Conditional — `OQ-14` + `NOQ-8` / `DG-3`** | `S-7`, `S-8`, `DD-7`. Resolved as **one decision**, not two. |
 
 **Build `BI-5` first, and prove it before the capability behind it exists.** No
@@ -464,7 +466,7 @@ documentation chain was delivered (`PA-5`), and preserved deliberately.
 
 **What a reviewer is responsible for, in priority order:**
 
-1. **Does it breach an invariant?** `BI-1`–`BI-9`, `DI-1`–`DI-9`. This outranks everything
+1. **Does it breach an invariant?** `BI-1`–`BI-9`, `DI-1`–`DI-11`. This outranks everything
    below it, including style, structure, and taste.
 2. **Does it silently answer an open question?** A field name, a default, a status value, a
    retention period, an ordering — each can quietly close a question the product owner has
@@ -553,7 +555,7 @@ invent.**
 
 | Checkpoint | When | What it asserts |
 |---|---|---|
-| **`RC-1`** — foundation ready | End of `P1` | `DI-1`–`DI-9`, `BI-7`, `BI-8` proven. Every entity authorised by a `DG-1` answer. |
+| **`RC-1`** — foundation ready | End of `P1` | `DI-1`–`DI-11`, `BI-7`, `BI-8` proven. Every entity authorised by a `DG-1` answer. |
 | **`RC-2`** — public path ready | End of `P2` | `V1`–`V7`. `BI-1`, `BI-3`, `BI-4`, `BI-6` proven — including **`BI-4`'s equivalence test**. Empty states distinguishable. |
 | **`RC-3`** — write and moderation paths ready | End of `P3`, `P4` | `L1`–`L4`, `A1`–`A7`. `BI-2`, `BI-5` proven. Confirmations state resulting states. |
 | **`RC-4`** — **release decision** | End of `P5` | Below. |
@@ -626,7 +628,7 @@ document lying. **A stale document is worse than no document**, because it is tr
 
 | ID | Risk | Consequence | Response |
 |---|---|---|---|
-| `IR-1` | **Gates are bypassed under delivery pressure** — "we'll assume and adjust." | The product decision gets made by an engineer, invisibly. `OQ-6` means backfilling every record; `OQ-10` means retrofitting a lifecycle state into a live workflow. | The `blocked` label; the decision log; reviewer responsibility #2. **The most likely failure of this plan, by a wide margin.** |
+| `IR-1` | **Gates are bypassed under delivery pressure** — "we'll assume and adjust." | The product decision gets made by an engineer, invisibly. `OQ-6` would have meant backfilling every record; `OQ-10` would have meant retrofitting a revision entity into a live workflow. **Both were answered through the workflow instead, before `P1`.** | The `blocked` label; the decision log; reviewer responsibility #2. **Still the most likely failure of this plan, by a wide margin** — `OQ-8`/`OQ-8b`, `OQ-11`, and `OQ-13` are the ones now exposed to it. |
 | `IR-2` | **The public projection is built as a convention, not a control.** | `BI-1`, `BI-6`, and `NFR-PRIV-01/02` become promises with nothing behind them (`docs/07` `R-2`). | Build it in `P1`/`P2` as a single enforced projection (`C4`); attack it at the operation level. |
 | `IR-3` | **Invariants tested only through the UI.** | The suite proves the UI hides the violation, not that the system forbids it. | `BI-9`, `IP-5`; a merge-blocking review item. |
 | `IR-4` | **`BI-4`'s equivalence test is skipped** — it is an absence, and absences are easy to not notice. | Existence of pending/rejected records leaks by message, count, shape, or timing. | Its own issue; second reviewer. |
@@ -654,7 +656,7 @@ document lying. **A stale document is worse than no document**, because it is tr
 | `OQ-7` | **Public versus private fields?** | **`DG-1`** | **`P1` and `P2`.** The projection is the control `NFR-PRIV-01/02` rests on. |
 | `OQ-8` / `OQ-8b` | **Required submission fields; contact minimum?** | **`DG-1`** | `P3` validation *rules* (`S-1`). The *behavior* is built regardless. |
 | `OQ-9` | **Anti-spam behavior?** | **`DG-3`** | The `C11` mechanism (`S-9`, `DD-6`). **Its absence cannot be asserted correct either.** |
-| `OQ-10` | **Edit after approval — immediate, or secondary review?** | **`DG-1`** | `P1` (`S-5` — may add a lifecycle state and a revision entity) and `OP-10`. **The largest architectural consequence of any open question.** |
+| ~~`OQ-10`~~ **Decided 2026-08-02** | **Edit after approval — immediate, or secondary review?** | **`DG-1`** | **Answered: secondary review.** `P1` gains entity `E7` and invariants `DI-10`/`DI-11`; **no lifecycle state was added**; `OP-10` is committed. Residual risk `R-3b` (the `FR-ADM-10b` atomic operation). **`DG-1` still Unresolved.** |
 | `OQ-11` | **Removal / unpublish?** | **`DG-1`** | `P1` status model; **`OP-9` does not exist today.** |
 | `OQ-12` | Duplicate resolution? | — | Nothing structural. An administrator procedure; an exploratory charter. |
 | `OQ-13` | **Rejected-submission retention?** | **`DG-1`** | `P1` (`S-11`) and a purge capability. Must resolve **both** retention *and* period (`NFR-PRIV-05`). |
@@ -681,10 +683,11 @@ Deliberately **not built** in the MVP. Listed so their absence reads as a decisi
 
 | Area | Status | Source |
 |---|---|---|
-| `OP-9` (remove/unpublish), `OP-10` (approve a revision) | **Conditional.** Built **only if** `OQ-11` / `OQ-10` resolve yes. | `docs/09`, `S-5` |
+| `OP-10` (approve a pending revision) | **Committed** — `OQ-10` Decided. | `docs/09`, `S-5` |
+| `OP-9` (remove/unpublish) | **Conditional.** Built **only if** `OQ-11` resolves yes. | `docs/09`, `S-5` |
 | Audit entity and emission (`E5`, `C10`) | **Conditional** — `OQ-14` **and `NOQ-8`**, taken together. | `docs/07` `DD-7`, `docs/08` `S-7`, `S-8` |
 | Anti-spam mechanism (`C11`, `E6`) | **Seam only.** The mechanism awaits `OQ-9`. | `docs/07` `DD-6`, `S-9` |
-| Revision storage (`E7`), duplicate representation, retention/purge | **Conditional** — `OQ-10`, `OQ-12`, `OQ-13`. | `S-5`, `S-10`, `S-11` |
+| Revision **storage** (`DDM-8` — the mechanism, not the entity), duplicate representation, retention/purge | **Open** — `DDM-8`, `OQ-12`, `OQ-13`. `E7` itself is **committed** by `OQ-10`; how it is persisted is not. | `S-5`, `S-10`, `S-11` |
 | Outcome notification (email) | **Not built** — `OQ-2`. Adds an outbound dependency, a failure mode, and a privacy surface. | `DD-16` |
 | Redundancy, horizontal scaling, caching, a dedicated search index | **Not built.** Stateless instances preserve every option at no cost today. A search index **must be justified by measurement, never by preference**. | `docs/07` `DD-8`, `DD-14` |
 | API versioning | No scheme adopted. One first-party client. | `docs/09` `AQ-5` |

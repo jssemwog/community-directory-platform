@@ -426,18 +426,33 @@ Each journey below uses this structure:
 - **Main success path:**
   1. The administrator opens the approved listing.
   2. The administrator edits its content to correct/update it.
-  3. The system validates and saves; the public listing reflects the update.
+  3. The system validates the change and records it as a **pending revision**. The
+     approved listing **remains publicly visible at its last approved version**, and
+     the pending revision is **not publicly visible**.
+  4. The revision is reviewed. On **approval**, its information becomes the
+     **effective public version**. On **rejection**, the approved listing remains
+     **unchanged** and still public.
 - **Alternate paths:**
   - No change is needed → the administrator leaves the listing as-is.
+  - **Atomic administrator operation** → an authorized administrator creates and
+    approves the revision within **one atomic authorized operation**, provided every
+    validation, authorization, and publication safeguard succeeds. This runs *through*
+    the revision lifecycle, not around it.
+  - The listing **already has a pending revision** → no second revision enters the
+    pending state until the existing one is resolved.
 - **Failure or exception paths:**
-  - Edited data fails validation → the administrator corrects it.
-- **Postcondition:** The approved listing is up to date.
+  - Edited data fails validation → the administrator corrects it. No revised
+    information becomes publicly visible, and the approved listing is unchanged.
+  - A required check fails during the atomic operation → the operation has no effect
+    and the **currently approved listing remains unchanged**.
+- **Postcondition:** The approved listing is up to date, or the approved listing is
+  unchanged and a revision is pending or was rejected.
 - **Related MVP capabilities:** Administrator editing; listing details; public
   browsing.
-- **Open questions:** Does an edit to an approved listing publish immediately or
-  need secondary review (MVP open question #10)? Can an administrator
-  **unpublish or remove** an approved listing in the MVP (MVP open question #5)?
-  Both are recorded, not decided.
+- **Open questions:** Can an administrator **unpublish or remove** an approved
+  listing in the MVP (MVP open question #5)? Recorded, not decided. *(Edit-after-
+  approval — MVP open question #10 — is now **Decided**; see `docs/05` `FR-ADM-10`,
+  `FR-ADM-10b` and `docs/13`.)*
 
 ### A7. Handle duplicate, incomplete, misleading, or abusive content
 
@@ -451,8 +466,9 @@ Each journey below uses this structure:
 - **Main success path:**
   1. The administrator classifies the problem.
   2. The administrator applies the appropriate available action: edit to fix
-     (A3/A6), reject (A5), or — for existing listings — take a corrective action
-     subject to the open questions in A6.
+     (A3/A6) — which for an approved listing means proposing a revision — reject
+     (A5), or take a corrective action subject to the removal/unpublish open question
+     in A6 (`OQ-11`).
 - **Alternate paths:**
   - Incomplete but fixable → the administrator completes it via edit, then
     approves.
@@ -552,8 +568,11 @@ choices implied):
    and whether at least one contact method is enforced (MVP open question #3).
 9. **Anti-spam for the public form (L2).** Whether any safeguard exists for an
    unauthenticated submission form.
-10. **Edit-after-approval (A6).** Immediate publish vs. secondary review (MVP
-    open question #10).
+10. ~~**Edit-after-approval (A6).**~~ **Decided (`OQ-10`, MVP open question #10):**
+    secondary review. Changes to an approved listing are held as a **pending revision**
+    that is never publicly visible; the approved listing stays public at its last
+    approved version; approval makes the revision the effective public version;
+    rejection leaves the approved listing unchanged.
 11. **Remove/unpublish approved listings (A6/A7).** Whether administrators can
     remove or unpublish public listings in the MVP (MVP open question #5).
 12. **Duplicate resolution (A7).** How duplicates are resolved during review (MVP
