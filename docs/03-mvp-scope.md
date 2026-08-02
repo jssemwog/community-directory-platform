@@ -268,8 +268,15 @@ review turnaround time) define "success" for the first release.
 8. **Duplicate submissions** — How are duplicate or near-duplicate listing
    requests handled during review?
 9. **Success metrics** — Quantitative targets are not yet defined (see above).
-10. **Edit review** — When an administrator edits an already-approved listing,
-    is any secondary review needed, or does the edit publish immediately?
+10. ~~**Edit review**~~ — **Decided (`OQ-10`)**: secondary review. A proposed change
+    to an already-approved listing is recorded as a **pending revision** that is never
+    publicly visible; the approved listing stays publicly visible at its last approved
+    version while the revision is reviewed; approval makes the revision's information
+    the effective public version; rejection leaves the approved listing unchanged. A
+    listing has at most one pending revision at a time. An authorized administrator may
+    create and approve a revision within one atomic authorized operation, provided every
+    validation, authorization, and publication safeguard succeeds. See `docs/05`
+    `FR-ADM-10`, `FR-ADM-10b` and `docs/13`.
 
 ## Future capabilities
 

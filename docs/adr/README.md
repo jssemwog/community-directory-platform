@@ -7,8 +7,8 @@ later**.
 `docs/07-system-architecture.md` names the ADRs this project needs. Until now, **nothing held
 them.** This directory is that place.
 
-**It contains no decisions yet.** `ADR-001` is written under issue #29; every other ADR is
-**blocked** on a question the product owner has not been asked. See *The register*.
+**It holds one decision.** `ADR-001` is **Accepted**; every other ADR is **blocked** on a
+question the product owner has not been asked. See *The register*.
 
 ---
 
@@ -119,12 +119,12 @@ forgotten.
 
 | ADR | Decision | Gate | Blocked by | Status |
 |---|---|---|---|---|
-| **`ADR-001`** | Adopt a modular monolith with a server-enforced public/administrative boundary; **reject microservices and browser-direct data access** — and record **why the mini lab shape was rejected on the requirements** (`R-10`) | `DG-0` | **Nothing** | **Ready to write** — issue #29. *The one ADR that can be written today.* |
+| **`ADR-001`** | Adopt a modular monolith with a server-enforced public/administrative boundary; **reject microservices and browser-direct data access** — and record **why the mini lab shape was rejected on the requirements** (`R-10`) | `DG-0` | **Nothing** | **Accepted** — 2026-07-24 (issue #29). *The only decision taken so far.* |
 | **`ADR-002`** | Application language and framework | **`DG-2`** | The technology decision (hard requirements 1, 2, 6; `DD-2`) | **Blocked** |
 | **`ADR-003`** | **Data-store product** | **`DG-2`** | **`NOQ-2`** (availability) · **`NOQ-3`** (backup / RPO / RTO) — `DD-3` | **Blocked** |
 | **`ADR-004`** | Administrator authentication mechanism | **`DG-3`** | **`NOQ-9`** — `DD-4`. *The boundary is settled; the mechanism is not* | **Blocked** |
 | **`ADR-005`** | Hosting platform and runtime model | **`DG-2`** | The technology decision — `DD-5` | **Blocked** |
-| **`ADR-006`** | **Listing data model and lifecycle states** | **`DG-1`** | **`OQ-6`, `OQ-7`, `OQ-8`/`OQ-8b`, `OQ-10`, `OQ-11`, `OQ-13`** — `DD-1` | **Blocked** |
+| **`ADR-006`** | **Listing data model and lifecycle states** | **`DG-1`** | **`OQ-8`/`OQ-8b`, `OQ-11`, `OQ-13`** — `DD-1`. *`OQ-6`, `OQ-7`, and `OQ-10` are **Decided**; three questions still hold it* | **Blocked** |
 | **`ADR-007`** | Search approach | **`DG-1`** | **`OQ-4`** — `DD-14`. *A dedicated index requires **measured** justification* | **Blocked** |
 | **`ADR-008`** | Anti-spam approach | **`DG-3`** | **`OQ-9`** — `DD-6`. *Must be weighed against `NFR-ACC-01/02`* | **Blocked** |
 | **`ADR-009`** | Audit-logging approach | **`DG-3`** | **`OQ-14`** — and `NOQ-8`, **taken as one decision** (`DD-7`). **Irreversible if answered late** (`IR-7`) | **Blocked** |

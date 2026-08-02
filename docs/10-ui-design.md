@@ -546,23 +546,45 @@ exist is a screen designed twice.
 The UI must therefore present the *same* field-level error behavior, not a laxer one — a
 common and quiet regression, since admin tools are usually built second and trusted more.
 
-**Editing changes content, never status** (`docs/09` `OP-6`). The edit screen has **no
-approve/reject control**. Merging "save" and "publish" into one action would let an
-administrator publish by accident while fixing a typo — two decisions behind one button.
+**Editing changes content, never status** (`docs/09` `OP-6`). **The general safety rule
+stands: publication is never accidental or implicit.** For ordinary editing the screen has
+**no approve/reject control** — merging "save" and "publish" into one action would let an
+administrator publish by accident while fixing a typo, two decisions behind one button.
 
-**Editing an *approved* listing is seam `S-5` (`OQ-10`), and it changes this screen's
-design.** Two answers are live and they are not cosmetically different:
+**Editing an *approved* listing — seam `S-5` (`OQ-10`, Decided 2026-08-02).** Saving does
+**not** change what the public sees. It records a **pending revision**. The approved
+listing stays publicly visible at its last approved version throughout review; the pending
+revision is never publicly visible (`docs/08` `DI-10`); approving it makes its information
+the effective public version; rejecting it leaves the approved listing unchanged.
 
-- **Publish immediately** — the edit goes live on save. The screen needs no new state.
-- **Secondary review** — the edit becomes a *proposed change* that is not yet live. The
-  public keeps seeing the old version. The screen then needs to show **two versions of the
-  same record** (live and proposed), a pending-review indication, and an approval path for
-  the revision — a materially different design.
+**This screen therefore needs a two-version view.** It shows both the **currently approved
+version** and the **pending revision**, a clear pending-review indication, and an approval
+path for the revision (`docs/09` `OP-10`). Because a listing has **at most one pending
+revision at a time** (`DI-11`), the screen must also present a clear state for "this
+listing already has a pending revision" rather than silently creating a second one.
 
-**This document does not choose, and does not hedge by building the general case.** Designing
-the two-version view "just in case" would resolve `OQ-10` in the expensive direction by
-default. The seam is named; the screen is specified for the simple reading only as far as
-`FR-ADM-10` already permits.
+**The named exception — `FR-ADM-10b`, and it is narrow.** An authorized administrator may
+create and approve a revision within **one atomic authorized operation**, presented as a
+single deliberate action distinct from an ordinary save. It is a path *through* the
+revision lifecycle, not around it:
+
+- **Only an authorized administrator may use it.**
+- **Revision creation and approval may occur in one atomic operation.**
+- **Every applicable validation and authorization check remains mandatory** — the screen
+  presents the same field-level error behavior, with no laxer path (`FR-VAL-04`, `UV-6`).
+- **No revised information becomes publicly visible before those checks succeed.**
+- **If any required check fails, the currently approved listing remains unchanged**, and
+  the screen must say so unambiguously (`FR-CONF-04`).
+- **The exception does not permit direct unvalidated overwriting**, and it must never be
+  the accidental result of pressing "save" — the combined action is itself the deliberate
+  publication decision, and must be labelled as one.
+
+**Confirmation must name the resulting revision state** (`FR-CONF-04`) — whether a pending
+revision was recorded, or its information became the effective public version. "Saved" is
+not sufficient, for exactly the reason the general rule exists.
+
+**Layout, controls, and the visual treatment of the two-version view are not designed
+here**, and no persistence mechanism is implied (`DDM-8`, open).
 
 ---
 
@@ -865,7 +887,6 @@ Deliberately **not designed**. Each is recorded so that its absence reads as a d
 |---|---|---|
 | **Report-inaccurate-listing control** (V7) | `FR-VIS-10` is priced **Deferred**; `OQ-1` is open. It would also be the **second unauthenticated write path**, doubling the abuse surface and inheriting every `OQ-9` concern. | `OQ-1` |
 | **Remove / unpublish control** | `OQ-11` is open — **and answering it "yes" breaks the three-value status set in `FR-AUD-01`.** Not a button; a lifecycle change. | `OQ-11`, `S-5` |
-| **Two-version (live vs. proposed) edit view** | Exists only if `OQ-10` requires secondary review of edits to approved listings. | `OQ-10`, `S-5` |
 | **Audit-trail / history view** | Exists only if `OQ-14` commits audit logging. **Resolve with `S-7`.** | `OQ-14`, `S-8` |
 | **"Mark as duplicate" control** | A7 needs a way to express "duplicates that"; `OQ-12` is open. | `OQ-12`, `S-10` |
 | **Rejected-submission archive view** | Depends on whether rejected records are retained at all. | `OQ-13`, `S-11` |
@@ -894,7 +915,7 @@ contribution to it.
 | `OQ-7` | Which fields are public vs. withheld? | **The content of S2 and of every result summary.** The largest open question in this document. | `S-2` |
 | `OQ-8` / `OQ-8b` | Required submission fields; contact minimum? | **The form's obligations** — and, if a contact minimum exists, a **cross-field error with no single field to attach to** (`UV-5`). | `S-1` |
 | `OQ-9` | Anti-spam safeguard? | Whether S3 has a challenge — **and it must not break `NFR-ACC-01/02`.** | `S-9` |
-| `OQ-10` | Edit-after-approval: immediate or secondary review? | Whether S7 needs a two-version view and a pending-revision state. | `S-5` |
+| ~~`OQ-10`~~ **Decided** | Edit-after-approval: immediate or secondary review? | **Answered:** secondary review. **S7 needs a two-version view** (currently approved version and pending revision) and a pending-revision state, plus a state for "a pending revision already exists" (`DI-11`). The pending revision is never publicly visible (`DI-10`). Layout is still not designed. | `S-5` — **resolved for `OQ-10`**; **open for `OQ-11`** |
 | `OQ-11` | May administrators unpublish or remove? | Whether S6 has a removal control — **and whether `FR-AUD-01`'s status set survives.** | `S-5` |
 | `OQ-12` | How are duplicates resolved? | Whether A7 needs a "duplicate of" control. | `S-10` |
 | `OQ-13` | Are rejected submissions retained? | Whether administrators can view rejected records at all. | `S-11` |
@@ -994,15 +1015,16 @@ open questions: an open question is a **product** decision; a deferred decision 
 | `OP-6` edit content | S7 |
 | `OP-7` approve · `OP-8` reject | S6 |
 | `OP-9` remove *(conditional)* | **No control designed** — `OQ-11` |
-| `OP-10` approve revision *(conditional)* | **No screen designed** — `OQ-10` |
+| `OP-10` approve revision *(committed)* | `S7` — the two-version view and its approval path. **Layout not designed** (`OQ-10` Decided; design deferred) |
 | `OP-11` category set | S1 (filter), S3 (form) |
 
 ### Seams preserved
 
-**All eleven `docs/08` seams remain open**, and the two conditional `docs/09` operations
-have **no UI drawn**: `S-1` (form obligations), `S-2` (what S2 and the result summary show),
-`S-3` (category control shape), `S-4` (search scope), `S-5` (removal control; two-version
-edit view), `S-6` (location controls), `S-7` (review history display — resolve with `S-8`),
+**Ten of the eleven `docs/08` seams remain open, and `S-5` is half open**; the remaining
+conditional `docs/09` operation `OP-9` has **no UI drawn**: `S-1` (form obligations), `S-2`
+(what S2 and the result summary show), `S-3` (category control shape), `S-4` (search scope),
+`S-5` (**removal control — still open, `OQ-11`**; the two-version edit view is now required
+by `OQ-10`, though its layout is not designed), `S-6` (location controls), `S-7` (review history display — resolve with `S-8`),
 `S-8` (audit trail display), `S-9` (anti-spam challenge), `S-10` (duplicate control), `S-11`
 (rejected-record visibility).
 

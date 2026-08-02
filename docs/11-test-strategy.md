@@ -61,7 +61,7 @@ R-2, `docs/09` R-A2, `docs/10` R-U5).
 - [`docs/06-non-functional-requirements.md`](./06-non-functional-requirements.md) — the
   qualities, and `NOQ-1`–`NOQ-9`.
 - [`docs/07-system-architecture.md`](./07-system-architecture.md) — the trust boundaries.
-- [`docs/08-data-model.md`](./08-data-model.md) — invariants `DI-1`–`DI-9`, rules
+- [`docs/08-data-model.md`](./08-data-model.md) — invariants `DI-1`–`DI-11`, rules
   `VR-1`–`VR-7`, slots `VR-S1`–`VR-S6`, seams `S-1`–`S-11`.
 - [`docs/09-api-design.md`](./09-api-design.md) — operations `OP-1`–`OP-11`, principles
   `P1`–`P7`, rules `AA-*`, `AP-*`, `AV-*`.
@@ -173,7 +173,7 @@ prescribed pyramid (**T7**).
 | Level | What it exercises | Best for |
 |---|---|---|
 | **Unit** | One rule or one decision in isolation. | Validation rules; status-transition legality; projection logic — *which fields leave the system for whom*. |
-| **Integration** | A component together with its store and its neighbours. | Data integrity (`DI-1`–`DI-9`); atomicity; timestamp semantics. |
+| **Integration** | A component together with its store and its neighbours. | Data integrity (`DI-1`–`DI-11`); atomicity; timestamp semantics. |
 | **Operation** | One logical API operation, end to end, exercised directly. | **The boundary invariants.** This is where `BI-1`–`BI-8` are genuinely proven, because it is where they are enforced. |
 | **Journey** | A complete user journey through the interface. | V1–V7, L1–L4, A1–A7 — including their failure and empty paths. |
 | **Human** | A person using the product, with judgment. | Accessibility experience, microcopy honesty, moderation usability. |
@@ -220,7 +220,7 @@ able to save a record that a lister could not have submitted.**
 |---|---|---|
 | **Security / authorization** | Yes — `BI-5`, `BI-9`. Fully testable. | Credential/session strength: **`NOQ-9`**. |
 | **Privacy / data exposure** | Yes — `BI-1`, `BI-4`, `BI-6`. Fully testable **as properties**. | *Which fields* are public: **`OQ-7`**. |
-| **Data integrity** | Yes — `BI-7`, `BI-8`, `DI-1`–`DI-9`. The most mechanically testable area in the product. | — |
+| **Data integrity** | Yes — `BI-7`, `BI-8`, `DI-1`–`DI-11`. The most mechanically testable area in the product. | — |
 | **Accessibility** | **Behaviors** yes — keyboard operability, announcement, non-colour status. | **Conformance level and contrast ratio: `NOQ-5`.** No level may be asserted. |
 | **Responsive behavior** | Yes — core flows usable at phone size; admin at tablet/desktop. | Device/browser matrix: **`NOQ-6`**. |
 | **Usability** | Partly — states are distinguishable and confirmations state outcomes. | *Understandability* is a human judgment (**T6**). |
@@ -291,9 +291,12 @@ what it validates, what it refuses, and what it does on failure.
   returning current state** — not a second transition, not an error, not a second
   last-updated bump (`docs/09`, `DI-1`/`DI-2`).
 
-**Not tested:** `OP-9` (remove/unpublish) and `OP-10` (approve-a-revision) — **they are
-conditional and do not exist** (`OQ-11`, `OQ-10`). Writing a test for either would be
-writing the decision.
+**Not tested:** `OP-9` (remove/unpublish) — **it is conditional and does not exist**
+(`OQ-11`). Writing a test for it would be writing the decision.
+
+**Now testable (`OQ-10` Decided):** `OP-10` (approve a pending revision) exists. The
+revision behaviours below are specifiable, and are **built and tested in `P4`** — not
+written here.
 
 ---
 
@@ -507,10 +510,20 @@ publicly visible*, and that rejection says *will not be published*.
 - **The full sequence:** submit → edit → approve → edit again. The record's **identity is
   stable throughout** (`DI-8`), and its timestamps behave correctly at each step (`DI-6`).
 
-**Decision-dependent and therefore NOT tested:** remove/unpublish (**`OQ-11`**), secondary
-review of edits to approved listings (**`OQ-10`**), duplicate marking (**`OQ-12`**),
-rejected-submission retention and purge (**`OQ-13`**), audit emission (**`OQ-14`**), and
-lister notification (**`OQ-2`**). Each would be a test of a behavior nobody has approved.
+**The revision lifecycle is now approved behaviour and must be tested** (`OQ-10`,
+`FR-ADM-10`, `FR-ADM-10b`): a pending revision is **never** returned by any public read
+path (`DI-10` — the public-path assertion, alongside `DI-5`); the approved listing stays
+publicly visible at its last approved version while a revision is pending; approving a
+revision makes its information the effective public version; **rejecting a revision leaves
+the approved listing unchanged and still public**; a second concurrent revision does not
+enter the pending state (`DI-11`); and the `FR-ADM-10b` atomic operation **publishes
+nothing unless every check succeeds** and **leaves the approved listing unchanged on any
+failure**. Listing identity is stable across the cycle (`DI-8`).
+
+**Decision-dependent and therefore NOT tested:** remove/unpublish (**`OQ-11`**), duplicate
+marking (**`OQ-12`**), rejected-submission retention and purge — including retention of a
+rejected *revision* (**`OQ-13`**), audit emission (**`OQ-14`**), and lister notification
+(**`OQ-2`**). Each would be a test of a behavior nobody has approved.
 
 ---
 
@@ -583,7 +596,7 @@ costly.**
 | Priority | Area | Why |
 |---|---|---|
 | **Highest** | **`BI-1`–`BI-9`, the boundary invariants** | Objective, catastrophic if broken, and cheap to check continuously. **These are the non-negotiable core of any automated suite.** |
-| **Highest** | **Data integrity `DI-1`–`DI-9`** | Purely mechanical; no judgment required. |
+| **Highest** | **Data integrity `DI-1`–`DI-11`** | Purely mechanical; no judgment required. |
 | **High** | **Status lifecycle and transition legality** | Attempts at forbidden transitions must fail. |
 | **High** | **Validation behavior** — field-level, input preserved, admin parity | Regression-prone. |
 | **High** | **The four-way equivalence of `OP-2`'s negative outcome** (`BI-4`) | Easy to break, invisible when broken. |
@@ -672,7 +685,7 @@ is the whole point of naming them separately.
 
 - **All nine boundary invariants (`BI-1`–`BI-9`) are proven**, by tests that *attempt to
   violate them* and fail to.
-- **All data integrity invariants (`DI-1`–`DI-9`) hold.**
+- **All data integrity invariants (`DI-1`–`DI-11`) hold.**
 - **No Critical-boundary defect is open.** Not deferred, not accepted, not documented as a
   known issue — **closed**.
 - **Every approved journey (V1–V7, L1–L4, A1–A7) is exercised, including its failure and
@@ -739,7 +752,7 @@ becomes the decision (**T4**).
 | **`OQ-7`** public vs. private fields | **An enumeration of public fields.** | **Yes — as a rule:** no field outside the approved public set is ever exposed. |
 | **`OQ-8` / `OQ-8b`** required fields; contact minimum | *Which* fields are required; whether a contact minimum exists. | Yes — that validation **is** field-level, and preserves input, whatever it enforces. |
 | **`OQ-9`** anti-spam | Any safeguard behavior — **and its absence cannot be asserted as correct either.** | Yes — that any safeguard must not break keyboard/assistive operability. |
-| **`OQ-10`** edit-after-approval | Secondary review, revisions, `OP-10`. | — |
+| ~~**`OQ-10`**~~ **Decided** | — nothing is untestable here any longer | **Yes:** the full revision lifecycle — pending revision never public (`DI-10`), approved listing stays public at its last approved version, approval makes the revision effective, **rejection leaves the approved listing unchanged**, one active pending revision (`DI-11`), and the `FR-ADM-10b` atomic operation's all-or-nothing publication |
 | **`OQ-11`** remove/unpublish | **Any removal behavior — `OP-9` does not exist.** | — |
 | **`OQ-12`** duplicate handling | Duplicate detection or marking. | — |
 | **`OQ-13`** rejected retention / purge | Any retention period or purge behavior. | — |
@@ -800,7 +813,7 @@ quietly becomes a missing performance *test*, permanently.
 | `OQ-7` | Public vs. private fields? | **The rule is testable; the enumeration is not.** |
 | `OQ-8` / `OQ-8b` | Required fields; contact minimum? | Validation *behavior* testable; the *rules* are not. |
 | `OQ-9` | Anti-spam? | Untestable either way — the absence of a safeguard cannot be asserted correct. The accessibility constraint on any future safeguard **is** recorded. |
-| `OQ-10` | Edit-after-approval? | No revision tests. |
+| ~~`OQ-10`~~ **Decided** | Edit-after-approval? | **Revision tests are now specifiable** and are built in `P4`. |
 | `OQ-11` | Remove/unpublish? | **No removal tests. `OP-9` does not exist.** |
 | `OQ-12` | Duplicate handling? | No duplicate tests; an exploratory charter records the pain. |
 | `OQ-13` | Rejected retention / purge? | No retention or purge tests. |
