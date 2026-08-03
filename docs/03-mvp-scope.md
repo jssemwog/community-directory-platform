@@ -148,24 +148,25 @@ Recorded below.
 
 ## Data required for a listing
 
-A **minimal** listing record is proposed below. Fields are classified as
-**required**, **optional**, **administrative** (system/admin-managed, not entered
-by the public), or **undecided**. Not every candidate field is automatically
-included.
+A **minimal** listing record is proposed below. Fields are classified as **required at
+initial submission**, **optional at initial submission**, **administrative**
+(system/admin-managed, not entered by the public), or **not collected**. Not every
+candidate field is automatically included. A field that is *optional at initial
+submission* may still be needed before approval — see the contact rule below.
 
 | Field | Classification | Notes |
 |---|---|---|
-| Business or organization name | **Required** | Core identity of the listing. |
-| Category | **Required** | Needed for category filtering; from a predefined set. |
-| Description | **Required** | Short text describing the listing. |
-| Locality | **Required** | The town, city, village, municipality, or comparable named place. User-facing label: "City, town, or locality." Supports location filtering. Decided: `OQ-6`. |
-| Country | **Required** | Every listing carries a country; the directory is multi-country capable from launch. Decided: `OQ-6`. |
-| Administrative area | **Optional** | State, province, region, county, district, parish, or comparable subdivision. User-facing label: "State, province, region, or district." Not required where no such subdivision meaningfully applies. Decided: `OQ-6`. |
-| Postal code | **Optional** | Text, international formats; may be omitted by any listing. User-facing label: "Postal code or ZIP code." Decided: `OQ-6`. |
+| Business or organization name | **Required at initial submission** | Core identity of the listing. Decided: `OQ-8`. |
+| Category | **Required at initial submission** | Needed for category filtering; from a predefined set. Decided: `OQ-8`. |
+| Description | **Required at initial submission** | Short text describing the listing. Decided: `OQ-8`. |
+| Locality | **Required at initial submission** | The town, city, village, municipality, or comparable named place. User-facing label: "City, town, or locality." Supports location filtering. Decided: `OQ-6`, `OQ-8`. |
+| Country | **Required at initial submission** | Every listing carries a country; the directory is multi-country capable from launch. Decided: `OQ-6`, `OQ-8`. |
+| Administrative area | **Optional at initial submission** | State, province, region, county, district, parish, or comparable subdivision. User-facing label: "State, province, region, or district." Not required where no such subdivision meaningfully applies. **Not a contact method.** Decided: `OQ-6`, `OQ-8`. |
+| Postal code | **Optional at initial submission** | Text, international formats; may be omitted by any listing. User-facing label: "Postal code or ZIP code." **Not a contact method.** Decided: `OQ-6`, `OQ-8`. |
 | Precise or residential street address | **Not collected** | Deliberately excluded from the initial MVP. Decided: `OQ-6`. |
-| Phone | **Optional** | At least one contact method is expected (see below). |
-| Email | **Optional** | Contact method. |
-| Website | **Optional** | Contact method. |
+| Phone | **Optional at initial submission** | Contact method. Counts toward the before-approval contact minimum. Decided: `OQ-8`, `OQ-8b`. |
+| Email | **Optional at initial submission** | Contact method. Counts toward the before-approval contact minimum. Decided: `OQ-8`, `OQ-8b`. |
+| Website | **Optional at initial submission** | Contact method. Counts toward the before-approval contact minimum. Decided: `OQ-8`, `OQ-8b`. |
 | Status | **Administrative** | e.g. pending / approved / rejected; not set by the public. |
 | Submission date | **Administrative** | Recorded by the system on submission. |
 | Last updated date | **Administrative** | Recorded by the system on change. |
@@ -200,9 +201,46 @@ where provided, and postal code only where voluntarily provided and approved for
 display. Full classification: `docs/08-data-model.md` *Field classification*. No storage
 mechanism or visibility-flag design is chosen by this decision.
 
-**Contact rule (open question):** the intent is that a listing carry **at least
-one** contact method (phone, email, or website), but whether that minimum is
-enforced in the MVP is undecided.
+**Submission obligations (decided — `OQ-8`).** Three distinct gates, and the documentation
+keeps them distinct:
+
+- **Required at initial submission** — business name, category, description, locality,
+  country.
+- **Optional at initial submission** — administrative area, postal code, phone, email,
+  website. A submission may omit all five and still be accepted into moderation.
+- **Required when supplied** — any optional value that *is* provided must pass the
+  applicable format and safety checks. A supplied-but-invalid value **fails visibly, is
+  preserved for correction, and is never silently dropped**; the submission cannot proceed
+  through that validation step as though the value had not been supplied.
+- **Required before approval** — everything above, plus the contact minimum below.
+
+Validation is **permissive, international-friendly, and technology-neutral**. It rejects
+values that are blank where required, malformed beyond practical use, unsafe, outside
+established length or content boundaries, or incompatible with the field's basic purpose —
+and it prescribes **no** regular expression, validation library, form control, schema type,
+database constraint, country-specific phone format, URL parser, or email-validation
+algorithm. This decision sets **obligation and validation only: it adds, removes, renames,
+and combines no field, and leaves the `OQ-7` public projection untouched.**
+
+**Administrator completion (decided — `OQ-8`).** During moderation and before approval an
+administrator may complete missing optional information and correct submitted information.
+**This is completion, not a bypass** — everything the administrator supplies or corrects is
+validated by the same rules as a public submission, and **all information must satisfy the
+applicable validation rules before approval.**
+
+**Contact rule (decided — `OQ-8b`):** a listing must carry **at least one usable** contact
+method — **phone, email, or website** — **before it may be approved**. The minimum applies
+**before approval, not at initial submission**: a public submission may therefore enter
+moderation with no phone, email, or website, but it cannot be approved until at least one
+usable contact method exists (the administrator may supply one under the completion rule
+above). A contact value is **usable** when it is non-blank, passes the applicable permissive
+format and safety checks, and is retained as the value proposed for the listing. **Usable
+means structurally usable — not verified as owned, reachable, or currently active**; the MVP
+introduces no confirmation email, SMS verification, phone call, ownership proof, domain
+verification, or third-party validation service. **Locality, administrative area, postal
+code, country, and any physical-location or address information are not contact methods**
+and never satisfy this minimum. **A business with no usable phone, email, or website cannot
+be approved under the MVP policy; there is no offline-business exemption.**
 
 **Note on need vs. feature:** these fields describe the *information* a listing
 holds. They do **not** imply a particular storage technology or schema — that is
@@ -254,8 +292,13 @@ review turnaround time) define "success" for the first release.
    required for a listing* above.
 2. ~~**Multi-country scope**~~ — **Decided (`OQ-6`)**: the MVP is multi-country capable from
    launch; country is required on every listing.
-3. **Contact-method minimum** — Should the MVP *enforce* at least one contact
-   method per listing, or leave all contact fields optional?
+3. ~~**Contact-method minimum**~~ — **Decided (`OQ-8b`)**: the MVP **enforces** at least
+   one **usable** contact method (phone, email, or website) **before approval** — not at
+   initial submission. A submission with no contact method still enters moderation; it
+   simply cannot be approved until one exists. Location and address information never
+   count. **No offline-business exemption.** Recorded alongside the `OQ-8` submission
+   obligations in *Data required for a listing* above; see `docs/05` `FR-DATA-08`,
+   `FR-VAL-05` and `docs/13`.
 4. **Category source** — Who defines the predefined category list, and can
    administrators manage it in the MVP or is it fixed?
 5. **Removing/unpublishing approved listings** — Is administrator removal or

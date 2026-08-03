@@ -375,30 +375,64 @@ the architecture, the data model, and the API all worked to establish.
 | **States** | Empty · In progress · **Submitting** · **Validation errors** · **Save failure** · (→ S4 on success) |
 | **Leads to** | Submission confirmation (S4) |
 
-**The form's field set is `S-1` (`OQ-8`, `OQ-8b`) and is deliberately not drawn.** The
-listing *content* fields are known from `docs/08`; what is **not** known is which are
-**required**, whether a **contact minimum** is enforced, and how strict format checks are.
-A form is a required-field rule made visible: putting an asterisk beside a label answers
-`OQ-8`. **The design therefore specifies the form's *structure and behavior* and leaves its
-*obligations* to the seam.**
+**The form's obligations are `S-1` (`OQ-8`, `OQ-8b`), and they are now Decided.** The
+listing *content* fields were always known from `docs/08`; what was open — which are
+required, whether a contact minimum is enforced, how strict format checks are — is
+answered, and the form must now show it:
+
+- **Marked as required at initial submission:** business name, category, description,
+  locality, country.
+- **Marked as optional at initial submission:** administrative area, postal code, phone,
+  email, website. **All three contact inputs are optional on this form**, and a lister may
+  submit with none of them.
+- **The form must not present the contact minimum as a submission requirement.** The
+  minimum is a **before-approval** obligation (`FR-DATA-08`): the public form accepts a
+  contact-less request, and blocking submission on it would state the rule at the wrong
+  stage and turn away exactly the listers `NFR-ACC-01/02` and the vision exist to admit.
+  Where the form mentions contact at all, it does so as **guidance** — that a listing needs
+  a way to be reached before it can be published — not as a submit-time gate.
+- **Format feedback is permissive.** The form must not reject a plausible international
+  phone number, an unusual address, or an uncommon domain. **No pattern, input mask,
+  specialised control, or `type=`-style constraint is selected here** — that remains an
+  implementation choice answerable to the permissive posture.
+
+**The field set itself is unchanged — no input is added, removed, renamed, or merged.**
+The design still specifies the form's *structure and behavior*; what it now also specifies
+is *which obligations it communicates, and at which stage*.
 
 **What the form must never contain** (`docs/09` **P3**, `AV-8`): status; submitted-at or
 last-updated timestamps; a moderation note field; any administrative control. These are not
 merely hidden — the operation does not accept them.
 
-**Required-versus-optional must be communicated visibly and non-visually.** Whatever `OQ-8`
-decides, the *pattern* is committed: obligation is indicated in a way that does not rely on
-colour or on a legend the user must remember (`NFR-ACC-03`, `FR-VAL-06`).
+**Required-versus-optional must be communicated visibly and non-visually.** The *pattern*
+was always committed, and `OQ-8` now supplies its content: obligation is indicated in a way
+that does not rely on colour or on a legend the user must remember (`NFR-ACC-03`,
+`FR-VAL-06`). **The obligation communicated on this form is "required at initial
+submission"** — five fields — and the wording must not imply that the other five are
+unwanted, nor that everything on the form is required.
 
-**The contact-method minimum is the hardest UI problem in this document, and it is worth
-naming now rather than discovering it in build.** If `OQ-8b` resolves to "at least one of
-phone, email, or website", the resulting rule is **cross-field**: it belongs to no single
-input, so there is no obvious place to attach its error. `FR-VAL-02` requires errors "at the
-level of the specific field(s) affected" — and here the affected "field" is a *group*. A
-naive implementation attaches the error to all three inputs (noisy, and each individually
-*is* valid) or to none (invisible). The design commits to the requirement — **a group-level
-obligation gets a group-level message, associated with the group and announced to assistive
-technology** — while leaving *whether the rule exists at all* to `OQ-8b`.
+**The contact-method minimum is the hardest UI problem in this document, and `OQ-8b` has
+now made it real.** The rule — at least one of phone, email, or website — is **cross-field**:
+it belongs to no single input, so there is no obvious place to attach its message.
+`FR-VAL-02` requires errors "at the level of the specific field(s) affected", and here the
+affected "field" is a *group*. A naive implementation attaches the message to all three
+inputs (noisy, and each individually *is* valid) or to none (invisible). The design commits
+to **a group-level message, associated with the group and announced to assistive
+technology** (`UV-5`).
+
+**Where that message appears is now decided by the stage, and this is the crucial part.**
+Because the minimum applies **before approval and not at initial submission**, the
+group-level *blocking* message belongs to the **administrator's review screen (S6/S7)** —
+where approval is attempted — and **not** to the public submission form, which must accept a
+contact-less request. On the public form the group carries at most **non-blocking guidance**.
+Two surfaces, one rule, different stages: **a design that puts the blocking error on the
+public form has enforced the rule at the wrong stage.**
+
+**An invalid contact value is not a present one.** If a lister supplies a malformed email
+and nothing else, the field-level format error appears, the entered value is preserved for
+correction (`UV-2`), and — because the value is not usable — the listing still has **no**
+contact method for approval purposes. The administrator's screen must make that
+distinction legible rather than showing the field as filled.
 
 **Set expectations before submission, not only after.** `NFR-USA-06` requires that the
 lister be clearly informed that a request is pending review and not immediately public. The
@@ -701,19 +735,25 @@ records nothing, and in particular records nothing *public* (`docs/08` `VR-7`).
 | `UV-2` | **Valid entered input is preserved.** The user corrects only what is wrong, and never re-types what was right. |
 | `UV-3` | Errors are perceivable **without relying on colour** (`FR-VAL-06`, `NFR-ACC-03`) and are **announced** to assistive technology. |
 | `UV-4` | Each error is **programmatically associated** with its input, so a screen-reader user encounters it *at* the field, not in a distant summary. |
-| `UV-5` | A **group-level** obligation (should `OQ-8b` create one) gets a **group-level** message attached to the group — not silently duplicated across three inputs that are each individually valid. |
-| `UV-6` | Administrator edits show the **same** validation behavior as the public form. No laxer path (`FR-VAL-04`). |
+| `UV-5` | The **group-level** contact obligation created by `OQ-8b` gets a **group-level** message attached to the group — not silently duplicated across three inputs that are each individually valid. **It blocks at the approval screen, not on the public form.** |
+| `UV-6` | Administrator edits show the **same** validation behavior as the public form. No laxer path (`FR-VAL-04`). **Administrator completion of missing optional information is validated identically — it is completion, never a bypass** (`FR-ADM-04`). |
 | `UV-7` | Nothing is recorded on a validation failure (`VR-7`). |
+| `UV-8` | An optional value that was **supplied but failed validation** is shown as an error and **retained for correction** — never silently cleared, and never treated as though it had not been entered (`FR-VAL-03`, `VR-S3`). |
 
-**Not committed — because the rules themselves are open:** *which* fields are required
-(`OQ-8`), *whether* a contact minimum exists (`OQ-8b`), and *how strict* format checks are
-(`OQ-8`). The UI commits to **how validation behaves**, not to **what it enforces**.
+**Now committed, because `OQ-8`/`OQ-8b` are Decided:** *which* fields are required at
+initial submission (name, category, description, locality, country), *that* a contact
+minimum exists and *when* it applies (before approval), and *how strict* format checks may
+be (permissive). **Still not committed:** every technology that would express them — no
+pattern, mask, control type, library, or constraint. The UI commits to **how validation
+behaves and at which stage it applies**, not to **how it is implemented**.
 
 **A note on format strictness, because the UI is where its cost is paid.** Over-strict
 validation rejects legitimate international phone numbers and unusual-but-valid addresses —
 and in a *community* directory, that falls hardest on exactly the small and unconventional
 organisations the vision exists to include. The UI cannot fix an over-strict rule; it can
-only display its rejection. That is a reason for whoever resolves `OQ-8` to err generous.
+only display its rejection. **`OQ-8` was resolved generously for exactly this reason** — the
+approved posture is permissive and international-friendly, and any concrete format check
+introduced during build must answer to it rather than to convenience.
 
 ---
 
@@ -913,7 +953,7 @@ contribution to it.
 | `OQ-5` | Category model — single or multiple; who curates? | **The shape of the category control** (single-select vs. multi-select) and whether a management screen exists. | `S-3` |
 | `OQ-6` | Location granularity? | How many location controls exist, on both the filter and the form. | `S-6` |
 | `OQ-7` | Which fields are public vs. withheld? | **The content of S2 and of every result summary.** The largest open question in this document. | `S-2` |
-| `OQ-8` / `OQ-8b` | Required submission fields; contact minimum? | **The form's obligations** — and, if a contact minimum exists, a **cross-field error with no single field to attach to** (`UV-5`). | `S-1` |
+| ~~`OQ-8` / `OQ-8b`~~ **Decided** | Required submission fields; contact minimum? | **Answered.** S3 marks name, category, description, locality, and country as required at initial submission; the other five as optional, **including all three contact inputs**. The contact minimum is **cross-field and blocks at approval, not at submission** — so its group-level message (`UV-5`) belongs to the administrator's review surface, with at most non-blocking guidance on the public form. Format feedback is **permissive**; no pattern, mask, or control type is chosen. | `S-1` — **resolved** |
 | `OQ-9` | Anti-spam safeguard? | Whether S3 has a challenge — **and it must not break `NFR-ACC-01/02`.** | `S-9` |
 | ~~`OQ-10`~~ **Decided** | Edit-after-approval: immediate or secondary review? | **Answered:** secondary review. **S7 needs a two-version view** (currently approved version and pending revision) and a pending-revision state, plus a state for "a pending revision already exists" (`DI-11`). The pending revision is never publicly visible (`DI-10`). Layout is still not designed. | `S-5` — **resolved for `OQ-10`**; **open for `OQ-11`** |
 | `OQ-11` | May administrators unpublish or remove? | Whether S6 has a removal control — **and whether `FR-AUD-01`'s status set survives.** | `S-5` |
@@ -1061,10 +1101,13 @@ has produced, and a field drawn on a form reads as a promise. **Mitigation:** th
 is conceptual and labeled illustrative; no field list is drawn where a seam owns it.
 
 **R-U3 — Closing a seam by drawing a control.** This is the dominant risk, and it is
-specific: a **checkbox list decides `OQ-5`**; an **asterisk decides `OQ-8`**; a **field on
-the detail screen decides `OQ-7`**; a **Remove button decides `OQ-11`** — and that last one
-changes an approved requirement. None would *feel* like a decision. Each feels like drawing
-an obvious control. **Mitigation:** **U8**, and the seam column on every screen.
+specific: a **checkbox list decides `OQ-5`**; a **field on the detail screen decides
+`OQ-7`**; a **Remove button decides `OQ-11`** — and that last one changes an approved
+requirement. None would *feel* like a decision. Each feels like drawing an obvious control.
+An **asterisk once decided `OQ-8`**; asterisks may be drawn now because `OQ-8` **was**
+decided through the workflow — but an **input mask or format pattern would still overreach
+it**, since the decision fixed the posture and left the expression open.
+**Mitigation:** **U8**, and the seam column on every screen.
 
 **R-U4 — Inventing screens for symmetry.** A dashboard, an about page, a settings screen, a
 "manage published listings" area parallel to the queue. `docs/09` rejected an operation on
@@ -1110,7 +1153,10 @@ Two strings are load-bearing and must be reviewed as security-relevant text, not
 rejected, removed, or nonexistent; and the **submission confirmation**, which is the last
 contact with a person who has no account and no way back.
 
-**All eleven data-model seams survive.** No framework, library, layout, colour, or
-conformance level is chosen — and the two questions a UI is most tempted to answer by
-drawing, `OQ-7` (what the detail screen shows) and `OQ-8` (what the form requires), remain
-exactly as open as they were.
+**No framework, library, layout, colour, or conformance level is chosen.** The two questions
+a UI is most tempted to answer by drawing — `OQ-7` (what the detail screen shows) and `OQ-8`
+(what the form requires) — have since been answered **by the product owner, through the
+decision workflow**, and this document now reflects those answers rather than pre-empting
+them. **What the UI still declines to choose** is every mechanism that would express them:
+no pattern, mask, control type, validation library, or conformance level. The remaining
+seams survive untouched.

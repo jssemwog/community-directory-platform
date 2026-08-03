@@ -32,9 +32,11 @@ first, and makes the second possible.
 
 A data model can *suggest* an answer. An API contract can *imply* one. A test **enforces**
 one — it asserts what the system must do and fails the build when reality disagrees. An
-assertion that the required fields are *name, category, description and city* does not
-merely hint at an answer to `OQ-8`; it **installs** that answer in the build pipeline,
-where it will be defended by every future engineer who sees the test go red.
+assertion that a phone number must match a particular pattern does not merely hint at an
+answer to `VR-S3`; it **installs** that answer in the build pipeline, where it will be
+defended by every future engineer who sees the test go red. (The obligations themselves —
+which fields are required, and when — were open under `OQ-8`/`OQ-8b` for exactly this
+reason, and are now **Decided**; the *format expressions* behind them still are not.)
 
 So the discipline of `docs/08`, `docs/09` and `docs/10` — leave the seams open — becomes
 *stricter* here, not looser. Every unresolved question is recorded in an explicit
@@ -487,8 +489,34 @@ a coincidence — it is the failure mode, and it is what the tests must target. 
 also be **announced**, not merely animated: to a screen-reader user, a silent transition is
 indistinguishable from nothing happening (`NFR-ACC-03`).
 
-**Validation states** (`UV-1`–`UV-7`): field-level; input preserved; not colour-dependent;
+**Validation states** (`UV-1`–`UV-8`): field-level; input preserved; not colour-dependent;
 announced; programmatically associated with the input; identical rules for administrators.
+
+**Field-obligation and contact-minimum testing** (`OQ-8`/`OQ-8b` — Decided). The rules are
+now specifiable, and the tests must target the **stage** as much as the rule. Stated as
+properties, deliberately free of any concrete format expression:
+
+| Property | Must be proven |
+|---|---|
+| **Initial-submission minimum** | A submission carrying **only** business name, category, description, locality, and country is **accepted** and enters moderation. |
+| **Each required field is required, individually** | **Five cases, one per field.** A submission omitting **only** business name is rejected; likewise one omitting only category, only description, only locality, and only country. Each failure is reported **at the level of the missing field** (`FR-VAL-02`, `VR-5`). A single all-fields-absent case does **not** prove this — it cannot distinguish five enforced obligations from one. (`FR-VAL-01`, `FR-VAL-05`, `VR-S1`) |
+| **Optional really is optional** | A submission omitting administrative area, postal code, phone, email, **and** website is accepted — the public form does not gate on contact. |
+| **The contact minimum gates approval, not submission** | The same contact-less record **cannot be approved**; approval succeeds once at least one usable phone, email, or website exists. |
+| **Each contact type satisfies the minimum, individually** | **Three cases, one per method.** A listing whose sole contact is a usable **phone** can be approved; likewise one whose sole contact is a usable **email**, and one whose sole contact is a usable **website**. No method is privileged over the others, and proving one does not prove the rest. (`FR-DATA-08`, `FR-ADM-06`, `VR-S2`) |
+| **Invalid does not count** | A record whose **only** contact value fails validation cannot be approved — an invalid value is **not** a present one. |
+| **Location is not contact** | A record with locality, administrative area, postal code, and country but no phone, email, or website **cannot be approved**. There is **no offline-business exemption** to assert. |
+| **Supplied-but-invalid is never dropped** | An invalid optional value produces a **visible field-level failure**, the entered value is **preserved**, and the step does **not** proceed as though the value were absent. |
+| **Administrator completion is not a bypass** | Information an administrator supplies or corrects during moderation is validated by the **same** rules; approval remains impossible while any applicable rule fails. |
+| **Revisions inherit the rules** | A revision is held to the same applicable obligations (`VR-6`); it may be **incomplete while being edited**; it cannot be approved without a usable contact method; and **failed validation or rejection leaves the currently approved listing unchanged and publicly visible.** |
+| **Permissiveness is a property too** | Plausible international phone numbers, uncommon domains, and unusual-but-valid addresses are **accepted**. This is asserted as generosity, not against a pattern. |
+
+**What these tests must not do.** No test, and no fixture, may encode a concrete regular
+expression, validation library, schema type, database constraint, country-specific phone
+format, URL parser, or email-validation algorithm. **A test asserting a specific pattern
+does not verify the approved posture — it replaces it**, and installs an implementation
+choice in CI where `VR-S3` deliberately left one open. Accessibility of the validation
+messages and of the correction flow is covered under *Accessibility testing*, and applies
+to the group-level contact message (`UV-5`) as much as to field-level errors.
 
 **Confirmation messages** (`FR-CONF-01..04`, `NFR-USA-05`): each states the **resulting
 state**, not that an action occurred. **"Saved" is a failing result.** The tests assert
@@ -625,8 +653,14 @@ strategy; *how* is a later decision.
 - **Never use real personal data** in testing (`NFR-PRIV-04`). Submissions contain contact
   details of real people; test data must be synthetic.
 - **Test data must not encode an unresolved decision.** A fixture with a `country` field
-  quietly asserts `OQ-6`; one marking four fields required asserts `OQ-8`. **Fixtures decide
-  questions just as surely as tests do.**
+  would once have asserted `OQ-6`, and one marking four fields required would have asserted
+  `OQ-8` — both are now **Decided**, so fixtures may reflect them. What a fixture still must
+  not do is encode a **format pattern**, a validation library, or a schema constraint, which
+  would assert `VR-S3` where it was left open. **Fixtures decide questions just as surely as
+  tests do.**
+- **Fixtures must cover the contact-less pending record.** A test corpus in which every
+  pending submission already carries a contact method cannot exercise the `OQ-8b` approval
+  gate at all, and would let a regression through unnoticed.
 
 ---
 
@@ -750,7 +784,7 @@ becomes the decision (**T4**).
 | **`OQ-5`** category model | Single vs. multiple selection; who curates. | Yes — a category is always from the predefined set (`DI-9`). |
 | **`OQ-6`** location granularity | Whether `state/region` or `country` exist or are required. | — |
 | **`OQ-7`** public vs. private fields | **An enumeration of public fields.** | **Yes — as a rule:** no field outside the approved public set is ever exposed. |
-| **`OQ-8` / `OQ-8b`** required fields; contact minimum | *Which* fields are required; whether a contact minimum exists. | Yes — that validation **is** field-level, and preserves input, whatever it enforces. |
+| ~~**`OQ-8` / `OQ-8b`**~~ **Decided** | — nothing is untestable here any longer | **Yes:** that a submission carrying only name, category, description, locality, and country is **accepted**; that a submission with **no** contact method is accepted into moderation but **cannot be approved**; that a listing with at least one usable phone, email, or website **can** be; that an **invalid** contact value does **not** satisfy the minimum; that locality or other location data **never** satisfies it; that a supplied-but-invalid optional value **fails visibly and is preserved**, never silently dropped; that administrator completion is validated by the **same** rules; and that the same rules apply to a revision, whose failure **leaves the approved listing unchanged**. **Still not testable: any concrete format pattern** — assertions must exercise the permissive posture, not a chosen expression |
 | **`OQ-9`** anti-spam | Any safeguard behavior — **and its absence cannot be asserted as correct either.** | Yes — that any safeguard must not break keyboard/assistive operability. |
 | ~~**`OQ-10`**~~ **Decided** | — nothing is untestable here any longer | **Yes:** the full revision lifecycle — pending revision never public (`DI-10`), approved listing stays public at its last approved version, approval makes the revision effective, **rejection leaves the approved listing unchanged**, one active pending revision (`DI-11`), and the `FR-ADM-10b` atomic operation's all-or-nothing publication |
 | **`OQ-11`** remove/unpublish | **Any removal behavior — `OP-9` does not exist.** | — |
@@ -811,7 +845,7 @@ quietly becomes a missing performance *test*, permanently.
 | `OQ-5` | Category model? | Set membership testable; cardinality is not. |
 | `OQ-6` | Location granularity? | No location-field obligations tested. |
 | `OQ-7` | Public vs. private fields? | **The rule is testable; the enumeration is not.** |
-| `OQ-8` / `OQ-8b` | Required fields; contact minimum? | Validation *behavior* testable; the *rules* are not. |
+| ~~`OQ-8` / `OQ-8b`~~ **Decided** | Required fields; contact minimum? | **Obligation tests are now specifiable** — by stage: at initial submission, on any supplied value, and before approval. **Concrete format patterns remain untestable**, and a test asserting one would overwrite the permissive posture. |
 | `OQ-9` | Anti-spam? | Untestable either way — the absence of a safeguard cannot be asserted correct. The accessibility constraint on any future safeguard **is** recorded. |
 | ~~`OQ-10`~~ **Decided** | Edit-after-approval? | **Revision tests are now specifiable** and are built in `P4`. |
 | `OQ-11` | Remove/unpublish? | **No removal tests. `OP-9` does not exist.** |
@@ -859,9 +893,10 @@ and protects nothing.** **Mitigation:** **T5**, and the operation-level focus.
 
 **R-T3 — Turning an open question into a test.** The dominant risk, and worse here than in
 any prior document: a test does not merely *record* an assumption, it **enforces** it, in
-CI, where it will be defended by every future engineer who sees it go red. A fixture with
-four required fields decides `OQ-8`; an assertion enumerating response fields decides
-`OQ-7`. **Mitigation:** **T4** and the cannot-test-yet register.
+CI, where it will be defended by every future engineer who sees it go red. An assertion
+enumerating response fields decides `OQ-7`; **an assertion pinning a phone or email format
+decides `VR-S3`**, which `OQ-8` deliberately left as a posture rather than a pattern.
+**Mitigation:** **T4** and the cannot-test-yet register.
 
 **R-T4 — Writing test cases instead of a strategy.** Cases depend on decisions not yet made.
 **Mitigation:** properties and categories only.

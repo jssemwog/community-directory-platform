@@ -105,7 +105,7 @@ Six phases, ordered by **what each one makes safe** rather than by what it makes
 | **P0** | Repository and project foundation | The working agreements, the ADRs, the scaffold. | `DG-0` partially; **`DG-2` for the scaffold itself** |
 | **P1** | Data foundation | Entities, the status machine, integrity invariants. | **`DG-1` and `DG-2` — hard** |
 | **P2** | Public browsing foundation | `OP-1`, `OP-2`, `OP-11`; `S1`, `S2`. The **public projection**. | `P1`; `DG-1` — blocking: `OQ-7`, `OQ-6`; shaping: `OQ-4`, `OQ-5` |
-| **P3** | Listing submission workflow | `OP-3`; `S3`, `S4`. The **public write path**. | `P1`; `DG-1` — blocking: `OQ-8`/`OQ-8b`; `DG-3` — blocking: `OQ-9` |
+| **P3** | Listing submission workflow | `OP-3`; `S3`, `S4`. The **public write path**. | `P1`; `DG-1` — ~~`OQ-8`/`OQ-8b`~~ **Decided**; `DG-3` — blocking: `OQ-9` |
 | **P4** | Administrative review workflow | `OP-4`–`OP-8`; `S5`–`S7`. The **moderation lifecycle**. | `P1`; `DG-3` — blocking: `NOQ-9`, `OQ-14` + `NOQ-8` |
 | **P5** | Testing, hardening, release preparation | Regression, exploratory, accessibility, the release decision. | `P2`–`P4`; `DG-4` |
 
@@ -153,7 +153,7 @@ the cost written down*. The distinction is marked in every row below.
 | Gate | Questions | Blocks | Why it cannot be worked around |
 |---|---|---|---|
 | **`DG-0`** — process | None (no product decision required) | Nothing | The stack-neutral half of `P0` can start **today**. |
-| **`DG-1`** — **data design** | **Hard blockers:** ~~**`OQ-6`**~~ **Decided** · ~~**`OQ-7`**~~ **Decided** · **`OQ-8` / `OQ-8b`** required fields and contact minimum · ~~**`OQ-10`**~~ **Decided** (edit-after-approval) · **`OQ-11`** removal/unpublish · **`OQ-13`** rejected retention.<br>**Shaping inputs:** **`OQ-4`** searchable fields and matching mode (`S-4`, `DDM-4`) · **`OQ-5`** category model — cardinality and curation (`S-3`, `DDM-3`) | **All of `P1`.** Transitively `P2`, `P3`, `P4`. | `docs/07` `DD-1` states the six hard blockers outright: they **must be answered before data design starts**. `OQ-6` retrofitted onto a populated directory means backfilling every record; `OQ-10` **added a revision entity (`E7`) and no lifecycle state** (`S-5`, resolved for `OQ-10`), decided before `P1` and at zero data volume; `OQ-7` is the control that `BI-6` and `NFR-PRIV-01` rest on — **until it is answered, the privacy commitment is an empty promise** (`docs/07` `R-2`).<br>**`OQ-4` and `OQ-5` shape rather than block:** each lands on a named data-model seam (`S-4`, `S-3`), so the *rule* can be built and the *representation* deferred — but a model built without considering them will be retrofitted, not merely configured. |
+| **`DG-1`** — **data design** | **Hard blockers:** ~~**`OQ-6`**~~ **Decided** · ~~**`OQ-7`**~~ **Decided** · ~~**`OQ-8` / `OQ-8b`**~~ **Decided** (required fields and contact minimum) · ~~**`OQ-10`**~~ **Decided** (edit-after-approval) · **`OQ-11`** removal/unpublish · **`OQ-13`** rejected retention.<br>**Shaping inputs:** **`OQ-4`** searchable fields and matching mode (`S-4`, `DDM-4`) · **`OQ-5`** category model — cardinality and curation (`S-3`, `DDM-3`) | **All of `P1`.** Transitively `P2`, `P3`, `P4`. | `docs/07` `DD-1` states the six hard blockers outright: they **must be answered before data design starts**. `OQ-6` retrofitted onto a populated directory means backfilling every record; `OQ-10` **added a revision entity (`E7`) and no lifecycle state** (`S-5`, resolved for `OQ-10`), decided before `P1` and at zero data volume; `OQ-7` is the control that `BI-6` and `NFR-PRIV-01` rest on — **until it is answered, the privacy commitment is an empty promise** (`docs/07` `R-2`); `OQ-8`/`OQ-8b` **filled the `S-1` obligation set** (`VR-S1`–`VR-S3`) **without adding a field and without selecting a schema or constraint mechanism**, so `P1` must still express them.<br>**Four of the six hard blockers are now Decided. `OQ-11` and `OQ-13` remain, so `DG-1` does not clear.**<br>**`OQ-4` and `OQ-5` shape rather than block:** each lands on a named data-model seam (`S-4`, `S-3`), so the *rule* can be built and the *representation* deferred — but a model built without considering them will be retrofitted, not merely configured. |
 | **`DG-2`** — **technology** | **Hard blockers (store selection, `ADR-003`):** **`NOQ-2`** availability · **`NOQ-3`** backup / RPO / RTO.<br>**Shaping inputs (technology selection, `ADR-002`, `ADR-005`):** **`NOQ-1`** performance thresholds · **`NOQ-4`** expected first-release load | **The `P0` scaffold** and all of `P1`. | **The store cannot be chosen against `NOQ-2` / `NOQ-3`** — `docs/07` `DD-3` is explicit that a store **cannot be responsibly chosen against an unknown recovery point objective**, because the objective determines the store's required *capability*, not merely a schedule. **`NOQ-1` and `NOQ-4` do not block the choice; they inform it** (`docs/07` files both under *before technology selection*). They must be **considered and carried as a stated assumption** — `PA-1` is exactly that assumption — because everything here assumes "small," and if that is wrong, this is the first decision to revisit (`DD-12`). |
 | **`DG-3`** — **build-time** | **Hard blockers:** **`OQ-9`** anti-spam · **`OQ-14` + `NOQ-8`** audit logging — *one decision, taken together* · **`NOQ-9`** administrator credential and session strength.<br>**Shaping inputs:** **`NOQ-5`** accessibility standard *(early — cheap now, expensive later)* · **`NOQ-6`** browser/device matrix | `P3` (`OQ-9`), `P4` (`NOQ-9`, `OQ-14`/`NOQ-8`), and the *verifiability* — not the building — of `P2` (`NOQ-5`, `NOQ-6`) | **`OQ-14` / `NOQ-8` is the asymmetric one.** Audit history not captured cannot be reconstructed later — every administrative action taken before a "yes" is permanently unlogged (`docs/11`). **`NOQ-5` and `NOQ-6` shape rather than block:** the accessibility *behaviors* and responsive behavior are built and tested regardless; only the **conformance claim** and the **support matrix** wait. |
 | **`DG-4`** — **release** | **`NOQ-7`** log retention · **testing depth** · written acceptance of every Category 3 blocked item | The release decision, not the build. | `docs/11` Category 3: these are **unmeasurable, not optional**. Each is a risk a person accepts **in writing**, or resolves. |
@@ -324,11 +324,19 @@ and supplying a status, a timestamp, or any administrative field must be **rejec
 merely ignored**. `docs/09` `AV-8` and `docs/08` `DI-4` both say so. Prove it by attempting
 the violation.
 
-**What stays open.** `OQ-8` / `OQ-8b` (required fields, contact minimum) is a **`DG-1`
-answer** — validation *behavior* is built here; the *rules* are configured, not invented.
-`OQ-9` (anti-spam) is a **`DG-3`** decision: the seam is built; the mechanism is not chosen,
-and **its absence cannot be asserted correct either** (`docs/11`). `AQ-1` (duplicate
-submissions) has no defined behavior — it gets an **exploratory charter**, not an assertion.
+**What is now settled here.** `OQ-8` / `OQ-8b` (required fields, contact minimum) is
+**Decided**, and it lands exactly where this plan anticipated: validation *behavior* was
+always built in `P3`, and the *rules* are now configured rather than invented. `P3` must
+build the public write path so that it **accepts a submission with no contact method** —
+the minimum is enforced at the `P4` approval step, not here — and so that a supplied-but-
+invalid optional value **fails visibly and is preserved** rather than dropped. **No concrete
+format expression, validation library, or constraint mechanism is authorised by the
+decision**; choosing one remains a `DG-2`/`DD-1` matter.
+
+**What stays open.** `OQ-9` (anti-spam) is a **`DG-3`** decision: the seam is built; the
+mechanism is not chosen, and **its absence cannot be asserted correct either** (`docs/11`).
+`AQ-1` (duplicate submissions) has no defined behavior — it gets an **exploratory
+charter**, not an assertion.
 `OQ-2` (lister notification) is **not built**: the absence of any unauthenticated retrieval
 path is itself tested (`DI-5`).
 
@@ -654,7 +662,7 @@ document lying. **A stale document is worse than no document**, because it is tr
 | `OQ-5` | Category model — cardinality, curation? | **`DG-1` — shaping input** | `S-3`, `DDM-3` (enumeration, reference table, or configuration). Blocks no phase. **Set membership — a category always from the predefined set — is enforced regardless.** |
 | `OQ-6` | **Location granularity?** | **`DG-1`** | **All of `P1`.** Retrofitting means backfilling every record. |
 | `OQ-7` | **Public versus private fields?** | **`DG-1`** | **`P1` and `P2`.** The projection is the control `NFR-PRIV-01/02` rests on. |
-| `OQ-8` / `OQ-8b` | **Required submission fields; contact minimum?** | **`DG-1`** | `P3` validation *rules* (`S-1`). The *behavior* is built regardless. |
+| ~~`OQ-8` / `OQ-8b`~~ **Decided 2026-08-03** | **Required submission fields; contact minimum?** | **`DG-1`** | **Answered.** Required at initial submission: name, category, description, locality, country. Optional: administrative area, postal code, phone, email, website. **At least one usable contact method before approval** — enforced at the `P4` approval step, **not** by `P3`'s write path; location never counts; **no offline-business exemption**. Permissive, technology-neutral formats. Fills `VR-S1`–`VR-S3`; **`S-1` resolved**. **`DG-1` still Unresolved** — `OQ-11` and `OQ-13` remain. |
 | `OQ-9` | **Anti-spam behavior?** | **`DG-3`** | The `C11` mechanism (`S-9`, `DD-6`). **Its absence cannot be asserted correct either.** |
 | ~~`OQ-10`~~ **Decided 2026-08-02** | **Edit after approval — immediate, or secondary review?** | **`DG-1`** | **Answered: secondary review.** `P1` gains entity `E7` and invariants `DI-10`/`DI-11`; **no lifecycle state was added**; `OP-10` is committed. Residual risk `R-3b` (the `FR-ADM-10b` atomic operation). **`DG-1` still Unresolved.** |
 | `OQ-11` | **Removal / unpublish?** | **`DG-1`** | `P1` status model; **`OP-9` does not exist today.** |
