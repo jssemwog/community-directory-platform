@@ -281,11 +281,28 @@ last-updated timestamp, moderation notes, review attribution, or any identity of
 existing record. These are not "ignored if present" — the operation does not accept them,
 and a request containing them is malformed rather than merely over-specified.
 
-**Which content fields are *required* is not decided here.** That is `docs/08`'s seam
-`S-1` (`OQ-8`, `OQ-8b`) and rule slots `VR-S1`, `VR-S2`, `VR-S3`. The API commits to
-*having* a required-field rule and to reporting violations at field level; it does not
-name the fields, does not enforce a contact-method minimum, and does not fix format
-strictness. Naming them in a request contract would close `OQ-8` by drawing it.
+**Which content fields are *required* was `docs/08`'s seam `S-1` (`OQ-8`, `OQ-8b`), and it
+is now Decided** — filling rule slots `VR-S1`, `VR-S2`, `VR-S3`. The API states the rules it
+must honour and still declines to draw them as a schema:
+
+- **`OP-3` accepts a submission carrying business name, category, description, locality,
+  and country.** Administrative area, postal code, phone, email, and website are optional
+  at initial submission, and a request omitting all five is **valid** — `OP-3` accepts it
+  and the record enters moderation.
+- **`OP-3` does not enforce the contact-method minimum.** That obligation is evaluated
+  **before approval** (`OP-7`, and `OP-10` for a revision), not at the write. **An
+  operation that refused a contact-less submission would be enforcing the rule at the
+  wrong stage.**
+- **Format checks are permissive, international-friendly, and technology-neutral.** The
+  API fixes the *posture*, not the expression: **no** pattern, parser, library, media-type
+  constraint, or schema type is named for phone, email, or website.
+- **A supplied-but-invalid optional value is a validation failure, not an omission.** The
+  operation must not accept the request by discarding the offending value; the failure is
+  reported at field level (`AV-*`) and the value is preserved for correction.
+
+**What would still close a seam by drawing it:** writing a concrete request schema with
+per-field patterns, or expressing the contact minimum as a request-shape union. The API
+reports these rules; it does not encode their mechanism.
 
 **On validation failure, nothing is recorded** (`VR-7`, `FR-SUB-06`, `NFR-DATA-03`). There
 is no partial record and — critically — no publicly visible one.
@@ -585,7 +602,7 @@ fixed here — those are the later specification (`DA-3`).
 
 | Concept | Meaning | Appears in | Seam |
 |---|---|---|---|
-| **Listing content** | The submittable field set: name, category, description, location values, contact methods. | `OP-3`, `OP-6` | **`S-1`** — which are *required* is open (`OQ-8`, `OQ-8b`); **`S-6`** — which location fields exist (`OQ-6`) |
+| **Listing content** | The submittable field set: name, category, description, location values, contact methods. | `OP-3`, `OP-6` | ~~**`S-1`**~~ **resolved** — required at initial submission = name, category, description, locality, country; contact minimum applies **before approval** (`OQ-8`, `OQ-8b` **Decided**); ~~**`S-6`**~~ **resolved** (`OQ-6`) |
 | **Record identity** | A stable reference to one record (`docs/08` `DI-8`). | `OP-2`, `OP-5`–`OP-9` | — |
 | **Search criteria** | Keyword, category, location — all optional, all combinable. | `OP-1` | **`S-4`** (keyword scope), **`S-3`** (category cardinality), **`S-6`** (location) |
 | **Moderation note** | Free text an administrator records with a decision. | `OP-8`, `OP-6` | Never public |
@@ -645,9 +662,9 @@ and *not* filled in here):
 
 | Slot | What is open | Blocked on |
 |---|---|---|
-| `VR-S1` | Which fields are required at submission | `OQ-8` |
-| `VR-S2` | Whether at least one contact method is enforced | `OQ-8b` |
-| `VR-S3` | Format checks and their strictness | `OQ-8` |
+| ~~`VR-S1`~~ **Filled** | Which fields are required at submission — **name, category, description, locality, country**; the other five are optional at initial submission | ~~`OQ-8`~~ — **Decided** |
+| ~~`VR-S2`~~ **Filled** | Whether at least one contact method is enforced — **yes, before approval**, at least one *usable* phone, email, or website. Not enforced by `OP-3`. Location values never count | ~~`OQ-8b`~~ — **Decided** |
+| ~~`VR-S3`~~ **Filled** | Format checks and their strictness — **permissive, international-friendly, technology-neutral**; no pattern, parser, or library named | ~~`OQ-8`~~ — **Decided** |
 | `VR-S4` | Whether state/region and country are required | `OQ-6` |
 | `VR-S5` | Whether one or several categories are permitted | `OQ-5` |
 
@@ -875,7 +892,7 @@ prefixed `AQ`.
 | `OQ-5` | Category model — single or multiple; who curates? | `OP-1` category criterion; `OP-11`; whether an administrative category-management operation is needed. | `S-3` |
 | `OQ-6` | Location granularity? | `OP-1` location criterion; the submittable field set. | `S-6` |
 | `OQ-7` | Which fields are public vs. withheld? | **The public projection's membership.** The single largest open question in this document. | `S-2` |
-| `OQ-8` / `OQ-8b` | Required submission fields; contact-method minimum? | `OP-3`'s validation rules (`VR-S1`–`VR-S3`). | `S-1` |
+| ~~`OQ-8` / `OQ-8b`~~ **Decided** | Required submission fields; contact-method minimum? | **Answered.** `OP-3` requires name, category, description, locality, and country, and **accepts a submission with no contact method**. The contact minimum — at least one **usable** phone, email, or website — is enforced **before approval** (`OP-7`, and `OP-10` for a revision), never at the write. Location values never count as contact. Format checks are **permissive and technology-neutral**; a supplied-but-invalid optional value is a **field-level validation failure**, not a silent omission. Fills `VR-S1`–`VR-S3`. **No operation was added, removed, or resequenced.** | `S-1` — **resolved** |
 | `OQ-9` | Anti-spam safeguard? | Whether `OP-3` has an abuse-refusal outcome and what it retains. | `S-9` |
 | ~~`OQ-10`~~ **Decided** | Edit-after-approval: publish immediately, or secondary review? | **Answered:** secondary review. `OP-10` **exists and is committed**; `OP-6` writes a **pending revision** when the target is an approved listing. The approved listing stays publicly visible at its last approved version; the pending revision is never public (`DI-10`); at most one pending revision per listing (`DI-11`). `FR-ADM-10b` permits an authorized administrator to create and approve a revision in one atomic authorized operation, with every safeguard enforced. | `S-5` — **resolved for `OQ-10`**; **open for `OQ-11`** |
 | `OQ-11` | May administrators unpublish or remove? | Whether `OP-9` exists — **and whether `FR-AUD-01`'s three-status set survives**. | `S-5` |
@@ -999,8 +1016,8 @@ belongs to a later specification.
 | `DI-1`/`DI-2` (one status; defined transitions) | `OP-7`/`OP-8`; administrative idempotency |
 | `DI-3` (atomic) | **P7** |
 | `VR-1..VR-7` | `AV-1`–`AV-8` |
-| `VR-S1..VR-S6` | Carried forward unfilled |
-| **Seams `S-1`–`S-11`** | **All preserved. None closed by this document.** |
+| `VR-S1..VR-S6` | `VR-S1`–`VR-S4` **filled** by `OQ-8`/`OQ-8b`/`OQ-6` and honoured here as *rules*, not schemas; `VR-S5`, `VR-S6` carried forward unfilled |
+| **Seams `S-1`–`S-11`** | **All preserved. None closed by this document** — `S-1`, `S-2`, `S-6` were closed by product decisions recorded in `docs/13`, and this document reflects them |
 
 ---
 
@@ -1042,7 +1059,9 @@ traces to a journey, and the traceability table is the check.
 
 **R-A4 — Closing a seam by drawing a contract.** Writing out the public response fields
 answers `OQ-7`. Naming the searched fields answers `OQ-4`. Listing the required submission
-fields answers `OQ-8`. An API contract is *even better than a schema* at making an unmade
+fields would once have answered `OQ-8` — they are named above only because `OQ-8`/`OQ-8b`
+**were** decided through the workflow, and even now the *format expressions* behind them are
+left undrawn. An API contract is *even better than a schema* at making an unmade
 decision look settled, because it is the thing clients are built against. **Mitigation:**
 concepts rather than schemas, and the seam table.
 

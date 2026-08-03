@@ -522,10 +522,15 @@ by `OQ-7` (2026-07-31), against the field inventory settled by `OQ-6`.
 | **Audit / security** | Security-event records, safeguard data (`E6`), addresses of network origin, device information, provider or infrastructure metadata | **Audit-only; never public** | Where they exist — `OQ-9`, `NOQ-7`. `NFR-PRIV-03/04`, `NFR-OBS-02` |
 
 **What this table does not do.** It does not decide **whether** an administrator-visible
-or audit-only field is collected or retained at all — that remains `OQ-8`/`OQ-8b`
-(submission obligations), `OQ-11`, `OQ-13` (lifecycle and retention), and
+or audit-only field is collected or retained at all — that remains `OQ-11`, `OQ-13`
+(lifecycle and retention) and
 `OQ-14`/`NOQ-8` (audit). **`OQ-10` is Decided and adds no field:** a revision changes
-the *values* of already-approved fields and the public field set is unchanged. It adds no business-profile field, no contact form, no messaging
+the *values* of already-approved fields and the public field set is unchanged.
+**`OQ-8`/`OQ-8b` are Decided and likewise add no field:** they set *obligation and
+validation* over the existing inventory — which fields must be present at initial
+submission, and that at least one contact method must be usable before approval —
+and they leave this classification, and the `OQ-7` public/withheld boundary, exactly
+as they were. It adds no business-profile field, no contact form, no messaging
 service, and no social-media field. And it selects **no mechanism**: whether the
 public/withheld boundary and the per-contact visibility designation are expressed as
 flags, a separate structure, or otherwise remains `DDM-6`.
@@ -534,31 +539,52 @@ flags, a separate structure, or otherwise remains `DDM-6`.
 
 ## Required, optional, administrative, and deferred fields
 
-Four classifications, plus a fifth the earlier documents force us to admit: **undecided**.
+Five classifications. An earlier revision of this document also carried five, one of which
+was **undecided** — the row that held the submission obligations while `OQ-8`/`OQ-8b` were
+open. **Both are now Decided, so that row is gone**, and the single *required* row it sat
+beside has been split into the explicit *required at initial submission* and *required
+before approval* distinctions the decision draws, with *optional* likewise qualified to
+*optional at initial submission*. The count is unchanged at five.
+**No attribute was added, removed, renamed, or combined** — only its obligation is now
+stated.
 
 | Classification | Meaning | Attributes |
 |---|---|---|
-| **Required** | Must hold a value for the record to be valid. | Name (`FR-DATA-01`), category (`FR-DATA-02`), description (`FR-DATA-03`), locality (`FR-DATA-04`), country (`FR-DATA-06`) |
-| **Optional** | May hold no value; the record is valid either way. | Administrative area (`FR-DATA-05`), postal code (`FR-DATA-06b`), phone, email, website (`FR-DATA-07`, each individually optional) |
+| **Required at initial submission** | Must hold a value for a public submission to be accepted at all. **Decided by `OQ-8`.** | Name (`FR-DATA-01`), category (`FR-DATA-02`), description (`FR-DATA-03`), locality (`FR-DATA-04`), country (`FR-DATA-06`) |
+| **Optional at initial submission** | May hold no value and the submission is still accepted into moderation. **Required when supplied:** any value actually provided must pass the applicable checks. **Decided by `OQ-8`.** | Administrative area (`FR-DATA-05`), postal code (`FR-DATA-06b`), phone, email, website (`FR-DATA-07`, each individually optional) |
+| **Required before approval** | A **cross-field** obligation that gates approval, not submission. **Decided by `OQ-8b`.** | At least one **usable** contact method — phone, email, or website (`FR-DATA-08`). Location attributes never satisfy it |
 | **Administrative** | Set by the system or an authorized administrator; **never** part of the public submittable surface. | Status, submitted at, last updated at (`FR-DATA-09`, `NFR-DATA-04`); reviewed by / at, moderation note (`S-7`) |
-| **Undecided** | The attribute's existence or obligation is genuinely open. | The contact-method minimum (`FR-DATA-08`, `OQ-8b`); the full required set at submission (`OQ-8`) |
 | **Deferred** | Deliberately absent from the MVP. | **Precise business street address and residential street address — not collected** (`FR-DATA-06c`, `OQ-6`); owner/account reference, claim state, ratings, reviews, analytics, promotion, geocoordinates, hours, images, tags |
 
-**The "Required" column above is narrower than it looks, and this must not be
-misread.** It states the fields `FR-DATA-01..04` mark **Must** — that is, the fields a
-*valid listing record* carries. It does **not** state which fields the *public
-submission form* requires: that is `OQ-8`, and it is open. The two can differ. A model
-that silently equates "required on the record" with "required at submission" has
-answered `OQ-8` by accident. See rule slot `VR-S1`.
+**"Required" is three different things here, and the distinction is the decision.**
+This document previously warned that "required on the record" and "required at
+submission" could differ and must not be conflated. `OQ-8`/`OQ-8b` resolve the question
+by keeping **three** stages apart, and every statement about obligation in this model
+now names which one it means:
 
-**The contact-method minimum is the subtlest of these.** `FR-DATA-07` makes phone,
-email and website *each individually optional*, while `FR-DATA-08` proposes that at
-least one be present — a **cross-field** obligation, priced `Should` and explicitly not
-yet approved (`OQ-8b`). These are not contradictory, but they are easy to render
-contradictory in a schema: marking all three nullable *and* adding a
-"at least one non-null" constraint decides `OQ-8b` in the affirmative; marking all three
-nullable and adding nothing decides it in the negative. **Either way, drawing it decides
-it.** The model therefore holds this as rule slot `VR-S2` and declines both.
+| Stage | What it demands | Where it is enforced |
+|---|---|---|
+| **Required at initial submission** | Name, category, description, locality, country are present and valid. | `FR-VAL-01`, `VR-S1` |
+| **Required when supplied** | Any optional value that *was* provided passes the applicable format and safety checks. An invalid one is **not** treated as absent. | `FR-VAL-01`, `FR-VAL-03`, `VR-S3` |
+| **Required before approval** | All of the above, **plus at least one usable contact method**. | `FR-DATA-08`, `FR-ADM-06`, `VR-S2` |
+
+A record sitting in *pending* may therefore be legitimately incomplete against the
+before-approval obligations. **That is a valid state, not a modelling error** — it is
+precisely the state an administrator completes under `FR-ADM-04`.
+
+**The contact-method minimum is the subtlest of these, and it is now settled.**
+`FR-DATA-07` makes phone, email and website *each individually optional* — that is
+unchanged, and no one of the three is ever required. `FR-DATA-08` adds a **cross-field**
+obligation over the group: **at least one must be usable before the listing may be
+approved**. It is now `Must` (`OQ-8b`). The two are not in tension once the stage is
+named: all three attributes remain individually omissible at submission, and the group
+constraint is evaluated at the approval step, not at the write. **This is a rule, not a
+schema instruction** — the model states the obligation and still selects **no** null
+constraint, check constraint, or storage mechanism to express it (that remains `DD-1`).
+"Usable" means non-blank, passing the permissive checks of `VR-S3`, and retained as the
+proposed value — **structurally usable, never verified as owned, reachable, or active.**
+**Locality, administrative area, postal code, country, and any physical-location
+information are not contact methods.**
 
 ---
 
@@ -576,27 +602,35 @@ Following **P7**, rules that hold regardless of any open question are stated as
 | `VR-3` | Administrative attributes may not be set or altered by a public actor, under any input. | `FR-AUD-04`, `NFR-DATA-04` |
 | `VR-4` | All submitted input must be validated and constrained before it is recorded, so malformed or malicious input cannot corrupt stored data. | `NFR-SEC-05` |
 | `VR-5` | Validation must identify the specific field(s) at fault and preserve already-entered valid input, so the submitter corrects only what is wrong. | `FR-VAL-02`, `FR-VAL-03` |
-| `VR-6` | Administrator edits are validated by the **same** field and format rules as public submissions — no privileged bypass. | `FR-VAL-04` |
+| `VR-6` | Administrator edits, and the content of a pending revision, are validated by the **same** applicable field-obligation and format rules as public submissions — **no privileged bypass**. This is the bridge that carries `VR-S1`, `VR-S2`, and `VR-S3` to revisions: a pending revision may be **incomplete or invalid while it is being edited or corrected**, the currently approved listing stays publicly visible throughout (`OQ-10`), and the revision **cannot be approved** until every before-approval obligation holds — including at least one usable contact method. **Rejection or failed validation leaves the currently approved listing unchanged.** Administrator *completion* of missing optional information (`FR-ADM-04`) runs through this same rule, which is what makes completion a convenience rather than an exemption. | `FR-VAL-04`, `FR-ADM-04` |
 | `VR-7` | A validation failure must leave **no** record behind — and in particular no publicly visible one. | `FR-SUB-06`, `FR-ERR-05`, `NFR-DATA-03` |
 
-**Rule slots — shape fixed, content pending.**
+**Rule slots — shape fixed, content pending.** `VR-S1`, `VR-S2`, `VR-S3`, and `VR-S4` are
+now **filled**; they are retained here under their established identifiers, struck through,
+so the record of what was open and how it closed stays legible. `VR-S5` and `VR-S6` remain
+genuinely open.
 
 | ID | Slot | Blocked on |
 |---|---|---|
-| `VR-S1` | *The set of fields required at submission.* A required-field rule will be enforced; **which** fields it names is not decided. | `OQ-8` |
-| `VR-S2` | *The contact-method minimum.* The system will either enforce "at least one of phone/email/website" or not. Which, is not decided. | `OQ-8b`, `FR-DATA-08` |
-| `VR-S3` | *Format checks* (phone, email, URL shape). That formats will be checked is committed by `NFR-SEC-05`; the specific rules and their strictness are not. | `OQ-8` |
+| ~~`VR-S1`~~ | *The set of fields required at submission.* **Resolved by `OQ-8`** and now a rule, not a slot: **at initial submission a listing must carry business name, category, description, locality, and country.** Administrative area, postal code, phone, email, and website may all be omitted, and a submission omitting every one of them is **accepted into moderation**. A revision is held to the same field obligations (`VR-6`). | ~~`OQ-8`~~ — **Decided** |
+| ~~`VR-S2`~~ | *The contact-method minimum.* **Resolved by `OQ-8b`** and now a rule, not a slot: **a listing must carry at least one usable contact method — phone, email, or website — before it may be approved.** The rule is evaluated **before approval, not at initial submission**. A contact value is **usable** when it is non-blank, passes `VR-S3`, and is retained as the value proposed for the listing. **Locality, administrative area, postal code, country, and physical-location or address information are not contact methods and never satisfy the minimum.** A business with no usable phone, email, or website **cannot be approved**; there is **no offline-business exemption**. "Usable" is structural — **no confirmation email, SMS, call, ownership proof, domain check, or third-party validation is introduced**. The model states the obligation and selects **no** constraint mechanism to express it (`DD-1`). | ~~`OQ-8b`~~ — **Decided**; `FR-DATA-08` **Must** |
+| ~~`VR-S3`~~ | *Format checks* (phone, email, URL shape). **Resolved by `OQ-8` as a posture, not a pattern**, and now a rule: validation is **permissive, international-friendly, and technology-neutral**. It must reject a value that is **blank where required, malformed beyond practical use, unsafe, outside established length or content boundaries, or incompatible with the field's basic purpose** — and it must do no more than that. It prescribes **no** regular expression, validation library, form control, schema type, database constraint, country-specific phone format, URL parser, or email-validation algorithm. **When an optional value is supplied but fails:** validation **fails visibly**, the entered value is **preserved for correction**, it is **not silently dropped**, and the submission or revision **cannot proceed through that validation step as though the value had not been supplied** (`VR-5`, `FR-VAL-03`). An invalid contact value therefore **does not count** toward `VR-S2`. | ~~`OQ-8`~~ — **Decided**; posture per `NFR-SEC-05` |
 | ~~`VR-S4`~~ | *Location obligations.* **Resolved by `OQ-6`** and now a rule, not a slot: locality **required**, country **required**, administrative area **optional**, postal code **optional**, street address **not collected**. Postal code is validated as international text, never against a fixed national format. | ~~`OQ-6`~~ — **Decided** |
 | `VR-S5` | *Category cardinality.* Whether exactly one category is enforced or several permitted. | `OQ-5` |
 | `VR-S6` | *Duplicate detection.* Whether the model must support identifying near-duplicate submissions, and on which attributes. | `OQ-12` |
 
-**Why `VR-S3` is a slot and not a rule.** It is tempting to write "email must match an
-email pattern" and call it settled. But format strictness is a product decision with real
-consequences: over-strict validation rejects legitimate international phone numbers and
-valid-but-unusual addresses, which in a *community* directory falls hardest on exactly
-the small and unconventional organizations the vision exists to include (`docs/01` —
-accessibility and inclusivity). The obligation to validate is committed. The severity is
-a product call, and it is not this document's to make.
+**Why `VR-S3` was a slot, and what filling it did — and did not — settle.** It was always
+tempting to write "email must match an email pattern" and call it settled. But format
+strictness is a product decision with real consequences: over-strict validation rejects
+legitimate international phone numbers and valid-but-unusual addresses, which in a
+*community* directory falls hardest on exactly the small and unconventional organizations
+the vision exists to include (`docs/01` — accessibility and inclusivity). **The product
+owner answered that question directly, and answered it generously: permissive.** What was
+filled is the **posture** — how strict validation may be, and what it must catch. What
+remains unfilled, deliberately, is every **expression** of that posture: the pattern, the
+library, the parser, the control, the constraint. **A model that writes a concrete regular
+expression here has not implemented `VR-S3`; it has overwritten it.** That choice belongs
+to `DD-1`/`DD-2`, and it must remain answerable to the permissive posture recorded above.
 
 ---
 
@@ -606,12 +640,21 @@ The life of one record, from arrival to end state.
 
 1. **Creation.** A public submission creates one listing record with status *pending* and
    a `submitted at` timestamp. It is not public. No public actor supplies status or
-   timestamps (`VR-3`).
+   timestamps (`VR-3`). **The record must satisfy the initial-submission obligations
+   (`VR-S1`) and the format checks on every value supplied (`VR-S3`) — but not yet the
+   contact minimum (`VR-S2`).** A submission carrying no phone, email, or website is
+   created and enters the queue normally.
 2. **Review.** An administrator reads the pending record, including its non-public
-   attributes.
+   attributes, and **may complete missing optional information or correct submitted
+   information** (`FR-ADM-04`). Everything the administrator supplies passes the same
+   rules as a public submission (`VR-6`) — this is completion, **not** a bypass.
 3. **Decision.** Exactly one of: **approve** (status → *approved*; the record becomes
    publicly visible in that same committed write), **reject** (status → *rejected*; it
    does not become visible), or **edit** (content changes; status unchanged).
+   **Approval is permitted only where every before-approval obligation holds** — the
+   initial-submission fields present and valid, every supplied value valid, and **at
+   least one usable contact method** (`VR-S2`, `FR-DATA-08`, `FR-ADM-06`). A record that
+   never acquires one cannot be approved; it stays pending or is rejected.
 4. **Maintenance.** An approved record may be edited later to keep it accurate. Every such
    change updates `last updated at`.
 5. **End state.** Here the lifecycle **stops being decided**, and the model says so.
@@ -824,8 +867,8 @@ contribution to them.
 | `OQ-5` | Single vs. multiple category; who curates the set; can administrators manage it? | Many-to-one vs. many-to-many is **structural**, not a field addition. If administrators curate the set, the category set becomes *mutable data*, not configuration. | `S-3` |
 | ~~`OQ-6`~~ **Decided** | Location granularity and the location-field set. | **Answered:** locality and country **required**; administrative area and postal code **optional**; precise/residential street address **not collected**; multi-country capable from launch. The `E1` attributes and the required/optional classification above are updated accordingly. Normalisation remains open (`DDM-5`). | `S-6` — **resolved** |
 | ~~`OQ-7`~~ **Decided** | Which listing/contact fields are public vs. withheld? | **Answered:** public = business name, category, description, locality, country, administrative area where provided, postal code where provided and designated public, and each contact method the business designated public. Everything else is administrator-visible or audit-only. *Collected* and *published* are separated explicitly; no field was added to the collection inventory. Mechanism remains `DDM-6`. | `S-2` — **resolved** |
-| `OQ-8` | Which fields are required at submission, and with what format checks? | Fills `VR-S1` and `VR-S3`. Distinct from "required on a valid record". | `S-1` |
-| `OQ-8b` | Is at least one contact method enforced per listing? | Fills `VR-S2`. A cross-field constraint that cannot be expressed as a per-field obligation. | `S-1` |
+| ~~`OQ-8`~~ **Decided** | Which fields are required at submission, and with what format checks? | **Answered:** required at initial submission = name, category, description, locality, country; optional at initial submission = administrative area, postal code, phone, email, website. Format checks are **permissive, international-friendly, technology-neutral**. A supplied-but-invalid optional value fails visibly, is preserved for correction, and is never treated as absent. An administrator may complete or correct information before approval **without bypassing validation**. Fills `VR-S1` and `VR-S3`. **"Required at submission" and "required before approval" are now separate and separately stated.** No field added or removed. | `S-1` — **resolved** |
+| ~~`OQ-8b`~~ **Decided** | Is at least one contact method enforced per listing? | **Answered: yes — before approval, not at initial submission.** At least one **usable** phone, email, or website is required before a listing may be approved; a submission may enter moderation with none. Location and address information never count. **No offline-business exemption.** Fills `VR-S2` — a cross-field constraint that cannot be expressed as a per-field obligation, and is deliberately still **not** expressed as a schema constraint (`DD-1`). | `S-1` — **resolved** |
 | `OQ-9` | Any anti-spam safeguard on the unauthenticated form? | Decides whether `E6` exists and what it holds. Most safeguards retain data about a non-consenting person. | `S-9` |
 | ~~`OQ-10`~~ **Decided** | Does a change to an approved listing publish immediately, or need secondary review? | **Answered:** secondary review. The approved listing stays public at its last approved version; the change is held as a **pending revision** that is never public (`DI-10`); approval makes it the effective public version; rejection leaves the approved listing unchanged. At most one pending revision per listing (`DI-11`). Entity **`E7` is committed**; **no listing status was added**. Storage mechanism remains `DDM-8`. | `S-5` — **resolved for `OQ-10`** |
 | `OQ-11` | Can administrators unpublish or remove an approved listing? | If yes, the three-value status set of `FR-AUD-01` is **no longer sufficient**. | `S-5` |
@@ -840,7 +883,7 @@ contribution to them.
 
 | Seam | Where the model is deliberately incomplete | Blocked on |
 |---|---|---|
-| `S-1` | The submission obligation set — required fields, contact minimum, formats. | `OQ-8`, `OQ-8b` |
+| ~~`S-1`~~ **Resolved** | The submission obligation set — required fields, contact minimum, formats. **Filled by `OQ-8` and `OQ-8b`:** required at initial submission = name, category, description, locality, country; optional at initial submission = administrative area, postal code, phone, email, website; **at least one usable contact method before approval**; permissive, international-friendly, technology-neutral format checks. See `VR-S1`, `VR-S2`, `VR-S3` above. **Only the obligations and the validation posture are fixed — no field was added or removed, and the mechanism that expresses them remains `DD-1`.** | ~~`OQ-8`~~, ~~`OQ-8b`~~ — **Decided** |
 | ~~`S-2`~~ **Resolved** | Field-level public/private designation. **Default: not public** — and the default stands for any attribute added later. **Filled by `OQ-7`:** see *Field classification* above. **Only the designation is fixed — the enforcement mechanism remains `DDM-6`.** | ~~`OQ-7`~~ — **Decided** |
 | `S-3` | Category cardinality and curation; whether the set is configuration or data. | `OQ-5` |
 | `S-4` | Searchable attribute set and matching mode. | `OQ-4` |
@@ -970,11 +1013,14 @@ Stated explicitly, because this document's chief risk is not that it models too 
 **R-1 — Resolving an open question by drawing it.** The dominant risk. Adding a `country`
 attribute would once have decided `OQ-6`; it is drawn now only because `OQ-6` **was** decided
 through the workflow and recorded above. The same applies to the revisions relationship: it is
-drawn now only because `OQ-10` **was** decided through the workflow and recorded above. Adding
-`deleted_at` decides `OQ-11`. Adding "at least one contact" decides `OQ-8b`. None of these
-would feel like a decision at the time — each would feel like drawing an obvious box.
-**Mitigation:** the eleven named seams, and the rule-slot device (**P7**) that keeps a
-pending rule visible as pending.
+drawn now only because `OQ-10` **was** decided through the workflow and recorded above. The
+same applies to the contact minimum: "at least one contact" is stated now only because
+`OQ-8b` **was** decided through the workflow — and even now it is stated as a **rule**, not
+as a null-or-check constraint, because *which* mechanism expresses it is still `DD-1`.
+Adding `deleted_at` decides `OQ-11`. None of these would feel like a decision at the time —
+each would feel like drawing an obvious box. **Mitigation:** the eleven named seams, and the
+rule-slot device (**P7**) that keeps a pending rule visible as pending — and, when it is
+answered, records *how far* the answer reached.
 
 **R-2 — Inheriting the mini lab's shape by default.** The prototype's single
 `business_listings` table is a plausible answer, and its very plausibility is the danger:
