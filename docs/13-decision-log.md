@@ -63,7 +63,7 @@ until it is answered. That is a harder deadline than a calendar date, and an hon
 | Gate | Subject | Owner | Status | Blocks | Hard blockers | Shaping inputs |
 |---|---|---|---|---|---|---|
 | **`DG-0`** | Process | **Joe S.** — maintainer | **Open** | Nothing | — | — |
-| **`DG-1`** | **Data design** | **Joe S.** — product owner | **Unresolved** | **All of `P1`**; transitively `P2`, `P3`, `P4` | 6 — **5 Decided, 1 Unresolved** (`OQ-13`) | 1 |
+| **`DG-1`** | **Data design** | **Joe S.** — product owner | **Unresolved** | **All of `P1`**; transitively `P2`, `P3`, `P4` | 6 — **5 Decided, 1 Unresolved** (`OQ-13`) | 2 |
 | **`DG-2`** | **Technology** | **Joe S.** — product owner | **Unresolved** | The **`P0b` scaffold** and all of `P1` | 2 | 2 |
 | **`DG-3`** | **Build-time** | **Joe S.** — product owner | **Unresolved** | `P3`, `P4`, and the *verifiability* of `P2` | 3 | 2 |
 | **`DG-4`** | **Release** | **Joe S.** — product owner | **Unresolved** | The **release decision**, not the build | — | — |
