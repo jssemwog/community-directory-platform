@@ -555,7 +555,12 @@ that revision's information the **effective public version** of its listing. Req
 
 **Rejecting a pending revision leaves the approved listing unchanged** and still
 public — it is not a removal, an unpublishing, or a content change. Retention of a
-rejected revision is **`OQ-13`**, which remains open and is not decided here.
+rejected revision is **`OQ-13`**, **Decided 2026-08-04**: a rejected revision is retained
+for **90 days from the rejection**, reachable only through the administrative projection,
+and then purged. **No operation in this document purges it.** `OQ-13` committed purge as a
+**system obligation** (`FR-AUD-06`) rather than an actor-invoked action, so it is not an
+operation and **no operation identifier was created**. Purging a rejected revision changes
+**nothing** about the approved listing or its current approved version.
 
 **Not designed in detail here:** the request and response shapes, and the persistence
 mechanism by which the effective public version changes (**`DDM-8`, open**).
@@ -941,7 +946,7 @@ prefixed `AQ`.
 | ~~`OQ-10`~~ **Decided** | Edit-after-approval: publish immediately, or secondary review? | **Answered:** secondary review. `OP-10` **exists and is committed**; `OP-6` writes a **pending revision** when the target is an approved listing. The approved listing stays publicly visible at its last approved version; the pending revision is never public (`DI-10`); at most one pending revision per listing (`DI-11`). `FR-ADM-10b` permits an authorized administrator to create and approve a revision in one atomic authorized operation, with every safeguard enforced. | `S-5` — **resolved for `OQ-10`**; **open for `OQ-11`** |
 | ~~`OQ-11`~~ **Decided** | May administrators unpublish or remove? | **Answered:** `OP-9` **exists and is committed**, carrying both **unpublish** and **republish**. A required current reason and an explicit confirmation are product obligations; an unpublished listing leaves **every** public read path, and a direct link returns the **same generic** unavailable result as any other non-available case. Approving a revision (`OP-10`) while unpublished does **not** republish. **`FR-AUD-01`'s three-status set survives unchanged** — publication state is a separate product concept. **Permanent deletion is excluded from the MVP.** | `S-5` — **resolved** |
 | `OQ-12` | How are duplicates resolved at review? | Whether any "duplicate of" concept enters the API; interacts with idempotency. | `S-10` |
-| `OQ-13` | Are rejected submissions retained or purged? | Whether any purge-triggering operation exists, and who may invoke it. | `S-11` |
+| ~~`OQ-13`~~ **Decided** | Are rejected submissions retained or purged? | **Answered:** retained **90 days from rejection**, then purged — rejected initial submissions and rejected approved-listing revisions alike. **No purge-triggering operation exists, and none was added:** purge is a **system obligation** (`FR-AUD-06`), not an actor-invoked action, so it falls outside this document's operation set. Retained records are reachable only through the **administrative projection** (`OP-5`); the public surface is unchanged — a rejected record remains one of the indistinguishable negative outcomes of `OP-2`. | `S-11` — **resolved** |
 | `OQ-14` | Audit logging? | Whether administrative writes emit audit entries. **Cannot be answered retrospectively.** | `S-8` |
 | `NOQ-4` | Expected load? | Whether read rate limiting or pagination is warranted at all. | — |
 | `NOQ-7` | Log retention; what counts as sensitive? | What an operational log may contain. | — |

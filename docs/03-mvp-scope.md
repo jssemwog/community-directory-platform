@@ -135,9 +135,12 @@ The MVP moderation flow, expressed functionally (not as an implementation):
    **republished** later. Unpublishing withdraws the listing from every public
    path while the record continues to exist administratively; it is **reversible**
    and destroys nothing. **Decided: `OQ-11` (2026-08-04).**
+6. Rejected records — both **rejected submissions** and **rejected revisions** — are
+   **retained for 90 days from rejection**, visible to authorized administrators only,
+   **terminal** (never edited, never later approved), and then **purged**. **Decided:
+   `OQ-13` (2026-08-04).**
 
-**Open question:** whether rejected submissions are retained or discarded
-(`OQ-13`). Recorded below.
+No open question remains for the administrative workflow. Recorded below.
 
 ## Content and moderation boundaries
 
@@ -320,9 +323,25 @@ review turnaround time) define "success" for the first release.
    outside MVP scope**. **`FR-AUD-01` is unchanged** — publication state is a
    **separate product concept** from listing status, and **no fourth listing
    status is introduced**. How this is represented remains deferred (`ADR-006`,
-   `DDM-9`); retention and purge remain `OQ-13`.
-6. **Retention of rejected submissions** — Are rejections kept for audit or
-   discarded?
+   `DDM-9`). **Whether an unpublished approved listing is ever subject to a retention
+   period or purge rule remains an open product question** — `OQ-13` explicitly excluded it
+   and assigned it to no existing open question.
+6. ~~**Retention of rejected submissions**~~ — **Decided 2026-08-04 (Joe S. — `OQ-13`).**
+   **Kept, then purged.** The policy covers **rejected initial submissions** and
+   **rejected approved-listing revisions**, under **one uniform rule**: each is retained
+   for **90 days from the rejection**, so an administrator can review, explain, or
+   reconsider a moderation decision for a bounded time. During retention the record —
+   including its **current rejection reason** — is visible to **authorized administrators
+   only**; it is never public and there is no submitter-facing view. A rejected record is
+   **terminal**: it cannot be edited and cannot later become approved. At 90 days it
+   becomes **purge-eligible**, which permits purging and changes nothing else; the record
+   stays administratively visible until it is actually purged. **Purging is part of the
+   MVP** as a **system obligation** — all-or-nothing, safe to repeat, and never altering an
+   approved listing. **Excluded from this policy:** unpublished approved listings (they
+   remain under `OQ-11`'s administrative retention), the resubmission workflow, and
+   category-specific retention. Historical audit events remain `OQ-14`/`NOQ-8`; duplicate
+   handling remains `OQ-12`; how retention and purge are represented remains `ADR-006`,
+   `DDM-8`, and `DDM-9`.
 7. **Administrator access** — The MVP requires that only administrators can
    moderate, but *how* administrators are authenticated is an architecture
    decision deferred to later work; the requirement here is functional only.

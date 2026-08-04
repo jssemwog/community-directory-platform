@@ -413,8 +413,18 @@ Each journey below uses this structure:
 - **Postcondition:** The submission is rejected and not public.
 - **Related MVP capabilities:** Administrator rejection; protection against
   unauthorized public changes.
-- **Open questions:** Are rejected submissions retained (for audit) or discarded
-  (MVP open question #6)? Is the lister informed (see L4 open question)?
+- **Retention of the rejected submission (Decided — `OQ-13`, 2026-08-04).** The rejected
+  submission is **kept for 90 days from the rejection**, so an administrator can review,
+  explain, or reconsider the decision for a bounded time. During those 90 days it is
+  visible to **authorized administrators only** — never to the public, and there is no
+  submitter-facing view — and so is the **reason** recorded for the rejection. The
+  rejection is **terminal**: the record cannot be edited and cannot later become approved,
+  so reconsideration means reviewing it, not reviving it; a further attempt requires a
+  **fresh submission**. After 90 days the record becomes **purge-eligible** — it stays
+  administratively visible until it is actually **purged**, which the system does as an
+  obligation rather than on request.
+- **Open questions:** Is the lister informed (see L4 open question)? *(Retention — MVP open
+  question #6 — is now **Decided**; see `OQ-13`.)*
 
 ### A6. Review or update an existing listing
 
@@ -447,6 +457,15 @@ Each journey below uses this structure:
     and the **currently approved listing remains unchanged**.
 - **Postcondition:** The approved listing is up to date, or the approved listing is
   unchanged and a revision is pending or was rejected.
+- **A rejected revision (Decided — `OQ-13`, 2026-08-04).** A revision that is rejected
+  **leaves the approved listing and its current approved version unchanged**, stays
+  **non-public**, and remains attached to its listing for **90 days from the rejection**,
+  visible to authorized administrators only. It is **terminal** — it cannot be edited,
+  reactivated, or approved later; a further change requires a **new pending revision**.
+  Retaining rejected revisions does **not** breach the one-active-pending-revision rule,
+  because that rule governs *pending* revisions and a rejected one is not pending. After
+  90 days the rejected revision becomes **purge-eligible**, and purging it changes
+  **nothing** about the approved listing.
 - **Related MVP capabilities:** Administrator editing; listing details; public
   browsing.
 - **Unpublish and republish (Decided — `OQ-11`, 2026-08-04).** An authorized
@@ -594,8 +613,11 @@ choices implied):
     from the MVP, and ordinary public removal requests are outside MVP scope.
 12. **Duplicate resolution (A7).** How duplicates are resolved during review (MVP
     open question #8).
-13. **Rejected-submission retention (A5).** Kept for audit or discarded (MVP open
-    question #6).
+13. ~~**Rejected-submission retention (A5).**~~ **Decided (`OQ-13`, 2026-08-04):**
+    rejected submissions **and** rejected revisions are kept for **90 days from
+    rejection**, administrator-visible only, **terminal**, then **purged** as a system
+    obligation. Unpublished approved listings, the resubmission workflow, and
+    category-specific retention are all **excluded**; audit events remain `OQ-14`.
 14. **Audit logging (A3).** Whether administrator edits/actions are logged
     (stakeholder interest; not confirmed for MVP).
 15. **Abuse escalation (A7).** Whether abuse handling needs any path beyond a
