@@ -75,7 +75,7 @@ Committed for the MVP:
 - **Administrator rejection** — decline a submission.
 - **Administrator editing** — correct or update listing content.
 - **Protection against unauthorized public changes** — only administrators can
-  approve, edit, or remove listings; the public can only submit requests.
+  approve, edit, or unpublish listings; the public can only submit requests.
 - **Responsive design** — usable on common phone, tablet, and desktop sizes.
 - **Basic accessibility** — sensible semantics, keyboard access, and readable
   contrast for core flows.
@@ -131,10 +131,13 @@ The MVP moderation flow, expressed functionally (not as an implementation):
      approved (or, if already approved, the correction is published).
 4. Approved listings may be **edited** later by an administrator to keep them
    accurate.
+5. Approved listings may be **unpublished** by an authorized administrator, and
+   **republished** later. Unpublishing withdraws the listing from every public
+   path while the record continues to exist administratively; it is **reversible**
+   and destroys nothing. **Decided: `OQ-11` (2026-08-04).**
 
-**Open question:** whether administrators can **unpublish or remove** an approved
-listing in the MVP, and whether rejected submissions are retained or discarded.
-Recorded below.
+**Open question:** whether rejected submissions are retained or discarded
+(`OQ-13`). Recorded below.
 
 ## Content and moderation boundaries
 
@@ -190,7 +193,7 @@ method**. The public read path does **not** show every stored field; it serves a
 | Category | Fields |
 |---|---|
 | **Public** | Business name, category, description, locality, country, administrative area where provided; postal code only where provided and designated for public display; each contact method (phone, email, website) the business designated public, that was supplied as a business contact and passed moderation. |
-| **Administrator-visible** | Record status, submission/update/review timestamps, reviewer identity, moderation notes, rejection reasons, approval and unpublishing history, and any submitter information another approved requirement authorises collecting. |
+| **Administrator-visible** | Record status, **current publication state** and the **current unpublish reason** required by `OQ-11`, submission/update/review timestamps, reviewer identity, moderation notes, rejection reasons, approval and unpublishing history, and any submitter information another approved requirement authorises collecting. *(`OQ-11` requires a current reason as current administrative state; whether durable historical event records exist remains `OQ-14`/`NOQ-8`.)* |
 | **Audit-only** | Audit entries and security-event records — never public. |
 | **Not collected during the MVP** | Precise business and residential street addresses (`OQ-6`). |
 
@@ -301,8 +304,23 @@ review turnaround time) define "success" for the first release.
    `FR-VAL-05` and `docs/13`.
 4. **Category source** — Who defines the predefined category list, and can
    administrators manage it in the MVP or is it fixed?
-5. **Removing/unpublishing approved listings** — Is administrator removal or
-   unpublishing in scope for the MVP, or only approve/reject/edit?
+5. ~~**Removing/unpublishing approved listings**~~ — **Decided 2026-08-04 (Joe S.
+   — `OQ-11`).** An authorized administrator **may unpublish** an approved
+   listing and **may republish** it. Unpublishing is **reversible**, requires a
+   **recorded current reason** and an **explicit confirmation**, and removes the
+   listing from **every** public read path — keyword search, category results,
+   location results, public listing collections, and direct public retrieval. A
+   previously shared public link receives the **same generic listing-unavailable
+   result** given for a listing that never existed, one awaiting review, and one
+   rejected. The listing stays **administratively visible**. A **pending revision
+   remains pending** when the listing is unpublished, and approving that revision
+   updates the current approved version **without republishing**; a later explicit
+   republish exposes the **current** approved version. **Permanent deletion is
+   excluded from the MVP**, and **ordinary public-user removal requests are
+   outside MVP scope**. **`FR-AUD-01` is unchanged** — publication state is a
+   **separate product concept** from listing status, and **no fourth listing
+   status is introduced**. How this is represented remains deferred (`ADR-006`,
+   `DDM-9`); retention and purge remain `OQ-13`.
 6. **Retention of rejected submissions** — Are rejections kept for audit or
    discarded?
 7. **Administrator access** — The MVP requires that only administrators can

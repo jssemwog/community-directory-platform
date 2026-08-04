@@ -293,8 +293,56 @@ what it validates, what it refuses, and what it does on failure.
   returning current state** — not a second transition, not an error, not a second
   last-updated bump (`docs/09`, `DI-1`/`DI-2`).
 
-**Not tested:** `OP-9` (remove/unpublish) — **it is conditional and does not exist**
-(`OQ-11`). Writing a test for it would be writing the decision.
+**Now testable (`OQ-11` Decided 2026-08-04):** `OP-9` (unpublish and republish an approved
+listing) **exists and is committed**, and the following properties are specifiable. They are
+built in `P4` alongside the other administrative operations.
+
+- **Authorized unpublish.** An authorized administrator unpublishes an approved listing;
+  the listing is no longer publicly available and the record still exists administratively.
+- **Unauthorized denial.** An unauthenticated or unauthorized caller attempting to unpublish
+  or republish is **denied without revealing whether the target exists** (`NFR-SEC-02`).
+- **Required reason.** An unpublish attempt with no reason is refused, and the listing
+  remains publicly available. The reason **never appears on any public surface**.
+- **Required confirmation.** Unpublishing does not take effect without the explicit
+  confirmation step; an unconfirmed attempt leaves the listing publicly available.
+- **Exclusion from every public read path.** An unpublished listing is absent from keyword
+  search, category results, location results, and public listing collections (`OP-1`,
+  `OP-11`) — asserted **per path**, not once.
+- **Generic direct-link behavior.** Direct public retrieval (`OP-2`) of an unpublished
+  listing returns **the same negative outcome, indistinguishable** from a listing that
+  never existed, one pending, and one rejected — an **equivalence** assertion, in the
+  spirit of `BI-4`, not merely a "not found" assertion.
+- **Administrative visibility.** The unpublished listing remains retrievable through the
+  administrative projection (`OP-5`), showing its current approved content, its **current
+  publication state**, its **current unpublish reason**, and any pending revision.
+- **Explicit republish.** An authorized administrator republishes; the listing becomes
+  publicly available again through every public read path.
+- **Current-approved-version republication.** Where a revision was approved while the
+  listing was unpublished, republishing exposes the **revised** (current approved) content,
+  **not** the content that was public when the listing was unpublished.
+- **Pending revision remains pending.** Unpublishing a listing that carries a pending
+  revision leaves that revision pending — not approved, rejected, cancelled, or discarded —
+  and `DI-11` still holds.
+- **Revision approval does not republish.** Approving a pending revision (`OP-10`) while the
+  listing is unpublished updates the current approved version and the listing **remains not
+  publicly available**. This is the highest-value test in the group: its failure mode is
+  silently returning withdrawn content to the public.
+- **Revision rejection does not republish.** Rejecting a pending revision while the listing
+  is unpublished leaves the approved listing unchanged (`FR-ADM-10`) **and leaves it not
+  publicly available**. Neither review outcome changes publication state.
+- **`FR-AUD-01` unchanged.** Throughout unpublish and republish, the listing's **status
+  remains *approved***, and no listing status outside `pending`/`approved`/`rejected` is
+  ever observed (`VR-1`, `NFR-DATA-01`, `NFR-DATA-02`).
+- **No permanent deletion.** No MVP operation destroys a listing record; after unpublishing,
+  the record is still retrievable administratively. **No retention or purge behavior is
+  tested** — that remains `OQ-13`.
+- **No public removal-request workflow.** No public surface offers a means to request
+  removal or unpublishing, and unpublishing is reachable only through an authorized
+  administrative path (`R-14`; `FR-VIS-09`, `FR-MOD-03`). This is an **absence** assertion,
+  in the same family as `BI-4` — it proves a capability was deliberately not built.
+
+**Still not tested here:** how any of this is represented or stored (`ADR-006`, `DDM-9`), and
+whether durable historical unpublish/republish events are recorded (`OQ-14`/`NOQ-8`).
 
 **Now testable (`OQ-10` Decided):** `OP-10` (approve a pending revision) exists. The
 revision behaviours below are specifiable, and are **built and tested in `P4`** — not
@@ -548,10 +596,12 @@ enter the pending state (`DI-11`); and the `FR-ADM-10b` atomic operation **publi
 nothing unless every check succeeds** and **leaves the approved listing unchanged on any
 failure**. Listing identity is stable across the cycle (`DI-8`).
 
-**Decision-dependent and therefore NOT tested:** remove/unpublish (**`OQ-11`**), duplicate
+**Decision-dependent and therefore NOT tested:** duplicate
 marking (**`OQ-12`**), rejected-submission retention and purge — including retention of a
 rejected *revision* (**`OQ-13`**), audit emission (**`OQ-14`**), and lister notification
-(**`OQ-2`**). Each would be a test of a behavior nobody has approved.
+(**`OQ-2`**). Each would be a test of a behavior nobody has approved. *(Unpublish and
+republish are **no longer** in this list — `OQ-11` is Decided and its properties are
+specified above.)*
 
 ---
 
@@ -787,7 +837,7 @@ becomes the decision (**T4**).
 | ~~**`OQ-8` / `OQ-8b`**~~ **Decided** | — nothing is untestable here any longer | **Yes:** that a submission carrying only name, category, description, locality, and country is **accepted**; that a submission with **no** contact method is accepted into moderation but **cannot be approved**; that a listing with at least one usable phone, email, or website **can** be; that an **invalid** contact value does **not** satisfy the minimum; that locality or other location data **never** satisfies it; that a supplied-but-invalid optional value **fails visibly and is preserved**, never silently dropped; that administrator completion is validated by the **same** rules; and that the same rules apply to a revision, whose failure **leaves the approved listing unchanged**. **Still not testable: any concrete format pattern** — assertions must exercise the permissive posture, not a chosen expression |
 | **`OQ-9`** anti-spam | Any safeguard behavior — **and its absence cannot be asserted as correct either.** | Yes — that any safeguard must not break keyboard/assistive operability. |
 | ~~**`OQ-10`**~~ **Decided** | — nothing is untestable here any longer | **Yes:** the full revision lifecycle — pending revision never public (`DI-10`), approved listing stays public at its last approved version, approval makes the revision effective, **rejection leaves the approved listing unchanged**, one active pending revision (`DI-11`), and the `FR-ADM-10b` atomic operation's all-or-nothing publication |
-| **`OQ-11`** remove/unpublish | **Any removal behavior — `OP-9` does not exist.** | — |
+| ~~**`OQ-11`**~~ **Decided** | — nothing is untestable here any longer, except **representation** (`ADR-006`/`DDM-9`) and **retention or purge**, which remain `OQ-13` | **Yes:** authorized unpublish; unauthorized denial; required reason; required confirmation; exclusion from **every** public read path; generic indistinguishable direct-link result; administrative visibility; explicit republish; **current**-approved-version republication; pending revision stays pending; **revision approval does not republish**; `FR-AUD-01` unchanged; no permanent deletion |
 | **`OQ-12`** duplicate handling | Duplicate detection or marking. | — |
 | **`OQ-13`** rejected retention / purge | Any retention period or purge behavior. | — |
 | **`OQ-14`** audit logging | **Any audit emission.** *(Note the asymmetry: history not captured cannot be reconstructed later.)* | — |
@@ -848,7 +898,7 @@ quietly becomes a missing performance *test*, permanently.
 | ~~`OQ-8` / `OQ-8b`~~ **Decided** | Required fields; contact minimum? | **Obligation tests are now specifiable** — by stage: at initial submission, on any supplied value, and before approval. **Concrete format patterns remain untestable**, and a test asserting one would overwrite the permissive posture. |
 | `OQ-9` | Anti-spam? | Untestable either way — the absence of a safeguard cannot be asserted correct. The accessibility constraint on any future safeguard **is** recorded. |
 | ~~`OQ-10`~~ **Decided** | Edit-after-approval? | **Revision tests are now specifiable** and are built in `P4`. |
-| `OQ-11` | Remove/unpublish? | **No removal tests. `OP-9` does not exist.** |
+| ~~`OQ-11`~~ **Decided** | Remove/unpublish? | **Unpublish/republish tests are now specifiable** and are built in `P4`. `OP-9` exists. **No retention or purge tests** — that is `OQ-13`. |
 | `OQ-12` | Duplicate handling? | No duplicate tests; an exploratory charter records the pain. |
 | `OQ-13` | Rejected retention / purge? | No retention or purge tests. |
 | `OQ-14` | Audit logging? | **No audit tests — and the omission is irreversible for every action taken meanwhile.** |

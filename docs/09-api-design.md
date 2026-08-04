@@ -57,7 +57,7 @@ a response body.
 - [`docs/08-data-model.md`](./08-data-model.md) — entities `E1`–`E7`, invariants
   `DI-1`–`DI-11`, validation rules `VR-1`–`VR-7` and slots `VR-S1`–`VR-S6`, and the
   **eleven seams `S-1`–`S-11`** this document must not close. `S-5` is **resolved for
-  `OQ-10`** and **still open for `OQ-11`**.
+  `OQ-10`** and **resolved for `OQ-11`** — `S-5` is now fully closed.
 
 ---
 
@@ -252,9 +252,13 @@ moment it is approved — or confirm that a named business was rejected. `NFR-SE
 requires that an unauthorized attempt be denied "without revealing protected content,
 whether a target record exists, or why access failed."
 
-Therefore: **`OP-2` returns exactly one negative outcome, for every non-approved case.**
-A listing that never existed, one awaiting review, one rejected, and — if `OQ-11` permits
-it — one unpublished are **indistinguishable** through the public surface. `FR-VIS-08`
+Therefore: **`OP-2` returns exactly one negative outcome, for every case in which the
+listing is not currently publicly available.** A listing that never existed, one awaiting
+review, one rejected, and — **`OQ-11` is Decided, so this case is now real** — one
+**unpublished** are **indistinguishable** through the public surface. This includes a
+visitor following a **previously shared direct link**: the response must not reveal that
+the listing exists administratively, that it was unpublished, by whom, when, or why.
+`FR-VIS-08`
 already asks for "a clear *listing not available* message, rather than stale content";
 this document adds the reason that message must not be refined into something more
 helpful.
@@ -467,7 +471,8 @@ those publicly would be severe.
 
 **`A7` (duplicate, incomplete, misleading, abusive content) gets no operation of its own,
 and that is a finding rather than an omission.** Every action `A7` describes is already
-expressible: reject with a note, edit to correct, or — if `OQ-11` allows — remove. What
+expressible: reject with a note, edit to correct, or — **`OQ-11` being Decided** —
+unpublish (`OP-9`). What
 `A7` would additionally need is a way to *express that one record duplicates another*, and
 that is `docs/08`'s seam `S-10` (`OQ-12`), which is open. Inventing a "mark as duplicate"
 operation now would close it. **Deferred to `OQ-12`.**
@@ -476,22 +481,61 @@ operation now would close it. **Deferred to `OQ-12`.**
 
 ## Status and lifecycle operations
 
-### OP-9 *(conditional — `S-5` / `OQ-11`)* — Remove or unpublish an approved listing
+### OP-9 *(committed — `S-5` resolved for `OQ-11`)* — Change the publication state of an approved listing
 
 | | |
 |---|---|
-| **Who** | Administrator (authenticated) |
+| **Who** | Administrator (authenticated, authorized) |
 | **Journeys** | A6, A7 |
-| **Status** | **Conditional. Exists only if `OQ-11` confirms that administrators may unpublish or remove an approved listing in the MVP.** |
-| **Returns** | Confirmation of the resulting state. |
-| **Authorization** | **Required**, attributable. |
+| **Status** | **Committed by `OQ-11` (Decided 2026-08-04).** Carries **both directions** of the publication-state change: **unpublish** and **republish**. |
+| **Accepts** | A record identity; the intended resulting publication state; and, when unpublishing, the **required current reason**. |
+| **Returns** | Confirmation naming the **resulting publication state**. |
+| **Authorization** | **Required**, attributable. An unauthorized attempt is denied under `NFR-SEC-02` without revealing whether the target exists. |
 
-**Why this is not simply specified and moved past.** `docs/08` found that answering
-`OQ-11` "yes" means **the three-value status set in `FR-AUD-01` is no longer sufficient** —
-an *unpublished* record is neither pending, approved, nor rejected. So `OP-9` cannot be
-designed without also changing the lifecycle, which is an approved requirement. It is
-recorded as conditional, and the consequence is stated so that whoever decides `OQ-11`
-knows it is not a permissions toggle.
+**Obligations this operation carries.**
+
+- **Unpublish** applies only to an **approved** listing. It makes the listing unavailable
+  through **every** public read path — `OP-1`, `OP-2`, `OP-11`, and any other public
+  retrieval — while the record continues to exist and remains fully available through the
+  administrative projection (`OP-5`).
+- **A current reason is required to unpublish**, and is **never public**. It is current
+  administrative state; whether a durable **historical event record** is written remains
+  `OQ-14`/`NOQ-8` and is **not decided here**.
+- **Explicit confirmation is required before the change takes effect** (product
+  obligation; the interaction is `docs/10`, and no widget is chosen here).
+- **Republish** exposes the listing's **current approved version at the time of
+  republication** — not necessarily the version public when it was unpublished. It
+  requires **no separate review or approval workflow** beyond this authorized, confirmed
+  action.
+- **`OP-9` never destroys a record.** Permanent deletion is **excluded from the MVP**; no
+  operation in this document destroys a listing.
+- **`OP-9` changes publication state only — never listing status.** The listing remains
+  *approved* throughout, so `FR-AUD-01` and `NFR-DATA-02` are untouched.
+
+**Interaction with the revision lifecycle (`OP-6`, `OP-10`).** Unpublishing a listing that
+carries a pending revision **leaves that revision pending** — `OP-9` does not approve,
+reject, cancel, or discard it, and `DI-11` still permits at most one. **`OP-10` invoked
+while the listing is unpublished** makes the revision's information the listing's current
+approved version and **leaves the listing unpublished**: it does **not** republish.
+**Rejecting a pending revision while the listing is unpublished** leaves the approved
+listing unchanged (`FR-ADM-10`) and likewise leaves it **unpublished**. *(`OP-8` is
+scoped to rejecting a pending **submission**; which operation expresses revision
+rejection is a pre-existing question for this document and is **not** settled by
+`OQ-11`.)* Neither outcome of revision
+review changes publication state: restoring public availability always requires an
+explicit `OP-9` republish.
+
+**Why the earlier conditional framing is superseded.** This operation was previously
+recorded as conditional, on `docs/08`'s finding that answering `OQ-11` "yes" would make
+`FR-AUD-01`'s three-value set insufficient and force a fourth state. **`OQ-11` answered the
+question without that consequence:** publication state is modelled as a **separate product
+concept** from listing status, on the precedent `OQ-10` set for pending revisions. The
+lifecycle is therefore **not** changed, `FR-AUD-01` is **unchanged**, and `OP-9` is
+committed. It was never a permissions toggle, and the caution was correct — the answer
+simply resolved the status-model question a different way.
+
+**Technology-neutral.** No route, method, payload schema, status code, transport, cache
+behavior, or store mechanism is selected here; representation remains `ADR-006` / `DDM-9`.
 
 ### OP-10 *(committed — `S-5` resolved for `OQ-10`)* — Approve a pending revision
 
@@ -833,7 +877,7 @@ boundary `DI-5` protects — and, per `NFR-BACK-04`'s logic, into every log back
 
 **Audit logging** — accountability for administrative actions. **Open** (`OQ-14`/`NOQ-8`,
 `docs/08` seam `S-8`). If committed, every state-changing administrative operation
-(`OP-6`, `OP-7`, `OP-8`, and `OP-9` if it exists) emits an **append-only** entry naming the
+(`OP-6`, `OP-7`, `OP-8`, and `OP-9`) emits an **append-only** entry naming the
 record, the administrator, the action, and the time.
 
 **The asymmetry, restated because it is the reason not to defer this quietly:** an audit
@@ -895,7 +939,7 @@ prefixed `AQ`.
 | ~~`OQ-8` / `OQ-8b`~~ **Decided** | Required submission fields; contact-method minimum? | **Answered.** `OP-3` requires name, category, description, locality, and country, and **accepts a submission with no contact method**. The contact minimum — at least one **usable** phone, email, or website — is enforced **before approval** (`OP-7`, and `OP-10` for a revision), never at the write. Location values never count as contact. Format checks are **permissive and technology-neutral**; a supplied-but-invalid optional value is a **field-level validation failure**, not a silent omission. Fills `VR-S1`–`VR-S3`. **No operation was added, removed, or resequenced.** | `S-1` — **resolved** |
 | `OQ-9` | Anti-spam safeguard? | Whether `OP-3` has an abuse-refusal outcome and what it retains. | `S-9` |
 | ~~`OQ-10`~~ **Decided** | Edit-after-approval: publish immediately, or secondary review? | **Answered:** secondary review. `OP-10` **exists and is committed**; `OP-6` writes a **pending revision** when the target is an approved listing. The approved listing stays publicly visible at its last approved version; the pending revision is never public (`DI-10`); at most one pending revision per listing (`DI-11`). `FR-ADM-10b` permits an authorized administrator to create and approve a revision in one atomic authorized operation, with every safeguard enforced. | `S-5` — **resolved for `OQ-10`**; **open for `OQ-11`** |
-| `OQ-11` | May administrators unpublish or remove? | Whether `OP-9` exists — **and whether `FR-AUD-01`'s three-status set survives**. | `S-5` |
+| ~~`OQ-11`~~ **Decided** | May administrators unpublish or remove? | **Answered:** `OP-9` **exists and is committed**, carrying both **unpublish** and **republish**. A required current reason and an explicit confirmation are product obligations; an unpublished listing leaves **every** public read path, and a direct link returns the **same generic** unavailable result as any other non-available case. Approving a revision (`OP-10`) while unpublished does **not** republish. **`FR-AUD-01`'s three-status set survives unchanged** — publication state is a separate product concept. **Permanent deletion is excluded from the MVP.** | `S-5` — **resolved** |
 | `OQ-12` | How are duplicates resolved at review? | Whether any "duplicate of" concept enters the API; interacts with idempotency. | `S-10` |
 | `OQ-13` | Are rejected submissions retained or purged? | Whether any purge-triggering operation exists, and who may invoke it. | `S-11` |
 | `OQ-14` | Audit logging? | Whether administrative writes emit audit entries. **Cannot be answered retrospectively.** | `S-8` |
@@ -961,8 +1005,8 @@ belongs to a later specification.
 | A3 Edit submitted information | `OP-6` |
 | A4 Approve a submission | `OP-7` |
 | A5 Reject a submission | `OP-8` |
-| A6 Review or update an existing listing | `OP-5`, `OP-6`; removal only if `OQ-11` (`OP-9`) |
-| A7 Handle duplicate/abusive content | `OP-6`, `OP-8` (with note); duplicate *expression* is `OQ-12` |
+| A6 Review or update an existing listing | `OP-5`, `OP-6`; unpublish/republish `OP-9` (**committed** — `OQ-11`) |
+| A7 Handle duplicate/abusive content | `OP-6`, `OP-8` (with note), `OP-9` unpublish (`OQ-11`); duplicate *expression* is `OQ-12` |
 
 ### Functional requirements → API
 
@@ -979,7 +1023,7 @@ belongs to a later specification.
 | `FR-SUB-*` | `OP-3` |
 | `FR-VAL-01..06` | `AV-1`–`AV-8`; slots `VR-S1`–`VR-S5` |
 | `FR-CONF-01..04` | *Response data concepts* — outcome confirmation; **P7** |
-| `FR-ADM-*` | `OP-4`–`OP-8`; `OP-9` conditional |
+| `FR-ADM-*` | `OP-4`–`OP-8`; `OP-9` **committed** (`FR-ADM-12` unpublish/republish) |
 | `FR-AUTH-*` | `AA-1`–`AA-5` |
 | `FR-ERR-04/05/06` | *Error and empty-state behavior* |
 | `FR-AUD-01` (three statuses, defined transitions) | `OP-7`, `OP-8`; status never a public input |
@@ -1086,8 +1130,8 @@ conditional on open questions.
 The public read surface (`OP-1` retrieve approved listings, `OP-2` retrieve one approved
 listing, `OP-11` retrieve the category set) cannot write and **cannot express a
 non-approved query**. The submission surface (`OP-3`) cannot read and **cannot express an
-approved record**. The administrative surface (`OP-4`–`OP-8` and `OP-10` approve-a-revision, plus conditional
-`OP-9` remove/unpublish) is the only one that spans both, and the only one behind
+approved record**. The administrative surface (`OP-4`–`OP-8` and `OP-10` approve-a-revision, plus committed
+`OP-9` unpublish/republish) is the only one that spans both, and the only one behind
 authentication.
 
 That asymmetry is the security argument in one line: **a defect in the public surface

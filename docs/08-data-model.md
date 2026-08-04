@@ -350,10 +350,31 @@ stateDiagram-v2
     pending --> rejected : administrator rejects
     pending --> pending : administrator edits (content only)
     approved --> approved : pending revision approved (content only - OQ-10)
-    approved --> unpublished : administrator removes (CONDITIONAL - OQ-11)
     rejected --> [*] : purge (CONDITIONAL - OQ-13)
-    unpublished --> [*] : purge (CONDITIONAL - OQ-11 + OQ-13)
 ```
+
+**`OQ-11` adds no edge to this diagram, and that is the decision, not an omission.**
+Unpublishing and republishing change a listing's **publication state**, not its
+**listing status** — an unpublished listing is still *approved*. The publication-state
+concept is modelled separately below; it is deliberately **not** a fourth node here.
+
+**Publication state — a separate product concept** (`OQ-11`, Decided 2026-08-04). An
+**approved** listing is, independently of its status, in exactly one of two publication
+states:
+
+```mermaid
+stateDiagram-v2
+    state "approved listing" as A {
+        [*] --> publicly_available : approval (FR-ADM-06)
+        publicly_available --> unpublished : administrator unpublishes (FR-ADM-12, reason + confirmation)
+        unpublished --> publicly_available : administrator republishes (FR-ADM-12, current approved version)
+    }
+```
+
+This second diagram describes a **product concept**, not a stored field, a status value,
+an enum, a flag, a timestamp, a table, or any other representation — all of which remain
+`ADR-006` and `DDM-9`. *Pending* and *rejected* records are not publicly available for
+reasons already settled elsewhere, and publication state does not apply to them.
 
 **In words, because the diagram alone is not the specification.** A record enters the
 system as *pending* — never as anything else, since nothing is public until an
@@ -414,29 +435,63 @@ immutable history, or any other persistence mechanism is **`DDM-8`, which remain
 open**. "Becomes the effective public version" is policy language about *which
 information the public sees*, and nothing more.
 
-**Two transitions on the listing-status diagram are marked conditional, and neither may
-be treated as approved:**
+**One transition on the listing-status diagram remains conditional, and it may not be
+treated as approved:**
 
-- **`approved → unpublished`** exists **only if `OQ-11`** confirms that administrators
-  may unpublish or remove an approved listing in the MVP. This is not settled.
-  Critically, if it is confirmed, *the three-value status set in `FR-AUD-01` is no
-  longer sufficient* — a fourth state is needed, or removal must be modeled some other
-  way. **This is the trap in `OQ-11`**: it looks like a permissions question, but it is
-  a status-model question, and answering it "yes" changes an approved requirement.
 - **`rejected → purge`** exists **only if `OQ-13`** resolves toward deletion rather
   than indefinite retention. See *Data retention considerations*.
+
+**`approved → unpublished` — resolved, and resolved by removing it from this diagram.**
+This edge was previously drawn as a conditional **listing-status** transition, on the
+reading that permitting unpublishing would make `FR-AUD-01`'s three-value set
+insufficient and force a fourth state. **`OQ-11` (Decided 2026-08-04) settled the
+question the other way, and that earlier reading is superseded.** The trap was real —
+it *is* a status-model question, not a permissions question — but the answer is that
+**publication state is modelled as a separate product concept**, exactly as `OQ-10`
+modelled a pending revision as a separate entity rather than a fourth state (`DI-1`).
+So: administrators **may** unpublish and republish; **`FR-AUD-01` is unchanged**; **no
+fourth listing status exists**; and **no status transition edge is added**, so
+`NFR-DATA-02` is preserved rather than extended.
 
 **The transition rule, stated as an invariant** (`NFR-DATA-02`): a status change occurs
 **only** through a defined administrator action, **only** along a permitted edge above,
 and **only** as part of a single all-or-nothing write (`NFR-DATA-03`). No other path
 may alter status — not a public form, not a bulk import, not a direct store write.
 
+**The unpublish and republish lifecycle** (`OQ-11`, Decided 2026-08-04):
+
+- An authorized administrator may **unpublish** an approved listing. It becomes
+  unavailable through **every** public read path — keyword search, category results,
+  location results, public listing collections, and direct public retrieval — while the
+  record continues to exist and remains **administratively visible**.
+- Unpublishing requires a **recorded current reason** and an **explicit confirmation**
+  before it takes effect. The reason is **administrator-visible, never public**, and is
+  **current administrative state**, not a durable audit-event record (`OQ-14`/`NOQ-8`).
+- Unpublishing is **reversible** and destroys nothing. **Permanent deletion is excluded
+  from the MVP**; the MVP provides no capability that destroys a listing record.
+- An authorized administrator may **republish**, as an explicit confirmed action
+  requiring **no separate review or approval workflow**. Republishing exposes the
+  listing's **current approved version at the time of republication** — which is not
+  necessarily the version that was public when it was unpublished.
+- **Pending-revision interaction.** A pending revision **remains pending** when its
+  listing is unpublished: unpublishing does not approve, reject, cancel, or discard it,
+  and `DI-11` (at most one per listing) continues to hold. **Approving a revision while
+  the listing is unpublished** updates the listing's current approved version, leaves it
+  **unpublished**, and does **not** republish it — publication is never accidental or
+  implicit (`FR-MOD-01`). **Rejecting a revision while the listing is unpublished** leaves
+  the approved listing unchanged (`FR-ADM-10`) and likewise **leaves it unpublished** — a
+  rejection is not a publication act either. A later explicit republish exposes the
+  then-current approved version.
+- **Ordinary public-user removal requests are outside MVP scope.** Unpublishing is
+  administrator-initiated only.
+
 **What the model now decides, and what it still does not.** Whether an approved listing
 keeps its public visibility while a change is reviewed **is decided**: it does, at its
-last approved version (`OQ-10`; `S-5` resolved for `OQ-10`). Still open: whether a
-rejected record may be resubmitted; what ordering or precedence statuses have; whether
-an approved listing may be unpublished or removed at all (`OQ-11` — the other half of
-`S-5`); and the retention of rejected submissions and rejected revisions (`OQ-13`).
+last approved version (`OQ-10`). Whether an approved listing may be unpublished and
+republished **is decided**: it may (`OQ-11`), through publication state rather than
+listing status — **`S-5` is now fully resolved**. Still open: whether a rejected record
+may be resubmitted; what ordering or precedence statuses have; and the retention of
+rejected submissions and rejected revisions (`OQ-13`).
 
 ---
 
@@ -516,14 +571,15 @@ by `OQ-7` (2026-07-31), against the field inventory settled by `OQ-6`.
 | **Moderation / workflow** | Record status | **Administrator-visible** | `FR-DATA-09`, `NFR-PRIV-01` |
 | **Moderation / workflow** | Submitted-at, last-updated-at | **Administrator-visible** | `FR-AUD-02/03`, `NFR-PRIV-01` |
 | **Moderation / workflow** | Reviewer identity, reviewed-at, moderation note, rejection reason | **Administrator-visible** | Where they exist — shape is `S-7`. `NFR-PRIV-03` |
-| **Moderation / workflow** | Approval history, unpublishing history, other internal workflow information | **Administrator-visible** | Where they exist — governed by `OQ-11`, `OQ-13`. `NFR-PRIV-03` |
+| **Moderation / workflow** | **Current publication state** (publicly available or unpublished) and the **current unpublish reason** | **Administrator-visible; never public** | **Required by `OQ-11`** (Decided) — current administrative state, not a historical record. `NFR-PRIV-03` |
+| **Moderation / workflow** | Approval history, unpublishing history, other internal workflow information | **Administrator-visible** | Where they exist — **whether durable historical event records exist is `OQ-14`/`NOQ-8`**, not `OQ-11`; retention is `OQ-13`. `NFR-PRIV-03` |
 | **Moderation / workflow** | Pending revision content and revision workflow information (`E7`) | **Administrator-visible; never public** | A pending revision is never returned by any public read path (`DI-10`). Only the currently effective public version is public, and it is projected by the `OQ-7` field classification above — **which this decision does not change**. `FR-ADM-10`, `NFR-PRIV-01/03` |
 | **Audit / security** | Audit entries (`E5`) | **Audit-only; never public** | Existence and content governed by `OQ-14`/`NOQ-8`. `NFR-OBS-05` |
 | **Audit / security** | Security-event records, safeguard data (`E6`), addresses of network origin, device information, provider or infrastructure metadata | **Audit-only; never public** | Where they exist — `OQ-9`, `NOQ-7`. `NFR-PRIV-03/04`, `NFR-OBS-02` |
 
 **What this table does not do.** It does not decide **whether** an administrator-visible
-or audit-only field is collected or retained at all — that remains `OQ-11`, `OQ-13`
-(lifecycle and retention) and
+or audit-only field is collected or retained at all — that remains `OQ-13`
+(retention) and
 `OQ-14`/`NOQ-8` (audit). **`OQ-10` is Decided and adds no field:** a revision changes
 the *values* of already-approved fields and the public field set is unchanged.
 **`OQ-8`/`OQ-8b` are Decided and likewise add no field:** they set *obligation and
@@ -657,11 +713,19 @@ The life of one record, from arrival to end state.
    never acquires one cannot be approved; it stays pending or is rejected.
 4. **Maintenance.** An approved record may be edited later to keep it accurate. Every such
    change updates `last updated at`.
-5. **End state.** Here the lifecycle **stops being decided**, and the model says so.
-   Whether an approved record can be unpublished or removed is `OQ-11`; whether a rejected
-   record is retained or purged is `OQ-13`. **The MVP has no approved end state for a
-   record.** That is not an omission in this document — it is an accurate report of an
-   unmade decision.
+5. **Unpublish and republish** (`OQ-11`, **Decided**). An approved record may be
+   **unpublished** by an authorized administrator — withdrawn from every public read path,
+   retained administratively, with a recorded current reason and explicit confirmation —
+   and may later be **republished**, exposing its current approved version. This is a
+   **publication-state** change, not a status change, and it is **reversible**.
+6. **End state.** Here the lifecycle **stops being decided**, and the model says so.
+   `OQ-11` deliberately created **no end state**: it authorises reversible withdrawal from
+   public view, **not** destruction, and **permanent deletion is excluded from the MVP**.
+   Whether a rejected record is retained or purged is `OQ-13`. Whether `OQ-13`'s retention
+   and purge scope **extends to unpublished listings** is **not settled here and must not
+   be assumed** — that expansion requires its own explicit decision. **The MVP has no
+   approved end state for a record.** That is not an omission in this document — it is an
+   accurate report of an unmade decision.
 
 **Every step above is a single all-or-nothing write** (`NFR-DATA-03`). There is no
 intermediate state in which a record is half-approved, partially edited, or visible before
@@ -871,7 +935,7 @@ contribution to them.
 | ~~`OQ-8b`~~ **Decided** | Is at least one contact method enforced per listing? | **Answered: yes — before approval, not at initial submission.** At least one **usable** phone, email, or website is required before a listing may be approved; a submission may enter moderation with none. Location and address information never count. **No offline-business exemption.** Fills `VR-S2` — a cross-field constraint that cannot be expressed as a per-field obligation, and is deliberately still **not** expressed as a schema constraint (`DD-1`). | `S-1` — **resolved** |
 | `OQ-9` | Any anti-spam safeguard on the unauthenticated form? | Decides whether `E6` exists and what it holds. Most safeguards retain data about a non-consenting person. | `S-9` |
 | ~~`OQ-10`~~ **Decided** | Does a change to an approved listing publish immediately, or need secondary review? | **Answered:** secondary review. The approved listing stays public at its last approved version; the change is held as a **pending revision** that is never public (`DI-10`); approval makes it the effective public version; rejection leaves the approved listing unchanged. At most one pending revision per listing (`DI-11`). Entity **`E7` is committed**; **no listing status was added**. Storage mechanism remains `DDM-8`. | `S-5` — **resolved for `OQ-10`** |
-| `OQ-11` | Can administrators unpublish or remove an approved listing? | If yes, the three-value status set of `FR-AUD-01` is **no longer sufficient**. | `S-5` |
+| ~~`OQ-11`~~ **Decided** | Can administrators unpublish or remove an approved listing? | **Answered:** an authorized administrator may **unpublish** and **republish**; unpublishing is reversible, needs a current reason and explicit confirmation, and excludes the listing from every public read path. **The three-value status set of `FR-AUD-01` survives unchanged** — publication state is modelled as a **separate product concept**, not a fourth status, on the `OQ-10` precedent. A pending revision stays pending; approving one while unpublished does not republish. **Permanent deletion is excluded from the MVP.** Representation remains `ADR-006` / `DDM-9`. | `S-5` — **resolved** |
 | `OQ-12` | How are duplicate/near-duplicate submissions resolved? | Fills `VR-S6`; may require attributes or a relationship to express "duplicate of". | `S-10` |
 | `OQ-13` | Are rejected submissions retained or discarded? | Resolves the `FR-AUD-06` / `NFR-PRIV-05` contradiction. If retained: a purge capability becomes mandatory. | `S-11` |
 | `OQ-14` | Are administrator actions recorded in an audit log? | Decides whether `E5` exists. **Cannot be answered retrospectively** — uncaptured history is gone. | `S-8` |
@@ -887,7 +951,7 @@ contribution to them.
 | ~~`S-2`~~ **Resolved** | Field-level public/private designation. **Default: not public** — and the default stands for any attribute added later. **Filled by `OQ-7`:** see *Field classification* above. **Only the designation is fixed — the enforcement mechanism remains `DDM-6`.** | ~~`OQ-7`~~ — **Decided** |
 | `S-3` | Category cardinality and curation; whether the set is configuration or data. | `OQ-5` |
 | `S-4` | Searchable attribute set and matching mode. | `OQ-4` |
-| `S-5` **— half resolved** | Edit-after-approval and removal. **Resolved for `OQ-10`:** `E7` exists and is committed; the revision lifecycle is defined above; **no fourth listing status was introduced**. **Still open for `OQ-11`:** whether an approved listing may be unpublished or removed, and whether *that* requires a fourth status state. **The seam is not closed.** | ~~`OQ-10`~~ — **Decided**; `OQ-11` — **open** |
+| ~~`S-5`~~ **Fully resolved** | Edit-after-approval and removal. **Resolved for `OQ-10`:** `E7` exists and is committed; the revision lifecycle is defined above; **no fourth listing status was introduced**. **Resolved for `OQ-11` (2026-08-04):** an approved listing **may** be unpublished and republished; this is a **publication-state** change modelled separately from listing status, so again **no fourth listing status was introduced** and `FR-AUD-01` is unchanged. The complete surface is recorded — the status-model question and the pending-revision interaction (`R-11`/`R-12`) included. **The seam is closed.** Representation remains `DDM-9`; retention remains `OQ-13`. | ~~`OQ-10`~~ — **Decided**; ~~`OQ-11`~~ — **Decided** |
 | ~~`S-6`~~ **Resolved** | Location attributes — which exist, which are required. **Filled by `OQ-6`:** locality (required), country (required), administrative area (optional), postal code (optional); no street address. **Only the obligation is fixed — representation and normalisation remain `DDM-5`.** | ~~`OQ-6`~~ — **Decided** |
 | `S-7` | Review data shape — attributes on `E1`, or a separate `E4`. **Resolve with `S-8`.** | `OQ-14` (dependency) |
 | `S-8` | Audit entries — whether `E5` exists. | `OQ-14`, `NOQ-8` |
@@ -913,7 +977,7 @@ above: an open question is a *product* decision someone must make; a deferred de
 | `DDM-6` | **Physical separation of non-public attributes, and the representation of per-contact public-display designations** — same record, separate related structure, flags, or otherwise. | **Still open.** An implementation of the `S-2` boundary; `OQ-7` fixed the *boundary* and the designation *obligation*, not the *mechanism*. | — (open; physical) |
 | `DDM-7` | **Audit-entry storage** — same store, separate store, or append-only log. | Only meaningful once `E5` is known to exist. | `OQ-14` |
 | `DDM-8` | **Revision storage and the representation of the effective public version** — row update, version record, pointer, copy, immutable history, or otherwise. | **Still open, and now meaningful.** `OQ-10` committed `E7` and fixed *which information the public sees and when*; it selected **no** persistence mechanism. "Becomes the effective public version" is policy language, not a storage design. | — (open; physical) |
-| `DDM-9` | **Soft-delete vs. hard-delete** representation. | Presupposes that removal exists at all. | `OQ-11`, `OQ-13` |
+| `DDM-9` | **Soft-delete vs. hard-delete** representation, **and the representation of publication state** — status value, flag, timestamp, separate structure, or otherwise. | **Still open, and now partly meaningful.** `OQ-11` is Decided: it authorises **reversible unpublishing**, excludes **permanent deletion** from the MVP, and fixes publication state as a **product concept** — selecting **no** representation for it. The soft-delete/hard-delete question itself stays open and is not reached by `OQ-11`. | `OQ-13` (open); ~~`OQ-11`~~ — **Decided, selects no representation** |
 | `DDM-10` | **Migration and schema-evolution tooling.** | Out of scope for a logical model entirely. | — |
 
 **`DDM-6` is worth a second look**, because it is the one most likely to be mistaken for a
@@ -947,7 +1011,7 @@ actually withheld.
 | `FR-SUB-06`, `FR-ERR-05` (no partial/public record on failure) | `VR-7`; `DI-3` |
 | `FR-ADM-10` (revision lifecycle after approval) | `E7` — **committed**; *Status model → The revision lifecycle*; `DI-10`, `DI-11`; `S-5` (resolved for `OQ-10`) |
 | `FR-ADM-10b` (administrator atomic operation) | *The revision lifecycle*; `DI-3`, `DI-10`; `VR-6` |
-| `FR-ADM-12` (removal) | *Status model*, conditional transition — `S-5` |
+| `FR-ADM-12` (unpublish / republish) | *Status model → Publication state* and *The unpublish and republish lifecycle*; `S-5` — **resolved**. **Not** a listing-status transition |
 | `FR-ADM-13`, `FR-MOD-04` (duplicates) | `VR-S6`; `S-10` |
 
 ### Non-functional requirements → data model
@@ -1017,7 +1081,10 @@ drawn now only because `OQ-10` **was** decided through the workflow and recorded
 same applies to the contact minimum: "at least one contact" is stated now only because
 `OQ-8b` **was** decided through the workflow — and even now it is stated as a **rule**, not
 as a null-or-check constraint, because *which* mechanism expresses it is still `DD-1`.
-Adding `deleted_at` decides `OQ-11`. None of these would feel like a decision at the time —
+Adding `deleted_at` would once have decided `OQ-11`; `OQ-11` is now Decided, but the same
+risk simply moved — adding a `deleted_at`, a publication flag, or a fourth status value
+now decides **`DDM-9`** and pre-empts **`ADR-006`**, and adding a purge rule decides
+**`OQ-13`**. None of these would feel like a decision at the time —
 each would feel like drawing an obvious box. **Mitigation:** the eleven named seams, and the
 rule-slot device (**P7**) that keeps a pending rule visible as pending — and, when it is
 answered, records *how far* the answer reached.
@@ -1059,9 +1126,11 @@ in tension: there is exactly one place where "public" is decided, exactly one id
 record for its whole life, and no window in which a record is half-published.
 
 Everything genuinely undecided stays undecided, behind **eleven named seams** — one of
-which, `S-5`, is now half resolved. **`OQ-10`** — the only open question that would add an
+which, `S-5`, is now **fully resolved**. **`OQ-10`** — the only open question that would add an
 entity — was answered before data design began, at zero data volume, and entity `E7` is
-committed with no listing status added. **`OQ-14`** (audit logging) still deserves attention
+committed with no listing status added. **`OQ-11`** was answered the same way and for the
+same reason: publication state is modelled as a separate product concept, so the second half
+of `S-5` also closed **without adding a listing status**. **`OQ-14`** (audit logging) still deserves attention
 first, because it is the one whose "no" answer destroys information permanently.
 
 The model introduces no schema, no SQL, no store product, and no deployment resource — and it

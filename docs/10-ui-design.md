@@ -346,7 +346,8 @@ field wrongly published is a privacy incident that cannot be undone.
 security decision wearing the costume of an error message.
 
 `OP-2` returns exactly **one** negative outcome for every non-approved case — never existed,
-pending, rejected, or (if `OQ-11` permits) removed are **indistinguishable**. The UI must
+pending, rejected, or **unpublished** (`OQ-11`, Decided) are **indistinguishable** — including
+for a visitor arriving by a previously shared direct link. The UI must
 preserve that indistinguishability, and this is where it is most likely to be lost, because
 every instinct of good UX writing pushes toward being *more* helpful:
 
@@ -538,7 +539,7 @@ nobody spends effort making a review queue work at phone width.
 | **Journeys** | A2 review, A4 approve, A5 reject, A6 review existing listing, A7 problem content |
 | **Purpose** | See everything about one record and decide what to do with it. |
 | **Shows** | The record in the **administrative projection** (`OP-5`) — all content, administrative fields, moderation data, **in any status**. |
-| **Actions** | Approve · Reject · Edit (→ S7) · *(conditional)* Remove/unpublish |
+| **Actions** | Approve · Reject · Edit (→ S7) · **Unpublish** (reason + confirmation) · **Republish** (confirmation) |
 | **States** | Loading · Present · Not found · Error · Unauthorized |
 
 **This screen shows what no public screen may.** That asymmetry is the boundary working, not
@@ -653,7 +654,7 @@ approved, and must disable the action while one is in progress (`NFR-USA-04`).
 
 **A7 needs no separate screen.** Duplicate, incomplete, misleading, or abusive content is
 handled with the controls that already exist — reject with a note, edit to correct, or (if
-`OQ-11` allows) remove. What A7 would *additionally* need is a way to express "this
+`OQ-11`, Decided) unpublish. What A7 would *additionally* need is a way to express "this
 duplicates that", and that is seam `S-10` (`OQ-12`), which is open. **No "mark as duplicate"
 control is designed.**
 
@@ -666,15 +667,38 @@ record is the same entity in a different status (`docs/08` **P2**), and it is op
 inspected, and edited through the same screens. Inventing a parallel "manage published
 listings" area would be a screen for symmetry (**U7**).
 
-**Remove / unpublish is decision-dependent (`S-5` / `OQ-11`) and is NOT designed.**
+**Unpublish and republish are approved capabilities (`S-5` / `OQ-11`, Decided
+2026-08-04). The *capability* is committed; the *control* is still not drawn.**
 
-This is the guardrail most likely to be breached by accident, because a "Remove" button is
-the most natural thing in the world to put on an admin screen. It must not be drawn, for a
-reason larger than scope discipline: `docs/08` established that answering `OQ-11` "yes"
-means **the three-value status set in `FR-AUD-01` is no longer sufficient** — an unpublished
-record is neither pending, approved, nor rejected. So the control cannot be designed without
-also changing an approved requirement. **A removal control appears in this design only if
-`OQ-11` is resolved, and its state model must be resolved with it.**
+An authorized administrator **may unpublish** an approved listing and **may republish** it.
+The administrative screens must therefore make both actions available, and must satisfy
+these product obligations:
+
+- **A reason is required to unpublish**, captured as part of the action and never shown on
+  any public surface.
+- **An explicit confirmation is required before unpublishing takes effect**, and the
+  confirmation must **name the resulting publication state** — the same principle
+  `FR-CONF-04` already applies to saving, and for the same reason: two decisions must never
+  sit behind one control.
+- **Republishing is a deliberate, confirmed action** requiring no separate review step, and
+  it exposes the listing's **current approved version** — which the screen should make
+  plain, since a revision may have been approved while the listing was unpublished.
+- **Publication state must be displayed distinctly from listing status.** An unpublished
+  listing is still *approved*; a screen that conflates the two teaches the wrong model.
+  Neither may be conveyed by colour alone (`NFR-ACC-03`).
+
+**The earlier guardrail is superseded, and the reasoning behind it should be read
+carefully.** This section previously recorded that a removal control must not be drawn
+because `docs/08` had established that answering `OQ-11` "yes" would make `FR-AUD-01`'s
+three-value set insufficient. **`OQ-11` was answered "yes" without that consequence:**
+publication state is a **separate product concept** from listing status, so no approved
+requirement changed and `FR-AUD-01` stands. The caution was sound and it did its job — the
+decision was made deliberately rather than by drawing a button.
+
+**What is still not designed, and must not be invented here:** the control's form, label,
+placement, layout, the confirmation's presentation, and how the reason is captured. Those
+remain undrawn — **no widget, component, layout, or framework behavior is selected** (`U7`,
+`R-U3`). What changed is that the capability is now approved; how it looks is still open.
 
 ---
 
@@ -926,7 +950,7 @@ Deliberately **not designed**. Each is recorded so that its absence reads as a d
 | Element | Why deferred | Blocked on |
 |---|---|---|
 | **Report-inaccurate-listing control** (V7) | `FR-VIS-10` is priced **Deferred**; `OQ-1` is open. It would also be the **second unauthenticated write path**, doubling the abuse surface and inheriting every `OQ-9` concern. | `OQ-1` |
-| **Remove / unpublish control** | `OQ-11` is open — **and answering it "yes" breaks the three-value status set in `FR-AUD-01`.** Not a button; a lifecycle change. | `OQ-11`, `S-5` |
+| **Unpublish / republish control** | **Capability approved** (`OQ-11`, Decided) — `FR-AUD-01` is **unchanged**, because publication state is a separate product concept, not a fourth status. **The control's form, label, placement, and confirmation presentation remain undrawn.** | ~~`OQ-11`~~ — **Decided**; `S-5` — **resolved** |
 | **Audit-trail / history view** | Exists only if `OQ-14` commits audit logging. **Resolve with `S-7`.** | `OQ-14`, `S-8` |
 | **"Mark as duplicate" control** | A7 needs a way to express "duplicates that"; `OQ-12` is open. | `OQ-12`, `S-10` |
 | **Rejected-submission archive view** | Depends on whether rejected records are retained at all. | `OQ-13`, `S-11` |
@@ -956,7 +980,7 @@ contribution to it.
 | ~~`OQ-8` / `OQ-8b`~~ **Decided** | Required submission fields; contact minimum? | **Answered.** S3 marks name, category, description, locality, and country as required at initial submission; the other five as optional, **including all three contact inputs**. The contact minimum is **cross-field and blocks at approval, not at submission** — so its group-level message (`UV-5`) belongs to the administrator's review surface, with at most non-blocking guidance on the public form. Format feedback is **permissive**; no pattern, mask, or control type is chosen. | `S-1` — **resolved** |
 | `OQ-9` | Anti-spam safeguard? | Whether S3 has a challenge — **and it must not break `NFR-ACC-01/02`.** | `S-9` |
 | ~~`OQ-10`~~ **Decided** | Edit-after-approval: immediate or secondary review? | **Answered:** secondary review. **S7 needs a two-version view** (currently approved version and pending revision) and a pending-revision state, plus a state for "a pending revision already exists" (`DI-11`). The pending revision is never publicly visible (`DI-10`). Layout is still not designed. | `S-5` — **resolved for `OQ-10`**; **open for `OQ-11`** |
-| `OQ-11` | May administrators unpublish or remove? | Whether S6 has a removal control — **and whether `FR-AUD-01`'s status set survives.** | `S-5` |
+| ~~`OQ-11`~~ **Decided** | May administrators unpublish or remove? | **Answered:** yes — S6 gains **unpublish** (reason + confirmation) and **republish** (confirmation) capabilities. **`FR-AUD-01`'s status set survives unchanged**; publication state is shown distinctly from listing status. Public surfaces exclude unpublished listings entirely, and direct links get the generic unavailable result. **Form and layout still undrawn.** | `S-5` — **resolved** |
 | `OQ-12` | How are duplicates resolved? | Whether A7 needs a "duplicate of" control. | `S-10` |
 | `OQ-13` | Are rejected submissions retained? | Whether administrators can view rejected records at all. | `S-11` |
 | `OQ-14` | Audit logging? | Whether any history/trail is displayable. **Resolve with `S-7`.** | `S-8` |
@@ -1010,7 +1034,7 @@ open questions: an open question is a **product** decision; a deferred decision 
 | A3 Edit submitted information | S7 | `OP-6` |
 | A4 Approve | S6 — approve action | `OP-7` |
 | A5 Reject | S6 — reject action, optional note | `OP-8` |
-| A6 Review/update an existing listing | S6, S7; removal only if `OQ-11` | `OP-5`, `OP-6` |
+| A6 Review/update an existing listing | S6, S7; unpublish/republish (`OQ-11`, **Decided**) | `OP-5`, `OP-6`, `OP-9` |
 | A7 Duplicate/abusive content | S6, S7 — existing controls only | `OP-6`, `OP-8` |
 
 ### Requirements → UI
@@ -1054,17 +1078,18 @@ open questions: an open question is a **product** decision; a deferred decision 
 | `OP-5` record detail | S6 |
 | `OP-6` edit content | S7 |
 | `OP-7` approve · `OP-8` reject | S6 |
-| `OP-9` remove *(conditional)* | **No control designed** — `OQ-11` |
+| `OP-9` unpublish/republish *(committed)* | **Capability approved** (`OQ-11`); **control form still not designed** |
 | `OP-10` approve revision *(committed)* | `S7` — the two-version view and its approval path. **Layout not designed** (`OQ-10` Decided; design deferred) |
 | `OP-11` category set | S1 (filter), S3 (form) |
 
 ### Seams preserved
 
-**Ten of the eleven `docs/08` seams remain open, and `S-5` is half open**; the remaining
-conditional `docs/09` operation `OP-9` has **no UI drawn**: `S-1` (form obligations), `S-2`
+**Nine of the eleven `docs/08` seams remain open; `S-5` is now fully resolved**, though the
+newly committed `docs/09` operation `OP-9` still has **no UI drawn**: `S-1` (form obligations), `S-2`
 (what S2 and the result summary show), `S-3` (category control shape), `S-4` (search scope),
-`S-5` (**removal control — still open, `OQ-11`**; the two-version edit view is now required
-by `OQ-10`, though its layout is not designed), `S-6` (location controls), `S-7` (review history display — resolve with `S-8`),
+`S-5` (**resolved** — the two-version edit view is required
+by `OQ-10` and the unpublish/republish capability is approved by `OQ-11`, though neither
+layout is designed), `S-6` (location controls), `S-7` (review history display — resolve with `S-8`),
 `S-8` (audit trail display), `S-9` (anti-spam challenge), `S-10` (duplicate control), `S-11`
 (rejected-record visibility).
 
@@ -1102,8 +1127,10 @@ is conceptual and labeled illustrative; no field list is drawn where a seam owns
 
 **R-U3 — Closing a seam by drawing a control.** This is the dominant risk, and it is
 specific: a **checkbox list decides `OQ-5`**; a **field on the detail screen decides
-`OQ-7`**; a **Remove button decides `OQ-11`** — and that last one changes an approved
-requirement. None would *feel* like a decision. Each feels like drawing an obvious control.
+`OQ-7`**. A **Remove button** once decided `OQ-11`; `OQ-11` is now Decided, and the risk
+moved rather than disappeared — drawing a publication control that reads as a *status*
+value, or one that destroys rather than withdraws, would pre-empt **`DDM-9`**, **`ADR-006`**,
+and **`OQ-13`**. None would *feel* like a decision. Each feels like drawing an obvious control.
 An **asterisk once decided `OQ-8`**; asterisks may be drawn now because `OQ-8` **was**
 decided through the workflow — but an **input mask or format pattern would still overreach
 it**, since the decision fixed the posture and left the expression open.

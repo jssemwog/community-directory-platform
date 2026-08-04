@@ -449,10 +449,19 @@ Each journey below uses this structure:
   unchanged and a revision is pending or was rejected.
 - **Related MVP capabilities:** Administrator editing; listing details; public
   browsing.
-- **Open questions:** Can an administrator **unpublish or remove** an approved
-  listing in the MVP (MVP open question #5)? Recorded, not decided. *(Edit-after-
-  approval — MVP open question #10 — is now **Decided**; see `docs/05` `FR-ADM-10`,
-  `FR-ADM-10b` and `docs/13`.)*
+- **Unpublish and republish (Decided — `OQ-11`, 2026-08-04).** An authorized
+  administrator may **unpublish** the approved listing, withdrawing it from every
+  public read path while it stays visible and manageable administratively. Doing so
+  requires the administrator to **give a reason** and to **confirm explicitly**; the
+  reason is never shown publicly. The administrator may later **republish** it, which
+  exposes the listing's **current** approved version — not necessarily the version
+  that was public when it came down. If the listing carries a **pending revision** when
+  it is unpublished, that revision **stays pending**; approving it updates the current
+  approved version but **does not bring the listing back into public view**. Nothing is
+  destroyed: **permanent deletion is not part of the MVP**.
+- **Open questions:** none remaining for this journey. *(Edit-after-approval — MVP open
+  question #10 — and removal/unpublishing — MVP open question #5 — are both now
+  **Decided**; see `docs/05` `FR-ADM-10`, `FR-ADM-10b`, `FR-ADM-12` and `docs/13`.)*
 
 ### A7. Handle duplicate, incomplete, misleading, or abusive content
 
@@ -467,23 +476,27 @@ Each journey below uses this structure:
   1. The administrator classifies the problem.
   2. The administrator applies the appropriate available action: edit to fix
      (A3/A6) — which for an approved listing means proposing a revision — reject
-     (A5), or take a corrective action subject to the removal/unpublish open question
-     in A6 (`OQ-11`).
+     (A5), or **unpublish** the listing to withdraw already-public content from view
+     (A6; `FR-ADM-12`, `FR-MOD-06` — `OQ-11`, Decided), giving a reason and confirming.
 - **Alternate paths:**
   - Incomplete but fixable → the administrator completes it via edit, then
     approves.
   - Duplicate → the administrator declines the new one in favor of the existing
     listing (resolution mechanism is an open question).
 - **Failure or exception paths:**
-  - Abusive content must not become public; if already public, it must be
-    correctable/removable — dependent on the remove/unpublish open question.
+  - Abusive content must not become public; if already public, the administrator
+    **unpublishes** it, which withdraws it from every public path immediately and
+    reversibly (`OQ-11`, Decided). Correcting the content afterwards does **not**
+    republish it — a further explicit republish action is required, so a correction
+    can never silently return problematic content to public view.
 - **Postcondition:** The problematic content is resolved to the extent MVP
   actions allow; unresolved aspects are captured as open questions.
 - **Related MVP capabilities:** Administrator review, editing, rejection; content
   and moderation boundaries; protection against unauthorized public changes.
-- **Open questions:** Duplicate-resolution mechanism (MVP open question #8);
-  removal/unpublish of already-public content (MVP open question #5); whether
+- **Open questions:** Duplicate-resolution mechanism (MVP open question #8); whether
   abuse handling needs any escalation path beyond a single administrator.
+  *(Removal/unpublishing of already-public content — MVP open question #5 — is now
+  **Decided**; see `OQ-11`.)*
 
 ---
 
@@ -573,8 +586,12 @@ choices implied):
     that is never publicly visible; the approved listing stays public at its last
     approved version; approval makes the revision the effective public version;
     rejection leaves the approved listing unchanged.
-11. **Remove/unpublish approved listings (A6/A7).** Whether administrators can
-    remove or unpublish public listings in the MVP (MVP open question #5).
+11. ~~**Remove/unpublish approved listings (A6/A7).**~~ **Decided (`OQ-11`,
+    2026-08-04):** authorized administrators may unpublish an approved listing and
+    may republish it. Unpublishing is reversible, needs a reason and an explicit
+    confirmation, and removes the listing from every public read path; a previously
+    shared link gets the generic unavailable result. Permanent deletion is excluded
+    from the MVP, and ordinary public removal requests are outside MVP scope.
 12. **Duplicate resolution (A7).** How duplicates are resolved during review (MVP
     open question #8).
 13. **Rejected-submission retention (A5).** Kept for audit or discarded (MVP open
