@@ -300,7 +300,7 @@ tamper-resistant record status and administrative fields.
 | ID | Requirement | Quality attribute | Source | Priority | Verification | Notes |
 |---|---|---|---|---|---|---|
 | NFR-DATA-01 | Every listing record shall have exactly one well-defined status (pending, approved, or rejected) at all times, and status shall change only through the defined administrator actions. | Data integrity | FR-AUD-01, FR-MOD-01 | Must | Test | No record may exist in an undefined or dual status. |
-| NFR-DATA-02 | A record's status transitions shall follow only the permitted lifecycle (submitted → pending; pending → approved or rejected; pending → pending on an administrator content edit; and approved → approved when a pending revision is approved), with no unauthorized or accidental transition. | Data integrity | FR-AUD-01; A4, A5, A6 | Must | Test | **Approved-edit rule Decided: OQ-10.** A change to an approved listing is held as a pending revision; the listing stays *approved* throughout and **no listing status is added** (FR-AUD-01, DI-1). Approving a revision changes content, not status. A pending revision is never publicly visible (DI-10); at most one per listing (DI-11). The atomic administrator operation (FR-ADM-10b) is subject to the same permitted-transition rule and to NFR-DATA-03 atomicity. **The removal/unpublish rule remains Decision pending: OQ-11.** |
+| NFR-DATA-02 | A record's status transitions shall follow only the permitted lifecycle (submitted → pending; pending → approved or rejected; pending → pending on an administrator content edit; and approved → approved when a pending revision is approved), with no unauthorized or accidental transition. | Data integrity | FR-AUD-01; A4, A5, A6 | Must | Test | **Approved-edit rule Decided: OQ-10.** A change to an approved listing is held as a pending revision; the listing stays *approved* throughout and **no listing status is added** (FR-AUD-01, DI-1). Approving a revision changes content, not status. A pending revision is never publicly visible (DI-10); at most one per listing (DI-11). The atomic administrator operation (FR-ADM-10b) is subject to the same permitted-transition rule and to NFR-DATA-03 atomicity. **Unpublish/republish rule Decided: OQ-11 (2026-08-04) — and it adds no edge to this list.** Unpublishing and republishing change a listing's **publication state**, not its **listing status**: the listing remains *approved* throughout, so the permitted-transition set above is **unchanged and not weakened**. A publication-state change is nevertheless subject to the same discipline — it occurs only through a defined, authorized, attributable administrator action (FR-ADM-12), never from a public path, and never accidentally: unpublishing requires a recorded current reason and an explicit confirmation, and approving a revision while a listing is unpublished does **not** republish it. |
 | NFR-DATA-03 | A create, edit, or moderation action shall either complete fully or have no effect, never leaving a record partially written or inconsistent. | Data integrity / Reliability | FR-SUB-06, FR-ERR-05 | Must | Test | Atomicity of record changes. Cross-links NFR-REL-04. |
 | NFR-DATA-04 | Administrative fields (status, submission date, last-updated date) shall be settable only by the system or an authorized administrator and shall never be modifiable through any public path. | Data integrity / Security | FR-DATA-09, FR-AUD-04 | Must | Test | Integrity of the moderation boundary. |
 | NFR-DATA-05 | The submission date shall be recorded once at submission and not change, and the last-updated date shall change whenever a record's content or status changes. | Data integrity | FR-AUD-02, FR-AUD-03 | Must | Test | Accurate temporal metadata. |
@@ -437,9 +437,9 @@ here.** Each decision-pending requirement above points to one of these.
 
 **Referenced functional open questions.** `OQ-7` (public vs. withheld fields —
 NFR-PRIV-01, NFR-PRIV-02) is now **Decided**, as is `OQ-8`/`OQ-8b` (submission obligations —
-NFR-PRIV-04); `OQ-9` (anti-spam safeguard — NFR-SEC-06), `OQ-11` (removal/unpublish rule —
-NFR-DATA-02; `OQ-10`, the approved-edit rule, is now **Decided**),
-`OQ-13` (rejected-submission retention —
+NFR-PRIV-04), `OQ-10` (the approved-edit rule) and `OQ-11` (the unpublish/republish rule —
+NFR-DATA-02; **Decided** 2026-08-04, and it adds **no status transition**); `OQ-9`
+(anti-spam safeguard — NFR-SEC-06), `OQ-13` (rejected-submission retention —
 NFR-PRIV-05), and `OQ-14` (audit logging — NFR-OBS-05) remain open in
 [`docs/05-functional-requirements.md`](./05-functional-requirements.md) and are
 not resolved here.
@@ -539,7 +539,7 @@ carrying a deferred target is linked to the question that must resolve it.
 | NFR-RESP-03, NFR-COMP-01, NFR-COMP-02 | NOQ-6 |
 | NFR-OBS-05 | OQ-14 (NOQ-8) |
 | NFR-OBS-06 | NOQ-7 |
-| NFR-DATA-02 | OQ-11 (removal/unpublish only; the approved-edit rule is Decided — OQ-10) |
+| NFR-DATA-02 | **No open question remains** — the approved-edit rule is Decided (OQ-10) and the unpublish/republish rule is Decided (OQ-11), the latter adding **no status transition** |
 | NFR-BACK-01, NFR-BACK-03 | NOQ-3 |
 
 ---

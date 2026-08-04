@@ -93,13 +93,13 @@ its own.
 
 | FR family (all IDs) | Journeys (`docs/04`) | Surface · phase (derived) | Blocked / shaping question | Status | Issue · PR · Test |
 |---|---|---|---|---|---|
-| **FR-VIS-01…10** (visitor browse/view) | V1, V5, V6, V7 | Public read · **P2** | `OQ-3` (ordering), `OQ-11` (removal); ~~`OQ-7`~~ **Decided** (public fields) | **Public read path now serves the approved public projection** (`FR-DATA-11`/`11b`/`11c`, `docs/08` *Field classification*); **VIS-10 Deferred** (`OQ-1`); rest Committed | pending |
+| **FR-VIS-01…10** (visitor browse/view) | V1, V5, V6, V7 | Public read · **P2** | `OQ-3` (ordering); ~~`OQ-7`~~ **Decided** (public fields), ~~`OQ-11`~~ **Decided** (`FR-VIS-08` trigger — *not currently publicly available, for any reason*; **generic** result, unpublished listings included) | **Public read path now serves the approved public projection** (`FR-DATA-11`/`11b`/`11c`, `docs/08` *Field classification*); **VIS-10 Deferred** (`OQ-1`); rest Committed | pending |
 | **FR-SUB-01…09** (listing submission) | L1–L4 | Public write · **P3** | `OQ-9` (anti-spam); ~~`OQ-8`/`OQ-8b`~~ **Decided** (submission obligations) | **Submission obligations Committed** (`OQ-8`): `FR-SUB-02` presents the required-at-initial-submission set — name, category, description, locality, country — distinctly from the five optional fields; `FR-SUB-05` accepts a submission omitting **all** optional fields, **including every contact method**. **SUB-08 Deferred** (`OQ-2`); **SUB-09 Blocked** (`OQ-9`); rest Committed | pending |
-| **FR-ADM-01…13** (administrator actions, incl. `FR-ADM-10b`) | A1–A7 | Administrative · **P4** | `OQ-11` (removal), `OQ-12` (duplicates); ~~`OQ-10`~~, ~~`OQ-8`/`OQ-8b`~~ **Decided** | **Administrator completion Committed** (`OQ-8` — settles **C-7**): `FR-ADM-04` — an administrator may complete missing optional information and correct submitted information during moderation before approval, **validated identically to a public submission; never a bypass**. `FR-ADM-06` — approval permitted only where every before-approval obligation holds, **including the contact minimum**. **Revision lifecycle Committed** (`OQ-10`): `FR-ADM-10` **Must** — pending revision, approved listing stays public, approval makes the revision the effective public version, rejection leaves it unchanged; `FR-ADM-10b` **Must** — safeguarded atomic administrator operation. **ADM-12/13 Blocked/Conditional**; rest Committed | pending |
+| **FR-ADM-01…13** (administrator actions, incl. `FR-ADM-10b`) | A1–A7 | Administrative · **P4** | `OQ-12` (duplicates); ~~`OQ-10`~~, ~~`OQ-8`/`OQ-8b`~~, ~~`OQ-11`~~ **Decided** (`FR-ADM-12` — unpublish **and** republish Committed, **raised to Must**) | **Administrator completion Committed** (`OQ-8` — settles **C-7**): `FR-ADM-04` — an administrator may complete missing optional information and correct submitted information during moderation before approval, **validated identically to a public submission; never a bypass**. `FR-ADM-06` — approval permitted only where every before-approval obligation holds, **including the contact minimum**. **Revision lifecycle Committed** (`OQ-10`): `FR-ADM-10` **Must** — pending revision, approved listing stays public, approval makes the revision the effective public version, rejection leaves it unchanged; `FR-ADM-10b` **Must** — safeguarded atomic administrator operation. **ADM-12/13 Blocked/Conditional**; rest Committed | pending |
 | **FR-SRCH-01…09** (search & filter) | V2, V3, V4, V6 | Public read · **P2** | `OQ-4` (search scope), `OQ-5` (category model); ~~`OQ-6`~~ **Decided** (location granularity) | **SRCH-02/09 Blocked** (`OQ-4`,`OQ-5`); rest Committed | pending |
 | **FR-DATA-01…11** (listing data, incl. `FR-DATA-06b/06c`, `FR-DATA-11b/11c`) | Data; V3–V5 | Data · **P1** | `OQ-5`; ~~`OQ-6`~~, ~~`OQ-7`~~, ~~`OQ-8b`~~ **Decided** | **Location fields Committed** (`OQ-6`): `FR-DATA-04` locality **required**, `FR-DATA-06` country **required**, `FR-DATA-05` administrative area **optional**, `FR-DATA-06b` postal code **optional**, `FR-DATA-06c` street address **not collected**. **Public projection Committed** (`OQ-7`): `FR-DATA-11`, `FR-DATA-11b` classification, `FR-DATA-11c` business-designated contact visibility. **Contact minimum Committed** (`OQ-8b`): **`FR-DATA-08` now `Must`** — at least one **usable** phone, email, or website **before approval**, never at initial submission; location is not contact; **no offline-business exemption**. `FR-DATA-07` unchanged — each contact field stays individually optional. Rest Committed | pending |
 | **FR-VAL-01…06** (validation) | L2, L3, A3, A6 | Public write / admin · **P3** | ~~`OQ-8`/`OQ-8b`~~ **Decided** (rule set) | **Rule set Committed** (`OQ-8`/`OQ-8b`): **`FR-VAL-05` now `Must`, rewritten** — required at initial submission, required when supplied, required before approval; **permissive, international-friendly, technology-neutral** formats with no pattern, library, widget, schema type, or constraint prescribed. `FR-VAL-01` applies the submission-stage rules; `FR-VAL-03` preserves supplied-but-invalid values (never silently dropped); **`FR-VAL-04` preserved as the bridge to revisions** (`VR-6`). Behavior Committed as before | pending |
-| **FR-MOD-01…08** (moderation) | A4, A5, A7; boundaries | Administrative · **P4** | `OQ-11` (removal), `OQ-15` (escalation) | **MOD-06 Blocked**, **MOD-08 Deferred** (`OQ-15`); rest Committed | pending |
+| **FR-MOD-01…08** (moderation) | A4, A5, A7; boundaries | Administrative · **P4** | `OQ-15` (escalation); ~~`OQ-11`~~ **Decided** | **MOD-06 Committed** (`OQ-11` — abuse-in-public resolved by unpublishing; **raised to Must**), **MOD-08 Deferred** (`OQ-15`); rest Committed | pending |
 | **FR-AUTH-01…04** (access control) | Cross-cutting; A1–A7 | Boundary · **P1/P4** | mechanism deferred (`DD-4`, `NOQ-9`) | Committed (boundary); mechanism → `ADR-004` | pending |
 | **FR-ERR-01…06** (error/empty states) | V1, V6, L1–L3, A1 | Cross-surface · **P2–P4** | — | Committed | pending |
 | **FR-CONF-01…04** (confirmations) | L4, A4, A5, A6 | Public write / admin · **P3/P4** | — | Committed | pending |
@@ -108,11 +108,10 @@ its own.
 
 **Deferred and blocked functional requirements, named explicitly** (so their absence reads as
 a decision, per acceptance criterion): `FR-VIS-10` (deferred — `OQ-1`), `FR-SUB-08` (deferred —
-`OQ-2`), `FR-SUB-09` (blocked — `OQ-9`), `FR-ADM-12` (blocked —
-`OQ-11`), `FR-ADM-13` (blocked — `OQ-12`), `FR-SRCH-02` (shaped — `OQ-4`), `FR-SRCH-09` (blocked
-— `OQ-5`), `FR-MOD-06`
-(blocked — `OQ-11`), `FR-MOD-08` (deferred — `OQ-15`), `FR-AUD-05` (conditional — `OQ-14`/
-`NOQ-8`), `FR-AUD-06` (blocked — `OQ-13`).
+`OQ-2`), `FR-SUB-09` (blocked — `OQ-9`), `FR-ADM-13` (blocked — `OQ-12`), `FR-SRCH-02` (shaped — `OQ-4`), `FR-SRCH-09` (blocked
+— `OQ-5`), `FR-MOD-08` (deferred — `OQ-15`), `FR-AUD-05` (conditional — `OQ-14`/
+`NOQ-8`), `FR-AUD-06` (blocked — `OQ-13`). *(`FR-ADM-12`, `FR-MOD-06`, and `FR-VIS-08` left this
+list on 2026-08-04: `OQ-11` is **Decided** and all three are now **Committed** and **Must**.)*
 
 ### 1b. Non-functional requirements → where they land, and what they wait on
 
@@ -156,7 +155,7 @@ existing · **A7** handle problematic content.
 | `OP-6` edit a record's content | A3 | P4 | `S7` Record edit | pending |
 | `OP-7` approve a pending submission | A4 | P4 | `S6` | pending |
 | `OP-8` reject a pending submission | A5 | P4 | `S6` | pending |
-| `OP-9` remove/unpublish *(conditional — `S-5`/`OQ-11`)* | A6, A7 | P4 | `S6`/`S7` | pending |
+| `OP-9` unpublish/republish *(committed — `S-5` resolved for `OQ-11`)* | A6, A7 | P4 | `S6` | pending |
 | `OP-10` approve a pending revision *(committed — `S-5` resolved for `OQ-10`)* | A6 | P4 | `S7` | pending |
 | `OP-11` retrieve the category set | V3, L1 | P2 | `S1`, `S3` | pending |
 | `S4` Submission confirmation | L4 | P3 | (screen) | pending |
@@ -249,7 +248,7 @@ work, and a shaping input is not overstated into a block.
 | `OQ-7` public vs private field projection | `DG-1` | **Hard blocker** | `P1`, `P2` — the public projection | **Decided (2026-07-31)** — public: name, category, description, locality, country, administrative area where provided, postal code where provided and designated public, and business-designated public contact methods; all other fields administrator-visible or audit-only | `S-2` (**resolved**), `ADR-006`; `docs/13` `DG-1`; `docs/03`, `docs/05` `FR-DATA-11/11b/11c`, `docs/06` `NFR-PRIV-01/02`, `docs/08` *Field classification* |
 | `OQ-8` / `OQ-8b` required fields; contact minimum | `DG-1` | **Hard blocker** | `P3` validation *rules* | **Decided (2026-08-03)** — **required at initial submission:** name, category, description, locality, country; **optional at initial submission:** administrative area, postal code, phone, email, website. **Before approval:** at least one **usable** contact method (phone, email, or website) — **locality and address never count**, and there is **no offline-business exemption**. "Usable" = non-blank, passes the permissive checks, retained as proposed — **structural, not verified as owned or reachable**. Formats are **permissive, international-friendly, technology-neutral**; no pattern, library, widget, schema type, or constraint prescribed. A supplied-but-invalid optional value **fails visibly and is preserved**, never silently dropped. An administrator may **complete and correct** during moderation **without bypassing validation** (settles **C-7**); the contact minimum settles **C-6**. Revisions follow the same rules; **failed validation leaves the approved listing unchanged**. **No field added; `OQ-7` projection unchanged** | `S-1` (**resolved**), `VR-S1`/`VR-S2`/`VR-S3` (**filled**), `ADR-006` (**still Blocked**); `docs/13` `DG-1`; `docs/03`, `docs/05` `FR-SUB-02/05`, `FR-ADM-04/06`, `FR-DATA-07/08`, `FR-VAL-01/03/04/05`, `docs/06` `NFR-PRIV-04`, `docs/08` `VR-S1`–`VR-S3`, `docs/10` `UV-5`/`UV-8` |
 | `OQ-10` edit-after-approval | `DG-1` | **Hard blocker** | `P1` (`E7`), `OP-10` | **Decided (2026-08-02)** — an approved listing stays publicly visible at its last approved version; a proposed change is a **pending revision** that is never public (`DI-10`); approval makes it the effective public version; rejection leaves the approved listing unchanged; **at most one pending revision per listing** (`DI-11`), history unrestricted; an authorized administrator may create and approve a revision in **one atomic authorized operation** with all safeguards enforced (`FR-ADM-10b`). **No listing status added**; storage mechanism remains `DDM-8` | `S-5` (**resolved for `OQ-10`**; open for `OQ-11`), `ADR-006` (**still Blocked**); `docs/13` `DG-1`; `docs/05` `FR-ADM-10`/`FR-ADM-10b`, `docs/08` `E7`/`DI-10`/`DI-11`, `docs/09` `OP-6`/`OP-10`, `docs/10` `S7` |
-| `OQ-11` removal / unpublish | `DG-1` | **Hard blocker** | `P1` status model, `OP-9` | Unresolved | `S-5`, `ADR-006` |
+| ~~`OQ-11`~~ removal / unpublish | `DG-1` | **Hard blocker** | `P1` publication model, `OP-9` | **Decided (2026-08-04)** — an authorized administrator may **unpublish** an approved listing and **republish** it; unpublishing is **reversible**, requires a **current reason** and **explicit confirmation**, and excludes the listing from **every** public read path, a direct link returning the **generic** unavailable result; the listing stays **administratively visible**; a **pending revision stays pending** and approving it while unpublished **does not republish**; republishing exposes the **current** approved version; **permanent deletion excluded from the MVP**; **public removal requests out of scope**; **`FR-AUD-01` unchanged** — publication state is a **separate product concept**, **no fourth status**, no new status transition; representation deferred to `ADR-006`/`DDM-9` | `S-5` — **resolved**; `ADR-006` — **no longer blocked by this** |
 | `OQ-13` rejected-submission retention | `DG-1` | **Hard blocker** | `P1` (`S-11`), purge | Unresolved | `S-11`, `ADR-006` |
 | `OQ-4` searchable fields & matching mode | `DG-1` | *Shaping input* | Search *scope* (`BI-3` built regardless) | Unresolved | `S-4`, `ADR-007` |
 | `OQ-5` category model — cardinality, curation | `DG-1` | *Shaping input* | `S-3` representation (membership enforced regardless) | Unresolved | `S-3` |
@@ -300,7 +299,7 @@ gate is the first maintenance action the decision log requires.
 | `ADR-003` | Data-store product | Pending | `NOQ-2`, `NOQ-3` (`DD-3`) |
 | `ADR-004` | Administrator authentication mechanism | Pending | `NOQ-9` (`DD-4`) |
 | `ADR-005` | Hosting platform & runtime model | Pending | `DG-2` (`DD-5`) |
-| `ADR-006` | Listing data model & lifecycle states | Pending | `OQ-11`, `OQ-13` (`DD-1`) — ~~`OQ-6/7/8/8b/10`~~ **Decided** |
+| `ADR-006` | Listing data model & lifecycle states | **Blocked** | `OQ-13` (`DD-1`) **alone** — ~~`OQ-6/7/8/8b/10/11`~~ **Decided**. Not ready, not writable |
 | `ADR-007` | Search approach | Pending | `OQ-4` (`DD-14`) |
 | `ADR-008` | Anti-spam approach | Pending | `OQ-9` (`DD-6`) |
 | `ADR-009` | Audit-logging approach | Pending | `OQ-14`/`NOQ-8` (`DD-7`) |
@@ -341,7 +340,7 @@ gate is the first maintenance action the decision log requires.
 
 ~~`S-1` submission obligations (`OQ-8/8b`)~~ **resolved — `OQ-8`/`OQ-8b` Decided** (`VR-S1`, `VR-S2`, `VR-S3` filled; obligations and validation posture fixed, **no field added and no constraint mechanism selected**) · ~~`S-2` public/private field designation (`OQ-7`)~~ **resolved — `OQ-7` Decided** ·
 `S-3` category cardinality/curation (`OQ-5`) · `S-4` searchable attributes & matching (`OQ-4`) ·
-`S-5` edit-after-approval / removal — **half resolved:** ~~`OQ-10`~~ **Decided** (`E7` committed, revision lifecycle defined, no fourth listing status); **`OQ-11` still open** (removal / unpublish) · ~~`S-6` location attributes (`OQ-6`)~~ **resolved — `OQ-6` Decided** ·
+~~`S-5` edit-after-approval / removal~~ — **fully resolved:** ~~`OQ-10`~~ **Decided** (`E7` committed, revision lifecycle defined, no fourth listing status) **and** ~~`OQ-11`~~ **Decided** (unpublish/republish committed as **publication state**, again **no fourth listing status**; `R-11`/`R-12` pending-revision interaction recorded) · ~~`S-6` location attributes (`OQ-6`)~~ **resolved — `OQ-6` Decided** ·
 `S-7` review-data shape (`OQ-14` dependency) · `S-8` audit entries (`OQ-14`, `NOQ-8`) ·
 `S-9` anti-spam data (`OQ-9`) · `S-10` duplicate representation (`OQ-12`) ·
 `S-11` rejected retention & purge (`OQ-13`). **A cell that fills a seam with a guessed field
@@ -349,10 +348,13 @@ has answered `DG-1` by the back door.**
 
 ### Deferred vs excluded (`docs/12`, `docs/03`)
 
-- **Conditional / blocked (would be built, decision unmade):** `OP-9`, `E5`, `E6`, audit
+- **Conditional / blocked (would be built, decision unmade):** `E5`, `E6`, audit
   emission, anti-spam mechanism, retention structures. Recorded against their questions above.
 - **Committed by `OQ-10`:** `E7` listing revision, `OP-10` approve a pending revision, and the
   `S7` two-version view. **The revision *storage* mechanism remains `DDM-8` — open.**
+- **Committed by `OQ-11`:** `OP-9` unpublish/republish, and the `S6` unpublish and republish
+  capabilities with their required reason and explicit confirmation. **The *representation* of
+  publication state remains `ADR-006`/`DDM-9` — open**, and the control's form is undrawn.
 - **Deferred (not built, not needed):** outcome notification (`OQ-2`, `DD-16`), report-
   inaccuracy path (`OQ-1`), API versioning (`AQ-5`), redundancy/caching/dedicated search index.
 - **Excluded by `docs/03` (not deferred):** business-owner accounts, listing claiming, reviews,

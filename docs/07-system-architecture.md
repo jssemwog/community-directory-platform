@@ -209,7 +209,7 @@ built in advance.
 |---|---|---|---|---|
 | **Visitor** | No | Browse, search, filter, and view an approved listing public fields | See pending or rejected data; see administrative or withheld fields; write anything | FR-VIS-01, FR-AUTH-01, NFR-PRIV-01..03 |
 | **Lister** | No | Everything a Visitor may do, plus submit one listing request | Publish, edit, or delete any listing; see the status of another submission | FR-SUB-01, FR-VIS-09, FR-MOD-03 |
-| **Administrator** | **Yes** | View the pending queue; open, edit, approve, and reject; edit approved listings; remove (subject to OQ-11) | Bypass validation; act without the action being attributable | FR-ADM-01..13, FR-AUTH-02, NFR-SEC-01 |
+| **Administrator** | **Yes** | View the pending queue; open, edit, approve, and reject; edit approved listings; unpublish and republish approved listings (OQ-11, Decided — reason and confirmation required) | Bypass validation; act without the action being attributable | FR-ADM-01..13, FR-AUTH-02, NFR-SEC-01 |
 | **Maintainer** | Yes (platform, not app) | Deploy, read operational logs, run backup and restore, check health | Casually read non-public submission content — such access is privileged and logged | NFR-OPS-01, NFR-OBS-01..03, NFR-BACK-02 |
 | **System** | n/a | Set administrative fields (status, dates); enforce the lifecycle | Allow any of these to be set from a public path | FR-DATA-09, FR-AUD-01..04, NFR-DATA-04 |
 
@@ -385,10 +385,16 @@ delegated to the caller.
   FR-ADM-10b atomic administrator operation, applying every validation,
   authorization, and publication safeguard before anything becomes public, and
   leaving the approved listing unchanged on any failure.
-- **Still owns two deferred lifecycle seams.** Whether unpublish or remove
-  exists (OQ-11, FR-ADM-12) and whether rejected records are retained (OQ-13,
-  FR-AUD-06) remain state-machine questions, and the state machine lives here.
-  Answering them changes C6 and the data design, and nothing else.
+- **Now owns the publication-state change, and one remaining deferred seam.**
+  **OQ-11 is Decided (2026-08-04):** C6 performs the authorized unpublish and
+  republish of an approved listing (FR-ADM-12) — a **publication-state** change,
+  **not** a listing-status transition, so C6 remains the sole status writer and
+  FR-AUD-01's three values and NFR-DATA-02's permitted edges are untouched. C6
+  enforces the required reason and the explicit confirmation, and enforces that
+  approving a revision while a listing is unpublished does **not** republish it.
+  Whether rejected records are retained (OQ-13, FR-AUD-06) remains a
+  state-machine question, and the state machine lives here. Answering it changes
+  C6 and the data design, and nothing else.
 
 ### C7 — Validation Rules
 
@@ -830,7 +836,7 @@ on the server, on every request.*
 | **Anonymous to public read** | Browse, search, filter, view | No authentication required. C4 cannot return non-approved or non-public data, so there is nothing here for authentication to protect — the protection lives in the query model itself. | FR-VIS-01, FR-AUTH-01, NFR-PRIV-01 |
 | **Anonymous to public write** | A listing request | No authentication required, but the write is *narrowed*: C5 can only create a pending record. Input is validated and constrained server-side. | FR-SUB-01, NFR-SEC-05 |
 | **Anonymous to administrative** | Nothing. Ever. | C8 gates every administrative entry point — pages, actions, and any direct-URL or non-browser access. Denial reveals nothing: not the content, and not whether the record exists. | FR-AUTH-02, FR-AUTH-03, NFR-SEC-01, NFR-SEC-02 |
-| **Administrator to moderation** | Approve, reject, edit, remove (OQ-11) | C6 refuses to act without an authorized identity. Authorization is not delegated to the interface layer; C3 being hidden is not the control. | FR-MOD-02, NFR-SEC-01 |
+| **Administrator to moderation** | Approve, reject, edit, unpublish/republish (OQ-11, Decided) | C6 refuses to act without an authorized identity. Authorization is not delegated to the interface layer; C3 being hidden is not the control. | FR-MOD-02, NFR-SEC-01 |
 | **Application to data store** | All reads and writes | A server-held credential over a private path. No client ever holds one. | NFR-SEC-08 |
 
 **Two roles, and no more.** *Administrator* and *everyone else*. FR-AUTH-04
@@ -1387,7 +1393,7 @@ is visible.
 
 | ID | Deferred decision | Why deferred | Blocked by / must precede |
 |---|---|---|---|
-| **DD-1** | **Detailed data design** — fields, types, keys, indexes, and how the category set is represented | It depends on unresolved product decisions; guessing now would silently resolve them | **Blocked by OQ-11** (removal) and **OQ-13** (rejected retention). **OQ-6**, **OQ-7**, **OQ-10**, and **OQ-8/8b** are now **Decided** — OQ-10 committed entity E7 and the revision lifecycle without adding a listing status; OQ-8/8b settled the field obligations and the contact minimum **without adding, removing, or renaming any field**, and deliberately selected **no schema type, database constraint, or validation mechanism** — so the data design still has to express them. **The remaining two must be answered before data design starts.** |
+| **DD-1** | **Detailed data design** — fields, types, keys, indexes, and how the category set is represented | It depends on unresolved product decisions; guessing now would silently resolve them | **Blocked by OQ-13** (rejected retention) **alone**. **OQ-6**, **OQ-7**, **OQ-10**, **OQ-8/8b**, and **OQ-11** are now **Decided** — OQ-11 authorised reversible unpublish/republish as **publication state**, adding **no listing status** and selecting **no representation**, so the data design still has to express it (ADR-006, DDM-9) — OQ-10 committed entity E7 and the revision lifecycle without adding a listing status; OQ-8/8b settled the field obligations and the contact minimum **without adding, removing, or renaming any field**, and deliberately selected **no schema type, database constraint, or validation mechanism** — so the data design still has to express them. **The remaining one must be answered before data design starts.** |
 | **DD-2** | Language and application framework | Technology selection; needs the criteria above applied deliberately | Must satisfy hard requirements 1, 2, and 6 |
 | **DD-3** | Data-store product | Same. The *storage properties* are fixed; the product is not | Must satisfy hard requirements 3, 4, and 5. **Cannot be responsibly chosen until NOQ-2 and NOQ-3** (availability, RPO/RTO) are answered |
 | **DD-4** | Administrator authentication mechanism | The *boundary* is architecture and is settled (C8 gates everything, server-side). The *mechanism* is a technology choice | NFR-SEC-07, NOQ-9 (credential and session strength) |
@@ -1499,9 +1505,9 @@ table above. That table is the primary driver-to-requirement trace.
 | **FR-SUB-01..09** (submission) | C2, C5, C7, C9; C11 *(conditional)* | F2 | FR-SUB-04 holds by construction (C5 can only write pending). FR-SUB-08 depends on **OQ-2 / DD-16**; FR-SUB-09 on **OQ-9 / DD-6** |
 | **FR-ADM-01..13** (administrator, incl. FR-ADM-10b) | C3, C8, C6, C7, C9 | F3 | FR-ADM-10 and FR-ADM-10b are **settled by OQ-10** — C6 implements the revision lifecycle. FR-ADM-12 depends on **OQ-11**. FR-ADM-13 on **OQ-12** |
 | **FR-SRCH-01..09** (search and filter) | C1, C4, C9 | F1 | FR-SRCH-02 depends on **OQ-4 / DD-14** (seam in C4). FR-SRCH-05 on **OQ-6**. FR-SRCH-09 on **OQ-5** |
-| **FR-DATA-01..11** (listing data) | C7, C9, and the data design | — | The detailed shape is **DD-1**, now blocked only by OQ-11 and OQ-13. FR-DATA-11 maps to the public projection in C4 (**OQ-7**). **FR-DATA-08 is settled by OQ-8b** — a cross-field, before-approval obligation evaluated in C7 and enforced at the C6 approval step |
+| **FR-DATA-01..11** (listing data) | C7, C9, and the data design | — | The detailed shape is **DD-1**, now blocked only by OQ-13. FR-DATA-11 maps to the public projection in C4 (**OQ-7**). **FR-DATA-08 is settled by OQ-8b** — a cross-field, before-approval obligation evaluated in C7 and enforced at the C6 approval step |
 | **FR-VAL-01..06** (validation) | **C7** (shared), C2, C3 | F2, F3 | FR-VAL-04 is satisfied *because* C5 and C6 share C7 — which is also why administrator completion (FR-ADM-04) cannot bypass validation. **FR-VAL-05 is settled by OQ-8/8b** and is C7's stage-aware rule set: required at initial submission, required when supplied, required before approval |
-| **FR-MOD-01..08** (moderation) | **C6** (sole status writer), C8 | F3 | FR-MOD-01 holds by construction. FR-MOD-06 depends on **OQ-11**. FR-MOD-08 (escalation) on **OQ-15** — a human process, no component |
+| **FR-MOD-01..08** (moderation) | **C6** (sole status writer), C8 | F3 | FR-MOD-01 holds by construction. FR-MOD-06 is **settled by OQ-11** — corrective action for already-public content is unpublishing via C6. FR-MOD-08 (escalation) on **OQ-15** — a human process, no component |
 | **FR-AUTH-01..04** (authorization) | **C8** (the gate), C4, C5 | all | Enforced server-side on every request; boundary TB-3 |
 | **FR-ERR-01..06** (errors and empty states) | C1, C2, C3, C12 | all | Three distinct states (NFR-USA-03), with no internal detail leaked (NFR-REL-03) |
 | **FR-CONF-01..04** (confirmations) | C2, C3 | F2, F3 | Each states the *resulting status* (NFR-USA-05) |
@@ -1521,7 +1527,7 @@ table above. That table is the primary driver-to-requirement trace.
 | **Responsive** (RESP-01..04) | Responsive layout in C1 and C2; the administrative interface usable at tablet size and above (C3) | **Device matrix: NOQ-6 (DD-11)** |
 | **Maintainability** (MAINT-01..05) | Enforced layering; one codebase; a domain testable in-process; the category set and rules held as configuration (MAINT-04) | The coding standard is a project decision |
 | **Observability** (OBS-01..06) | C12: structured logs including denied access; a health check; non-technical user errors; the sensitive-data exclusion | **Audit log: OQ-14 (DD-7). Retention: NOQ-7 (DD-13)** |
-| **Data integrity** (DATA-01..06) | A single transactional store; C6 as sole status writer; atomic writes; system-set administrative fields | **Lifecycle completion: OQ-11.** OQ-10 is Decided — the revision lifecycle is defined and adds no listing status; residual risk is **R-3b** |
+| **Data integrity** (DATA-01..06) | A single transactional store; C6 as sole status writer; atomic writes; system-set administrative fields | **Lifecycle complete for OQ-10 and OQ-11** — both are Decided and **neither added a listing status**; the revision lifecycle and the publication-state change are defined. Residual risk is **R-3b**; retention (OQ-13) is still open |
 | **Backup and recovery** (BACK-01..05) | Scheduled backups to separate, equally protected storage; a documented and **tested** restore | **RPO, RTO, and frequency: NOQ-3 (DD-9)** — and this **gates DD-3** |
 | **Scalability** (SCALE-01..04) | Stateless (so it can scale out); a small corpus; C4 isolating search so that growth is additive. The SCALE-04 warning is honored explicitly: R-1 names review capacity as an attack surface | **Expected load: NOQ-4 (DD-12)** |
 | **Compatibility** (COMP-01..04) | Server-rendered, progressively enhanced, no plug-in required, degrades usably | **Supported matrix: NOQ-6 (DD-11)** |
@@ -1552,7 +1558,7 @@ because a deferred decision without a visible cost is just a decision nobody mad
 | ~~**OQ-8 / OQ-8b**~~ **Decided 2026-08-03** | Required submission fields; the contact-method minimum | **Answered: the rule set in C7 — configuration, not structure, exactly as anticipated.** Required at initial submission: name, category, description, locality, country. Optional at initial submission: administrative area, postal code, phone, email, website. **Before approval**, at least one **usable** contact method (phone, email, or website); location is never a contact method and there is **no offline-business exemption**. Format checks are **permissive, international-friendly, and technology-neutral** — no expression, library, parser, schema type, or database constraint is selected. **No component was added or changed, and no field was added** | ~~Before build~~ — **answered before build** |
 | **OQ-9** | The anti-spam safeguard for the public form | **C11.** The seam is fixed; the mechanism is open. Bulk submissions attack the manual-review capacity that A-1 assumes (**R-1**) | **Before build** |
 | ~~**OQ-10**~~ **Decided 2026-08-02** | Edit after approval: publish immediately, or require secondary review? | **Answered: secondary review.** A pending revision (E7) is stored separately from the effective public version and is never public (DI-10); the approved listing stays public at its last approved version; at most one pending revision per listing (DI-11). **No lifecycle state was added.** FR-ADM-10b permits a safeguarded atomic administrator operation (**R-3b**). Storage mechanism remains **DDM-8, open** | ~~Before data design~~ — **answered before DD-1** |
-| **OQ-11** | Can an administrator unpublish or remove an approved listing? | **The C6 state machine** (FR-ADM-12, FR-MOD-06, NFR-DATA-02) | Before data design |
+| ~~**OQ-11**~~ **Decided 2026-08-04** | Can an administrator unpublish or remove an approved listing? | **Answered: yes — reversible unpublish and explicit republish.** Modelled as **publication state, separate from listing status**, so **no fourth status** and **no new status transition**: FR-AUD-01 and NFR-DATA-02 are unchanged. A current reason and explicit confirmation are required; the listing leaves every public read path and direct links get the generic unavailable result; a pending revision stays pending and approving it does not republish. **Permanent deletion excluded from the MVP.** Representation remains **ADR-006 / DDM-9, open** | ~~Before data design~~ — **answered before DD-1** |
 | **OQ-13** | Retention of rejected submissions | **Data design plus a purge capability.** The tension with NFR-PRIV-05 must resolve *both* — retention **and** a period (**R-9**) | Before data design |
 | **OQ-14** | Audit logging of administrator actions | **C10.** Cheap to add (principle 9). Answering "no" carries a real stakeholder cost (`02`: administrators need audit trails) | Before build |
 | **NOQ-1** | Committed response-time thresholds | **DD-12.** NFR-PERF-* is untestable without them | Before technology selection |
@@ -1577,8 +1583,8 @@ process, not a component).
 > table above, **six are Decided** — OQ-6, OQ-7, OQ-8/8b, OQ-10, NOQ-2, and NOQ-3.
 > **Eleven remain open.**
 >
-> **Data design (DD-1) now waits on OQ-11 and OQ-13**, and those two are what
-> keep **ADR-006 Blocked**. The store-selection preconditions this document set — NOQ-2
+> **Data design (DD-1) now waits on OQ-13 alone**, and that one question is what
+> keeps **ADR-006 Blocked**. The store-selection preconditions this document set — NOQ-2
 > and NOQ-3, via DD-3 — are answered; the technology selection itself is not.
 >
 > **Two are cheap now and expensive later, and should be answered early: NOQ-5**
@@ -1600,7 +1606,7 @@ applied — judged against *Technology-selection criteria* above.
 | **ADR-003** | Data-store product | Hard requirements 3, 4, 5; DD-3. **Blocked by NOQ-2 and NOQ-3** |
 | **ADR-004** | Administrator authentication mechanism | DD-4, NOQ-9 |
 | **ADR-005** | Hosting platform and runtime model | DD-5. Must not reopen the rejected decomposition of Option D |
-| **ADR-006** | Listing data model and lifecycle states | DD-1. **Still Blocked by OQ-11 and OQ-13** (OQ-6, OQ-7, OQ-8/8b, OQ-10 Decided) |
+| **ADR-006** | Listing data model and lifecycle states | DD-1. **Still Blocked — by OQ-13 alone** (OQ-6, OQ-7, OQ-8/8b, OQ-10, OQ-11 Decided). Not ready, not writable |
 | **ADR-007** | Search approach | DD-14. **Blocked by OQ-4.** A dedicated index requires *measured* justification |
 | **ADR-008** | Anti-spam approach | DD-6. **Blocked by OQ-9.** Must be weighed against NFR-ACC-01/02 |
 | **ADR-009** | Audit-logging approach | DD-7. **Blocked by OQ-14** |
@@ -1639,8 +1645,8 @@ small, and a pending status plus an approved-only read filter is the whole trick
 a named seam.** They wait on product and non-functional questions that are the product
 owner's to answer.
 
-**Of those questions, OQ-6, OQ-7, OQ-8/8b, OQ-10, NOQ-2, and NOQ-3 are Decided.**
-**OQ-11 and OQ-13 are outstanding, and they block data design (DD-1) and ADR-006.**
+**Of those questions, OQ-6, OQ-7, OQ-8/8b, OQ-10, OQ-11, NOQ-2, and NOQ-3 are Decided.**
+**OQ-13 is outstanding, and it alone blocks data design (DD-1) and ADR-006.**
 **OQ-9 and NOQ-5 are cheap now and expensive later**, and should be answered early —
 not because the architecture cannot proceed without them, but because answering them
 *later* is what would make them expensive.
