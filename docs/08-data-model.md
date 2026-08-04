@@ -350,7 +350,7 @@ stateDiagram-v2
     pending --> rejected : administrator rejects
     pending --> pending : administrator edits (content only)
     approved --> approved : pending revision approved (content only - OQ-10)
-    rejected --> [*] : purge (CONDITIONAL - OQ-13)
+    rejected --> [*] : purge after retention (OQ-13 - 90 days from rejection)
 ```
 
 **`OQ-11` adds no edge to this diagram, and that is the decision, not an omission.**
@@ -397,7 +397,7 @@ stateDiagram-v2
     pending_revision --> approved_revision : administrator approves the revision
     pending_revision --> rejected_revision : administrator rejects the revision
     approved_revision --> [*] : its information is now the effective public version
-    rejected_revision --> [*] : approved listing unchanged (retention - OQ-13)
+    rejected_revision --> [*] : approved listing unchanged; purge after 90 days (OQ-13)
 ```
 
 **In words.** A proposed change to an approved listing is recorded as a **pending
@@ -435,11 +435,13 @@ immutable history, or any other persistence mechanism is **`DDM-8`, which remain
 open**. "Becomes the effective public version" is policy language about *which
 information the public sees*, and nothing more.
 
-**One transition on the listing-status diagram remains conditional, and it may not be
-treated as approved:**
+**No transition on the listing-status diagram remains conditional.**
 
-- **`rejected → purge`** exists **only if `OQ-13`** resolves toward deletion rather
-  than indefinite retention. See *Data retention considerations*.
+- **`rejected → purge`** is **committed by `OQ-13` (Decided 2026-08-04)**: a rejected
+  record is retained for **90 days from the rejection** and is then purged. See *Data
+  retention considerations*. It is an **end state reached by the passage of the retention
+  period**, not an administrator action, and it applies equally to a rejected initial
+  submission and a rejected approved-listing revision.
 
 **`approved → unpublished` — resolved, and resolved by removing it from this diagram.**
 This edge was previously drawn as a conditional **listing-status** transition, on the
@@ -489,9 +491,11 @@ may alter status — not a public form, not a bulk import, not a direct store wr
 keeps its public visibility while a change is reviewed **is decided**: it does, at its
 last approved version (`OQ-10`). Whether an approved listing may be unpublished and
 republished **is decided**: it may (`OQ-11`), through publication state rather than
-listing status — **`S-5` is now fully resolved**. Still open: whether a rejected record
-may be resubmitted; what ordering or precedence statuses have; and the retention of
-rejected submissions and rejected revisions (`OQ-13`).
+listing status — **`S-5` is now fully resolved**. Whether rejected records are retained
+**is decided**: they are, for 90 days from rejection, and then purged (`OQ-13`) — **`S-11`
+is now resolved too**. Still open: whether a rejected record may be resubmitted, which
+`OQ-13` **explicitly excluded** and which is assigned to no open question; and what
+ordering or precedence statuses have.
 
 ---
 
@@ -578,8 +582,7 @@ by `OQ-7` (2026-07-31), against the field inventory settled by `OQ-6`.
 | **Audit / security** | Security-event records, safeguard data (`E6`), addresses of network origin, device information, provider or infrastructure metadata | **Audit-only; never public** | Where they exist — `OQ-9`, `NOQ-7`. `NFR-PRIV-03/04`, `NFR-OBS-02` |
 
 **What this table does not do.** It does not decide **whether** an administrator-visible
-or audit-only field is collected or retained at all — that remains `OQ-13`
-(retention) and
+or audit-only field is collected or retained at all — that remains
 `OQ-14`/`NOQ-8` (audit). **`OQ-10` is Decided and adds no field:** a revision changes
 the *values* of already-approved fields and the public field set is unchanged.
 **`OQ-8`/`OQ-8b` are Decided and likewise add no field:** they set *obligation and
@@ -718,14 +721,21 @@ The life of one record, from arrival to end state.
    retained administratively, with a recorded current reason and explicit confirmation —
    and may later be **republished**, exposing its current approved version. This is a
    **publication-state** change, not a status change, and it is **reversible**.
-6. **End state.** Here the lifecycle **stops being decided**, and the model says so.
-   `OQ-11` deliberately created **no end state**: it authorises reversible withdrawal from
-   public view, **not** destruction, and **permanent deletion is excluded from the MVP**.
-   Whether a rejected record is retained or purged is `OQ-13`. Whether `OQ-13`'s retention
-   and purge scope **extends to unpublished listings** is **not settled here and must not
-   be assumed** — that expansion requires its own explicit decision. **The MVP has no
-   approved end state for a record.** That is not an omission in this document — it is an
-   accurate report of an unmade decision.
+6. **End state — for a rejected record** (`OQ-13`, **Decided 2026-08-04**). A rejected
+   initial submission and a rejected approved-listing revision are **retained for 90 days
+   from the rejection**, administrator-visible only throughout, then become
+   **purge-eligible** and are **purged**. Purge-eligibility permits purging and changes
+   nothing else — the record stays administratively visible until purged. Purge is a
+   **system obligation**, **all-or-nothing** (`NFR-DATA-03`, `DI-3`), **idempotent**, and
+   **never alters an approved listing or any current approved version**. **This is the
+   MVP's one approved end state.**
+7. **No end state for an approved record.** `OQ-11` deliberately created none: it
+   authorises reversible withdrawal from public view, **not** destruction, and
+   **permanent deletion is excluded from the MVP**. **`OQ-13` explicitly excluded
+   unpublished approved listings** from its retention and purge policy; whether an
+   unpublished approved listing is ever subject to one **remains an open product
+   question, assigned to no existing open question**. That is not an omission in this
+   document — it is an accurate report of an unmade decision.
 
 **Every step above is a single all-or-nothing write** (`NFR-DATA-03`). There is no
 intermediate state in which a record is half-approved, partially edited, or visible before
@@ -735,10 +745,15 @@ its status says it should be.
 
 ## Data retention considerations
 
-**The genuine contradiction, named rather than buried.** `FR-AUD-06` says rejected
-submissions should be **retained** for audit. `NFR-PRIV-05` says non-public data must
-**not** be kept indefinitely by default, and must have a documented purpose and period.
-These pull in opposite directions, and **`OQ-13` must resolve both at once.**
+**The contradiction is resolved** (`OQ-13`, **Decided 2026-08-04**). `FR-AUD-06` said
+rejected submissions should be **retained** for audit. `NFR-PRIV-05` said non-public data
+must **not** be kept indefinitely by default, and must have a documented purpose and
+period. These pulled in opposite directions, and **`OQ-13` resolved both at once** by
+taking the third shape below: **retained for 90 days from the rejection, for the stated
+purpose of allowing an administrator to review, explain, or reconsider a moderation
+decision and to provide moderation context for a bounded time — then purged.** One
+uniform rule covers **rejected initial submissions and rejected approved-listing
+revisions**. Both requirements are now **Must**, and neither had to be amended.
 
 The resolution space is narrower than it first appears:
 
@@ -748,27 +763,36 @@ The resolution space is narrower than it first appears:
 - **"Discard immediately"** satisfies `NFR-PRIV-05` and **defeats** `FR-AUD-06`, and
   destroys the only evidence of a moderation decision — awkward if a rejection is disputed.
 - **"Retain for a defined period, for a defined purpose, then purge"** is the only shape
-  that satisfies both. `docs/07` reaches the same conclusion independently.
+  that satisfies both. `docs/07` reaches the same conclusion independently. **This is the
+  shape `OQ-13` chose.**
 
-**The consequence the model must state:** if retention is chosen, **a purge capability
-becomes a requirement rather than a nice-to-have**, and someone must own running it. A
-retention period with no mechanism to enforce it is retention forever with extra paperwork.
+**The consequence, now committed:** retention was chosen, so **a purge capability is a
+requirement rather than a nice-to-have**. `OQ-13` committed **purge execution to the MVP
+as a system obligation** (`FR-AUD-06`) precisely because a retention period with no
+mechanism to enforce it is retention forever with extra paperwork. It is not an
+administrator-invoked action and needs no per-record decision. **How it is carried out —
+soft delete, hard delete, or otherwise — remains `DDM-9` and `ADR-006`.**
 
 **Retention questions the model records and does not answer:**
 
 | Question | Owner |
 |---|---|
-| How long are rejected submissions retained, and for what stated purpose? | `OQ-13` |
+| ~~How long are rejected submissions retained, and for what stated purpose?~~ **Answered by `OQ-13`: 90 days from rejection, to allow review, explanation, or reconsideration of a moderation decision and to provide moderation context for a bounded time. Same rule for rejected revisions.** | ~~`OQ-13`~~ — **Decided** |
 | What retention applies to non-public submitter data on *approved* records — e.g. a contact method collected for verification but never published? | `OQ-7` + `NFR-PRIV-05` |
 | How long are audit entries kept, if they exist at all? | `OQ-14`, `NOQ-7` |
 | How long are safeguard artifacts kept, if a safeguard exists? | `OQ-9`, `NFR-PRIV-04` |
-| Does a purge reach into backups, or only the live store? | `NFR-BACK-04` |
+| ~~Does a purge reach into backups, or only the live store?~~ **Answered by `OQ-13`: the purge obligation applies to the live product; pre-purge backup copies may temporarily persist under equal protection; a restoration must not silently return an expired or purged record to live use. Backup mechanics stay deferred.** | ~~`OQ-13`~~ — **Decided**; `NFR-BACK-04` |
 
-**That last row is the one teams miss.** `NFR-BACK-04` requires backups to preserve the
-same confidentiality as live data. It follows that purging a rejected submission from the
-live store does not, by itself, purge it: it persists in every backup taken before the
-purge. Whether that is acceptable is a real decision, and it belongs to `OQ-13` — not to
-whoever later configures the backup schedule.
+**That last row is the one teams miss, and `OQ-13` answered it deliberately.** `NFR-BACK-04`
+requires backups to preserve the same confidentiality as live data. It follows that purging
+a rejected record from the live store does not, by itself, purge it: it persists in every
+backup taken before the purge. The approved rule is narrow and has three parts — the purge
+obligation applies to the **live product**; **pre-purge copies may temporarily remain** in
+backup or disaster-recovery media and stay subject to `NFR-BACK-04` while they do; and a
+**restoration must not silently return an expired or purged record to live product use**.
+Backup retention, rotation, deletion mechanics, and restoration procedure remain deferred —
+the decision was made here rather than left to whoever later configures the backup
+schedule, but **no schedule, product, or mechanism was selected**.
 
 ---
 
@@ -937,7 +961,7 @@ contribution to them.
 | ~~`OQ-10`~~ **Decided** | Does a change to an approved listing publish immediately, or need secondary review? | **Answered:** secondary review. The approved listing stays public at its last approved version; the change is held as a **pending revision** that is never public (`DI-10`); approval makes it the effective public version; rejection leaves the approved listing unchanged. At most one pending revision per listing (`DI-11`). Entity **`E7` is committed**; **no listing status was added**. Storage mechanism remains `DDM-8`. | `S-5` — **resolved for `OQ-10`** |
 | ~~`OQ-11`~~ **Decided** | Can administrators unpublish or remove an approved listing? | **Answered:** an authorized administrator may **unpublish** and **republish**; unpublishing is reversible, needs a current reason and explicit confirmation, and excludes the listing from every public read path. **The three-value status set of `FR-AUD-01` survives unchanged** — publication state is modelled as a **separate product concept**, not a fourth status, on the `OQ-10` precedent. A pending revision stays pending; approving one while unpublished does not republish. **Permanent deletion is excluded from the MVP.** Representation remains `ADR-006` / `DDM-9`. | `S-5` — **resolved** |
 | `OQ-12` | How are duplicate/near-duplicate submissions resolved? | Fills `VR-S6`; may require attributes or a relationship to express "duplicate of". | `S-10` |
-| `OQ-13` | Are rejected submissions retained or discarded? | Resolves the `FR-AUD-06` / `NFR-PRIV-05` contradiction. If retained: a purge capability becomes mandatory. | `S-11` |
+| ~~`OQ-13`~~ **Decided** | Are rejected submissions retained or discarded? | **Answered:** retained, then purged. **Rejected initial submissions and rejected approved-listing revisions**, one uniform rule: **90 days from rejection**, administrator-visible only, **terminal**, then **purge-eligible** and purged. The `FR-AUD-06` / `NFR-PRIV-05` contradiction is resolved with **neither requirement amended** — both are now **Must**. **A purge capability is mandatory and committed** as a **system obligation**; its representation stays `DDM-9` / `ADR-006`. **Unpublished approved listings excluded**; audit events remain `OQ-14`/`NOQ-8`. | `S-11` — **resolved** |
 | `OQ-14` | Are administrator actions recorded in an audit log? | Decides whether `E5` exists. **Cannot be answered retrospectively** — uncaptured history is gone. | `S-8` |
 | `NOQ-3` | Backup frequency, recovery point, recovery time? | Constrains the store's required durability properties. | — |
 | `NOQ-4` | Expected corpus size and load? | Determines whether the query needs above are trivial or demanding. | — |
@@ -957,7 +981,7 @@ contribution to them.
 | `S-8` | Audit entries — whether `E5` exists. | `OQ-14`, `NOQ-8` |
 | `S-9` | Anti-spam data — whether `E6` exists and what it holds. | `OQ-9` |
 | `S-10` | Duplicate representation. | `OQ-12` |
-| `S-11` | Rejected-submission retention and purge. | `OQ-13` |
+| ~~`S-11`~~ **Resolved** | Rejected-record retention and purge. **Filled by `OQ-13` (2026-08-04):** rejected initial submissions and rejected approved-listing revisions are retained **90 days from rejection**, administrator-visible only, terminal, then purge-eligible and purged; purge is a committed **system obligation**. **Only the policy is fixed — the representation of retention and purge remains `DDM-9` and `ADR-006`.** | ~~`OQ-13`~~ — **Decided** |
 
 ---
 
@@ -977,7 +1001,7 @@ above: an open question is a *product* decision someone must make; a deferred de
 | `DDM-6` | **Physical separation of non-public attributes, and the representation of per-contact public-display designations** — same record, separate related structure, flags, or otherwise. | **Still open.** An implementation of the `S-2` boundary; `OQ-7` fixed the *boundary* and the designation *obligation*, not the *mechanism*. | — (open; physical) |
 | `DDM-7` | **Audit-entry storage** — same store, separate store, or append-only log. | Only meaningful once `E5` is known to exist. | `OQ-14` |
 | `DDM-8` | **Revision storage and the representation of the effective public version** — row update, version record, pointer, copy, immutable history, or otherwise. | **Still open, and now meaningful.** `OQ-10` committed `E7` and fixed *which information the public sees and when*; it selected **no** persistence mechanism. "Becomes the effective public version" is policy language, not a storage design. | — (open; physical) |
-| `DDM-9` | **Soft-delete vs. hard-delete** representation, **and the representation of publication state** — status value, flag, timestamp, separate structure, or otherwise. | **Still open, and now partly meaningful.** `OQ-11` is Decided: it authorises **reversible unpublishing**, excludes **permanent deletion** from the MVP, and fixes publication state as a **product concept** — selecting **no** representation for it. The soft-delete/hard-delete question itself stays open and is not reached by `OQ-11`. | `OQ-13` (open); ~~`OQ-11`~~ — **Decided, selects no representation** |
+| `DDM-9` | **Soft-delete vs. hard-delete** representation, **and the representation of publication state and of purge** — status value, flag, timestamp, separate structure, or otherwise. | **Still open, and now fully meaningful.** `OQ-11` is Decided: it authorises **reversible unpublishing**, excludes **permanent deletion** from the MVP, and fixes publication state as a **product concept** — selecting **no** representation. `OQ-13` is Decided: it commits **purge as a system obligation** for rejected records — and likewise selects **no** representation. **Whether a purge is a physical destruction or a logical marking is precisely what this question still owns**, and both decisions deliberately left it here. | ~~`OQ-13`~~, ~~`OQ-11`~~ — **both Decided, both select no representation** |
 | `DDM-10` | **Migration and schema-evolution tooling.** | Out of scope for a logical model entirely. | — |
 
 **`DDM-6` is worth a second look**, because it is the one most likely to be mistaken for a
@@ -1003,7 +1027,7 @@ actually withheld.
 | `FR-AUD-02/03` (timestamps) | `E1`; `DI-6` |
 | `FR-AUD-04` (admin data not public-editable) | `DI-4`; `VR-3` |
 | `FR-AUD-05` (audit log) | `E5` — **conditional**, `S-8` |
-| `FR-AUD-06` (retain rejected) | *Data retention*; `S-11` — in tension with `NFR-PRIV-05` |
+| `FR-AUD-06` (retain rejected, then purge) | *Data retention considerations*; *Data lifecycle* end state; `S-11` — **resolved**. The former tension with `NFR-PRIV-05` is settled by `OQ-13`: 90 days from rejection, then purge; **both requirements now `Must`, neither amended** |
 | `FR-VAL-01..06` (validation) | *Validation rules* — `VR-1..7`, slots `VR-S1..S6` |
 | `FR-VIS-02` (only approved visible) | `DI-5` — the model's hardest invariant |
 | `FR-VIS-04/05` (listing details) | Field-level exposure — `S-2` |
@@ -1027,7 +1051,7 @@ actually withheld.
 | `NFR-PRIV-01/02` (public field limits) | `S-2`; *Public versus private data* |
 | `NFR-PRIV-03` (non-public data unreachable publicly) | `DI-5` |
 | `NFR-PRIV-04` (minimal collection) | **P4**; `S-9` |
-| `NFR-PRIV-05` (bounded retention) | *Data retention*; `S-11` |
+| `NFR-PRIV-05` (bounded retention) | *Data retention considerations*; `S-11` — **resolved**. Period and purpose fixed by `OQ-13` |
 | `NFR-SEC-05` (input constrained) | `VR-4` |
 | `NFR-SEC-06` (anti-abuse safeguard) | `E6` — **conditional**, `S-9` |
 | `NFR-SEC-01/08` (admin auth; credentials never in ordinary storage) | `E3` — identity referenced, credentials absent |
@@ -1082,9 +1106,10 @@ same applies to the contact minimum: "at least one contact" is stated now only b
 `OQ-8b` **was** decided through the workflow — and even now it is stated as a **rule**, not
 as a null-or-check constraint, because *which* mechanism expresses it is still `DD-1`.
 Adding `deleted_at` would once have decided `OQ-11`; `OQ-11` is now Decided, but the same
-risk simply moved — adding a `deleted_at`, a publication flag, or a fourth status value
-now decides **`DDM-9`** and pre-empts **`ADR-006`**, and adding a purge rule decides
-**`OQ-13`**. None of these would feel like a decision at the time —
+risk simply moved — with `OQ-13` also Decided, adding a `deleted_at`, a publication flag, a
+retention timestamp, or a fourth status value now decides **`DDM-9`** and pre-empts
+**`ADR-006`**, and choosing *how* the committed purge is carried out decides `DDM-9` rather
+than `OQ-13`. None of these would feel like a decision at the time —
 each would feel like drawing an obvious box. **Mitigation:** the eleven named seams, and the
 rule-slot device (**P7**) that keeps a pending rule visible as pending — and, when it is
 answered, records *how far* the answer reached.
@@ -1125,13 +1150,17 @@ That single decision is what makes the model both **small** and **safe**, and th
 in tension: there is exactly one place where "public" is decided, exactly one identity per
 record for its whole life, and no window in which a record is half-published.
 
-Everything genuinely undecided stays undecided, behind **eleven named seams** — one of
-which, `S-5`, is now **fully resolved**. **`OQ-10`** — the only open question that would add an
+Everything genuinely undecided stays undecided, behind **eleven named seams** — two of
+which, `S-5` and `S-11`, are now **fully resolved**. **`OQ-10`** — the only open question that would add an
 entity — was answered before data design began, at zero data volume, and entity `E7` is
 committed with no listing status added. **`OQ-11`** was answered the same way and for the
 same reason: publication state is modelled as a separate product concept, so the second half
-of `S-5` also closed **without adding a listing status**. **`OQ-14`** (audit logging) still deserves attention
-first, because it is the one whose "no" answer destroys information permanently.
+of `S-5` also closed **without adding a listing status**. **`OQ-13`** closed `S-11` the same
+way: it fixed a retention period and a purge obligation as **policy**, and selected no
+representation for either. **`OQ-14`** (audit logging) still deserves attention
+first, because it is the one whose "no" answer destroys information permanently — and
+note that `OQ-13` deliberately did **not** decide whether purging a rejected record
+reaches any audit entry that may later exist.
 
 The model introduces no schema, no SQL, no store product, and no deployment resource — and it
 resolves none of the product questions that are not its to resolve.

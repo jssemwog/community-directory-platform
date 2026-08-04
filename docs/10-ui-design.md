@@ -953,7 +953,7 @@ Deliberately **not designed**. Each is recorded so that its absence reads as a d
 | **Unpublish / republish control** | **Capability approved** (`OQ-11`, Decided) — `FR-AUD-01` is **unchanged**, because publication state is a separate product concept, not a fourth status. **The control's form, label, placement, and confirmation presentation remain undrawn.** | ~~`OQ-11`~~ — **Decided**; `S-5` — **resolved** |
 | **Audit-trail / history view** | Exists only if `OQ-14` commits audit logging. **Resolve with `S-7`.** | `OQ-14`, `S-8` |
 | **"Mark as duplicate" control** | A7 needs a way to express "duplicates that"; `OQ-12` is open. | `OQ-12`, `S-10` |
-| **Rejected-submission archive view** | Depends on whether rejected records are retained at all. | `OQ-13`, `S-11` |
+| **Rejected-record view** | **Retention is approved** (`OQ-13`, Decided) — a rejected initial submission or rejected approved-listing revision is administrator-visible for **90 days from rejection**, including its **current rejection reason**, and stays visible while purge-eligible until purged. The screen must make clear that a rejected record is **terminal** — no edit, no approve. **Its form, placement, and layout are still not designed.** | ~~`OQ-13`~~ — **Decided**; `S-11` — **resolved** |
 | **Category-management screen** | Only if `OQ-5` makes the set administrator-curated. | `OQ-5`, `S-3` |
 | **Lister "check my submission" view** | **Cannot be built safely** without a lister identity — it would expose a pending record to an unauthenticated caller (`DI-5`). | `OQ-2` |
 | **Anti-spam challenge UI** | `OQ-9` is open, and the safeguard must not break `NFR-ACC-01/02`. | `OQ-9`, `S-9` |
@@ -982,7 +982,7 @@ contribution to it.
 | ~~`OQ-10`~~ **Decided** | Edit-after-approval: immediate or secondary review? | **Answered:** secondary review. **S7 needs a two-version view** (currently approved version and pending revision) and a pending-revision state, plus a state for "a pending revision already exists" (`DI-11`). The pending revision is never publicly visible (`DI-10`). Layout is still not designed. | `S-5` — **resolved for `OQ-10`**; **open for `OQ-11`** |
 | ~~`OQ-11`~~ **Decided** | May administrators unpublish or remove? | **Answered:** yes — S6 gains **unpublish** (reason + confirmation) and **republish** (confirmation) capabilities. **`FR-AUD-01`'s status set survives unchanged**; publication state is shown distinctly from listing status. Public surfaces exclude unpublished listings entirely, and direct links get the generic unavailable result. **Form and layout still undrawn.** | `S-5` — **resolved** |
 | `OQ-12` | How are duplicates resolved? | Whether A7 needs a "duplicate of" control. | `S-10` |
-| `OQ-13` | Are rejected submissions retained? | Whether administrators can view rejected records at all. | `S-11` |
+| ~~`OQ-13`~~ **Decided** | Are rejected submissions retained? | **Answered:** yes — for **90 days from rejection**, so administrators **can** view rejected records and their reasons during that window. Public and submitter surfaces are **unchanged**: a rejected record never appears publicly and no submitter-facing view exists. Rejected records are **terminal**, so no edit or approve control belongs on them. **Form and layout still undrawn.** | `S-11` — **resolved** |
 | `OQ-14` | Audit logging? | Whether any history/trail is displayable. **Resolve with `S-7`.** | `S-8` |
 | `NOQ-5` | Accessibility standard and contrast target? | **No conformance level or contrast ratio is asserted here.** | — |
 | `NOQ-6` | Browser/device/assistive-technology matrix? | No support claim is made. | — |
@@ -1084,14 +1084,15 @@ open questions: an open question is a **product** decision; a deferred decision 
 
 ### Seams preserved
 
-**Nine of the eleven `docs/08` seams remain open; `S-5` is now fully resolved**, though the
+**Eight of the eleven `docs/08` seams remain open; `S-5` and `S-11` are now fully resolved**, though the
 newly committed `docs/09` operation `OP-9` still has **no UI drawn**: `S-1` (form obligations), `S-2`
 (what S2 and the result summary show), `S-3` (category control shape), `S-4` (search scope),
 `S-5` (**resolved** — the two-version edit view is required
 by `OQ-10` and the unpublish/republish capability is approved by `OQ-11`, though neither
 layout is designed), `S-6` (location controls), `S-7` (review history display — resolve with `S-8`),
 `S-8` (audit trail display), `S-9` (anti-spam challenge), `S-10` (duplicate control), `S-11`
-(rejected-record visibility).
+(**resolved** — rejected records are administrator-visible for 90 days by `OQ-13`, though the
+view is not designed).
 
 ---
 
@@ -1129,8 +1130,10 @@ is conceptual and labeled illustrative; no field list is drawn where a seam owns
 specific: a **checkbox list decides `OQ-5`**; a **field on the detail screen decides
 `OQ-7`**. A **Remove button** once decided `OQ-11`; `OQ-11` is now Decided, and the risk
 moved rather than disappeared — drawing a publication control that reads as a *status*
-value, or one that destroys rather than withdraws, would pre-empt **`DDM-9`**, **`ADR-006`**,
-and **`OQ-13`**. None would *feel* like a decision. Each feels like drawing an obvious control.
+value, or one that destroys rather than withdraws, would pre-empt **`DDM-9`** and
+**`ADR-006`**. `OQ-13` is now Decided too, and its residual risk is the same shape: drawing
+a purge control would misstate the approved policy, because purge is a **system
+obligation**, not an administrator action. None would *feel* like a decision. Each feels like drawing an obvious control.
 An **asterisk once decided `OQ-8`**; asterisks may be drawn now because `OQ-8` **was**
 decided through the workflow — but an **input mask or format pattern would still overreach
 it**, since the decision fixed the posture and left the expression open.

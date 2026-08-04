@@ -124,7 +124,7 @@ forgotten.
 | **`ADR-003`** | **Data-store product** | **`DG-2`** | **`NOQ-2`** (availability) · **`NOQ-3`** (backup / RPO / RTO) — `DD-3` | **Blocked** |
 | **`ADR-004`** | Administrator authentication mechanism | **`DG-3`** | **`NOQ-9`** — `DD-4`. *The boundary is settled; the mechanism is not* | **Blocked** |
 | **`ADR-005`** | Hosting platform and runtime model | **`DG-2`** | The technology decision — `DD-5` | **Blocked** |
-| **`ADR-006`** | **Listing data model and lifecycle states** | **`DG-1`** | **`OQ-13`** — `DD-1`. *`OQ-6`, `OQ-7`, `OQ-8`/`OQ-8b`, `OQ-10`, and `OQ-11` are **Decided**; one question still holds it* | **Blocked** |
+| **`ADR-006`** | **Listing data model and lifecycle states** | **`DG-1`** — **Resolved 2026-08-04** | **Nothing.** `OQ-6`, `OQ-7`, `OQ-8`/`OQ-8b`, `OQ-10`, `OQ-11`, and `OQ-13` are all **Decided** — `DD-1` | **Ready to write** |
 | **`ADR-007`** | Search approach | **`DG-1`** | **`OQ-4`** — `DD-14`. *A dedicated index requires **measured** justification* | **Blocked** |
 | **`ADR-008`** | Anti-spam approach | **`DG-3`** | **`OQ-9`** — `DD-6`. *Must be weighed against `NFR-ACC-01/02`* | **Blocked** |
 | **`ADR-009`** | Audit-logging approach | **`DG-3`** | **`OQ-14`** — and `NOQ-8`, **taken as one decision** (`DD-7`). **Irreversible if answered late** (`IR-7`) | **Blocked** |
@@ -140,14 +140,15 @@ forgotten.
 **Eleven of twelve cannot be written today.** That is not a backlog to work around; it is the
 measure of what `DG-1`, `DG-2`, and `DG-3` are holding. See `docs/13-decision-log.md`.
 
-**`ADR-006` is narrowing, and it is worth watching.** It began blocked on six `DG-1`
-questions; five are now answered — `OQ-6` and `OQ-7` (2026-07-31), `OQ-10` (2026-08-02),
-`OQ-8`/`OQ-8b` (2026-08-03), and `OQ-11` (2026-08-04) — leaving **`OQ-13` alone**. **It
-remains `Blocked`, and the reduced blocker list does not make it writable:** a *Blocked* ADR
-becomes writable when its gate opens, and `DG-1` does not clear while any hard blocker
-stands. **One is fewer than four, not none.** `OQ-11` in particular *narrowed* `ADR-006`
-without filling any of it: it settled the **product** question and deliberately left the
-**representation** of publication state to this ADR and to `DDM-9`.
+**`ADR-006` is now `Ready to write`, and the distinction matters.** It began blocked on six
+`DG-1` questions; all six are now answered — `OQ-6` and `OQ-7` (2026-07-31), `OQ-10`
+(2026-08-02), `OQ-8`/`OQ-8b` (2026-08-03), and `OQ-11` and `OQ-13` (2026-08-04). `DG-1` is
+**Resolved**, so the gate that held this ADR is open and its status moves from **Blocked** to
+**Ready to write**. **That means only that it may now be drafted.** No file exists, nothing
+is Proposed, and nothing is **Accepted** — no work may rely on it. Every one of those six
+decisions *narrowed* `ADR-006` without filling any of it: each settled a **product**
+question and deliberately left **representation** to this ADR and to `DDM-8`/`DDM-9` —
+`OQ-11` for publication state, `OQ-13` for retention and purge.
 
 ---
 

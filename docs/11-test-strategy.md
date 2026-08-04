@@ -334,8 +334,63 @@ built in `P4` alongside the other administrative operations.
   remains *approved***, and no listing status outside `pending`/`approved`/`rejected` is
   ever observed (`VR-1`, `NFR-DATA-01`, `NFR-DATA-02`).
 - **No permanent deletion.** No MVP operation destroys a listing record; after unpublishing,
-  the record is still retrievable administratively. **No retention or purge behavior is
-  tested** — that remains `OQ-13`.
+  the record is still retrievable administratively. **Retention and purge of *unpublished*
+  listings is still not tested** — `OQ-13` explicitly excluded them, and no period or purge
+  rule applies to them.
+
+**Now testable (`OQ-13` Decided 2026-08-04):** rejected-record retention and purge are
+approved, and the following properties are specifiable. Retention state is built in `P1`
+with the lifecycle; the purge obligation is exercised wherever the lifecycle is exercised.
+
+- **Rejected initial submission enters the retained state.** A rejected submission is
+  retained rather than discarded, and remains retrievable through the administrative
+  projection.
+- **Rejected approved-listing revision enters the retained state.** Same property for a
+  rejected revision, asserted separately — the two record types are covered by one rule but
+  are distinct records.
+- **The period begins at rejection.** The 90-day window is measured from the rejection
+  event, not from submission and not from last update; a record that waited in moderation
+  does not arrive already expired.
+- **Administrator visibility during retention.** Content and the **current rejection reason**
+  are available to an authorized administrator throughout the period.
+- **Public and submitter invisibility.** A retained rejected record appears on **no** public
+  path, and no submitter-facing view exists — the `OP-2` negative outcome stays
+  indistinguishable (`BI-4` family).
+- **Rejection reason visibility.** The reason is administrator-visible and **never** appears
+  on any public surface.
+- **Rejected records are terminal.** A retained rejected record cannot be edited and cannot
+  be transitioned to *approved* or back to *pending*; an attempt is refused and the record
+  is unchanged (`NFR-DATA-02`, `VR-1`).
+- **A fresh attempt is a new record.** Approving a later submission never revives a rejected
+  record. *(How resubmission itself works is out of scope — `OQ-13` excluded it.)*
+- **Rejected revisions remain non-public.** Throughout retention, `DI-10` holds.
+- **The approved listing is unaffected.** Rejecting, retaining, and purging a revision leave
+  the approved listing and its current approved version unchanged (`FR-ADM-10`).
+- **Retention does not breach `DI-11`.** A listing may hold any number of retained rejected
+  revisions and still accept one pending revision — `DI-11` constrains *pending* revisions
+  only.
+- **Expiration produces purge eligibility.** At 90 days the record becomes purge-eligible,
+  and **eligibility alone changes nothing else** — it remains administrator-visible until
+  purged.
+- **Purge occurs as a product obligation.** A purge-eligible record is purged without an
+  administrator invoking it; it is **all-or-nothing** and **idempotent** — a repeat purge is
+  not an error.
+- **Purge does not alter an approved listing.** No approved listing or current approved
+  version changes as a result of any purge.
+- **Unpublished approved listings are excluded.** No retention period or purge applies to an
+  unpublished approved listing; it remains administratively retained under `OQ-11`.
+- **Audit-event behavior is not asserted.** No test asserts that purging a record purges,
+  or preserves, any audit entry — that remains `OQ-14`/`NOQ-8`.
+- **Category-specific retention is absent.** All rejected records follow the same period
+  regardless of rejection category; no test asserts a category-dependent period.
+- **Restoration does not silently reactivate.** A restoration from backup does not return an
+  expired or purged rejected record to live product use.
+- **`FR-AUD-06` and `NFR-PRIV-05` are `Must`.** Both are committed obligations, not
+  aspirations, and are tested as such.
+
+**Still not tested here:** how retention and purge are represented or stored (`ADR-006`,
+`DDM-8`, `DDM-9`), backup retention and deletion mechanics, and whether durable audit-event
+history exists (`OQ-14`/`NOQ-8`).
 - **No public removal-request workflow.** No public surface offers a means to request
   removal or unpublishing, and unpublishing is reachable only through an authorized
   administrative path (`R-14`; `FR-VIS-09`, `FR-MOD-03`). This is an **absence** assertion,
@@ -597,8 +652,7 @@ nothing unless every check succeeds** and **leaves the approved listing unchange
 failure**. Listing identity is stable across the cycle (`DI-8`).
 
 **Decision-dependent and therefore NOT tested:** duplicate
-marking (**`OQ-12`**), rejected-submission retention and purge — including retention of a
-rejected *revision* (**`OQ-13`**), audit emission (**`OQ-14`**), and lister notification
+marking (**`OQ-12`**), audit emission (**`OQ-14`**), and lister notification
 (**`OQ-2`**). Each would be a test of a behavior nobody has approved. *(Unpublish and
 republish are **no longer** in this list — `OQ-11` is Decided and its properties are
 specified above.)*
@@ -839,7 +893,7 @@ becomes the decision (**T4**).
 | ~~**`OQ-10`**~~ **Decided** | — nothing is untestable here any longer | **Yes:** the full revision lifecycle — pending revision never public (`DI-10`), approved listing stays public at its last approved version, approval makes the revision effective, **rejection leaves the approved listing unchanged**, one active pending revision (`DI-11`), and the `FR-ADM-10b` atomic operation's all-or-nothing publication |
 | ~~**`OQ-11`**~~ **Decided** | — nothing is untestable here any longer, except **representation** (`ADR-006`/`DDM-9`) and **retention or purge**, which remain `OQ-13` | **Yes:** authorized unpublish; unauthorized denial; required reason; required confirmation; exclusion from **every** public read path; generic indistinguishable direct-link result; administrative visibility; explicit republish; **current**-approved-version republication; pending revision stays pending; **revision approval does not republish**; `FR-AUD-01` unchanged; no permanent deletion |
 | **`OQ-12`** duplicate handling | Duplicate detection or marking. | — |
-| **`OQ-13`** rejected retention / purge | Any retention period or purge behavior. | — |
+| ~~**`OQ-13`**~~ **Decided** | — nothing is untestable here any longer, except **representation** (`ADR-006`/`DDM-8`/`DDM-9`) and **backup mechanics** | **Yes:** both covered record types enter the retained state; the period begins at rejection; administrator visibility and reason visibility; public and submitter invisibility; terminality; rejected revisions non-public and the approved listing unaffected; `DI-11` unbreached; expiry produces eligibility; purge occurs as an obligation, all-or-nothing and idempotent; purge alters no approved listing; unpublished listings excluded; audit behavior unasserted; no category-specific retention; restoration does not reactivate |
 | **`OQ-14`** audit logging | **Any audit emission.** *(Note the asymmetry: history not captured cannot be reconstructed later.)* | — |
 | **`NOQ-1` / `NOQ-4`** performance / load | **Any performance threshold.** | Only that performance is **measurable**. |
 | **`NOQ-2`** availability | Any availability target. | — |
@@ -900,7 +954,7 @@ quietly becomes a missing performance *test*, permanently.
 | ~~`OQ-10`~~ **Decided** | Edit-after-approval? | **Revision tests are now specifiable** and are built in `P4`. |
 | ~~`OQ-11`~~ **Decided** | Remove/unpublish? | **Unpublish/republish tests are now specifiable** and are built in `P4`. `OP-9` exists. **No retention or purge tests** — that is `OQ-13`. |
 | `OQ-12` | Duplicate handling? | No duplicate tests; an exploratory charter records the pain. |
-| `OQ-13` | Rejected retention / purge? | No retention or purge tests. |
+| ~~`OQ-13`~~ **Decided** | Rejected retention / purge? | **Retention and purge tests are now specifiable.** 90 days from rejection, then purge as a system obligation. **No representation or backup-mechanics tests** — those remain `ADR-006`/`DDM-9` and the backup requirements. |
 | `OQ-14` | Audit logging? | **No audit tests — and the omission is irreversible for every action taken meanwhile.** |
 | `NOQ-1`, `NOQ-4` | Performance thresholds; expected load? | **No threshold can be asserted.** |
 | `NOQ-2` | Availability target? | No availability target asserted. |

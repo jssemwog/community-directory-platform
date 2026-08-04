@@ -104,14 +104,16 @@ its own.
 | **FR-ERR-01…06** (error/empty states) | V1, V6, L1–L3, A1 | Cross-surface · **P2–P4** | — | Committed | pending |
 | **FR-CONF-01…04** (confirmations) | L4, A4, A5, A6 | Public write / admin · **P3/P4** | — | Committed | pending |
 | **FR-ACC-01…05** (accessibility/responsive) | All core flows | Cross-cutting · **P2 onward** | `NOQ-5` (conformance *claim* only) | Committed (behaviors); **claim Blocked** (`NOQ-5`) | pending |
-| **FR-AUD-01…06** (status & auditability) | Data; A4, A5 | Data / admin · **P1/P4** | `OQ-13` (rejected retention), `OQ-14`+`NOQ-8` (audit log) | **AUD-05 Conditional** (`OQ-14`/`NOQ-8`), **AUD-06 Blocked** (`OQ-13`); rest Committed | pending |
+| **FR-AUD-01…06** (status & auditability) | Data; A4, A5, A6 | Data / admin · **P1/P4** | `OQ-14`+`NOQ-8` (audit log); ~~`OQ-13`~~ **Decided** (rejected retention) | **AUD-05 Conditional** (`OQ-14`/`NOQ-8`); **AUD-06 Committed and raised to Must** (`OQ-13` — retain 90 days from rejection, then purge as a system obligation); rest Committed | pending |
 
 **Deferred and blocked functional requirements, named explicitly** (so their absence reads as
 a decision, per acceptance criterion): `FR-VIS-10` (deferred — `OQ-1`), `FR-SUB-08` (deferred —
 `OQ-2`), `FR-SUB-09` (blocked — `OQ-9`), `FR-ADM-13` (blocked — `OQ-12`), `FR-SRCH-02` (shaped — `OQ-4`), `FR-SRCH-09` (blocked
 — `OQ-5`), `FR-MOD-08` (deferred — `OQ-15`), `FR-AUD-05` (conditional — `OQ-14`/
-`NOQ-8`), `FR-AUD-06` (blocked — `OQ-13`). *(`FR-ADM-12`, `FR-MOD-06`, and `FR-VIS-08` left this
-list on 2026-08-04: `OQ-11` is **Decided** and all three are now **Committed** and **Must**.)*
+`NOQ-8`). *(`FR-ADM-12`, `FR-MOD-06`, and `FR-VIS-08` left this
+list on 2026-08-04: `OQ-11` is **Decided** and all three are now **Committed** and **Must**.
+`FR-AUD-06` left it the same day: `OQ-13` is **Decided**, and it is **Committed** and
+**Must**, as is `NFR-PRIV-05`.)*
 
 ### 1b. Non-functional requirements → where they land, and what they wait on
 
@@ -123,7 +125,7 @@ blocking question is from `docs/06`'s own NFR→NOQ mapping.
 | **NFR-PERF-01…06** | `DD-12`; measurement | `NOQ-1`, `NOQ-4` (shaping) | **Blocked** — no threshold asserted (`docs/11` Cat. 3) | pending |
 | **NFR-REL-01…06** | `DD-8`; error states | `NOQ-2` — **Decided** | REL-03/04/06 Committed; **target Decided** (`NOQ-2`, 2026-07-30): 99% over a rolling monthly window, announced maintenance excluded, public read path prioritised over admin | pending |
 | **NFR-SEC-01…08** | `C8`, `C7`; `BI-5` | `OQ-9` (SEC-06), `NOQ-9` (SEC-07) | Committed; SEC-06 **Blocked** (`OQ-9`), SEC-07 **Blocked** (`NOQ-9`) | pending |
-| **NFR-PRIV-01…05** | `S-2` (**resolved**), `DI-5`; `BI-6` | `OQ-13` (PRIV-05); ~~`OQ-7`~~ **Decided** (PRIV-01/02) | Committed (rule); **field set Committed** (`OQ-7` — `docs/08` *Field classification*); retention **Blocked** (`OQ-13`) | pending |
+| **NFR-PRIV-01…05** | `S-2` (**resolved**), `DI-5`; `BI-6` | ~~`OQ-13`~~ **Decided** (PRIV-05); ~~`OQ-7`~~ **Decided** (PRIV-01/02) | Committed (rule); **field set Committed** (`OQ-7` — `docs/08` *Field classification*); **retention Committed and PRIV-05 raised to Must** (`OQ-13` — 90 days from rejection, documented purpose) | pending |
 | **NFR-ACC-01…05** | Core-flow UI | `NOQ-5` (ACC-04/05) | Committed (behaviors); **level Blocked** (`NOQ-5`) | pending |
 | **NFR-USA-01…06** | UI messaging | — | Committed | pending |
 | **NFR-RESP-01…04** | Responsive layout | `NOQ-6` (RESP-03) | Committed (behavior); **matrix Blocked** (`NOQ-6`) | pending |
@@ -249,7 +251,7 @@ work, and a shaping input is not overstated into a block.
 | `OQ-8` / `OQ-8b` required fields; contact minimum | `DG-1` | **Hard blocker** | `P3` validation *rules* | **Decided (2026-08-03)** — **required at initial submission:** name, category, description, locality, country; **optional at initial submission:** administrative area, postal code, phone, email, website. **Before approval:** at least one **usable** contact method (phone, email, or website) — **locality and address never count**, and there is **no offline-business exemption**. "Usable" = non-blank, passes the permissive checks, retained as proposed — **structural, not verified as owned or reachable**. Formats are **permissive, international-friendly, technology-neutral**; no pattern, library, widget, schema type, or constraint prescribed. A supplied-but-invalid optional value **fails visibly and is preserved**, never silently dropped. An administrator may **complete and correct** during moderation **without bypassing validation** (settles **C-7**); the contact minimum settles **C-6**. Revisions follow the same rules; **failed validation leaves the approved listing unchanged**. **No field added; `OQ-7` projection unchanged** | `S-1` (**resolved**), `VR-S1`/`VR-S2`/`VR-S3` (**filled**), `ADR-006` (**still Blocked**); `docs/13` `DG-1`; `docs/03`, `docs/05` `FR-SUB-02/05`, `FR-ADM-04/06`, `FR-DATA-07/08`, `FR-VAL-01/03/04/05`, `docs/06` `NFR-PRIV-04`, `docs/08` `VR-S1`–`VR-S3`, `docs/10` `UV-5`/`UV-8` |
 | `OQ-10` edit-after-approval | `DG-1` | **Hard blocker** | `P1` (`E7`), `OP-10` | **Decided (2026-08-02)** — an approved listing stays publicly visible at its last approved version; a proposed change is a **pending revision** that is never public (`DI-10`); approval makes it the effective public version; rejection leaves the approved listing unchanged; **at most one pending revision per listing** (`DI-11`), history unrestricted; an authorized administrator may create and approve a revision in **one atomic authorized operation** with all safeguards enforced (`FR-ADM-10b`). **No listing status added**; storage mechanism remains `DDM-8` | `S-5` (**resolved for `OQ-10`**; open for `OQ-11`), `ADR-006` (**still Blocked**); `docs/13` `DG-1`; `docs/05` `FR-ADM-10`/`FR-ADM-10b`, `docs/08` `E7`/`DI-10`/`DI-11`, `docs/09` `OP-6`/`OP-10`, `docs/10` `S7` |
 | ~~`OQ-11`~~ removal / unpublish | `DG-1` | **Hard blocker** | `P1` publication model, `OP-9` | **Decided (2026-08-04)** — an authorized administrator may **unpublish** an approved listing and **republish** it; unpublishing is **reversible**, requires a **current reason** and **explicit confirmation**, and excludes the listing from **every** public read path, a direct link returning the **generic** unavailable result; the listing stays **administratively visible**; a **pending revision stays pending** and approving it while unpublished **does not republish**; republishing exposes the **current** approved version; **permanent deletion excluded from the MVP**; **public removal requests out of scope**; **`FR-AUD-01` unchanged** — publication state is a **separate product concept**, **no fourth status**, no new status transition; representation deferred to `ADR-006`/`DDM-9` | `S-5` — **resolved**; `ADR-006` — **no longer blocked by this** |
-| `OQ-13` rejected-submission retention | `DG-1` | **Hard blocker** | `P1` (`S-11`), purge | Unresolved | `S-11`, `ADR-006` |
+| ~~`OQ-13`~~ rejected-record retention and purge | `DG-1` | **Hard blocker** | `P1` (`S-11`), purge obligation | **Decided (2026-08-04)** — rejected **initial submissions** and rejected **approved-listing revisions**, one uniform rule: retained **90 days from rejection**, **administrator-visible only** (including the current rejection reason), never public and no submitter view, **terminal** (not editable, not re-approvable — `NFR-DATA-02` gains no transition), then **purge-eligible** (visibility unchanged until purged) and **purged as a committed system obligation** — all-or-nothing, idempotent, never altering an approved listing. Rejected revisions stay non-public, leave the approved listing unchanged, and do not breach `DI-11`. **Excluded:** unpublished approved listings, the resubmission workflow, category-specific retention. Backups: live-product purge, pre-purge copies may persist under `NFR-BACK-04`, restoration must not silently reactivate. Audit events remain `OQ-14`/`NOQ-8`. **`FR-AUD-06` and `NFR-PRIV-05` raised to Must; no new identifier created**; representation remains `ADR-006`/`DDM-8`/`DDM-9` | `S-11` — **resolved**; `ADR-006` — **unblocked** |
 | `OQ-4` searchable fields & matching mode | `DG-1` | *Shaping input* | Search *scope* (`BI-3` built regardless) | Unresolved | `S-4`, `ADR-007` |
 | `OQ-5` category model — cardinality, curation | `DG-1` | *Shaping input* | `S-3` representation (membership enforced regardless) | Unresolved | `S-3` |
 | `NOQ-2` availability target | `DG-2` | **Hard blocker** | Store & hosting selection | **Decided (2026-07-30)** | `ADR-003`, `ADR-010` |
@@ -299,7 +301,7 @@ gate is the first maintenance action the decision log requires.
 | `ADR-003` | Data-store product | Pending | `NOQ-2`, `NOQ-3` (`DD-3`) |
 | `ADR-004` | Administrator authentication mechanism | Pending | `NOQ-9` (`DD-4`) |
 | `ADR-005` | Hosting platform & runtime model | Pending | `DG-2` (`DD-5`) |
-| `ADR-006` | Listing data model & lifecycle states | **Blocked** | `OQ-13` (`DD-1`) **alone** — ~~`OQ-6/7/8/8b/10/11`~~ **Decided**. Not ready, not writable |
+| `ADR-006` | Listing data model & lifecycle states | **Ready to write** | **Nothing** — ~~`OQ-6/7/8/8b/10/11/13`~~ all **Decided**, `DG-1` **Resolved** (`DD-1`). May now be drafted; **not written, not Proposed, not Accepted** |
 | `ADR-007` | Search approach | Pending | `OQ-4` (`DD-14`) |
 | `ADR-008` | Anti-spam approach | Pending | `OQ-9` (`DD-6`) |
 | `ADR-009` | Audit-logging approach | Pending | `OQ-14`/`NOQ-8` (`DD-7`) |
@@ -343,7 +345,7 @@ gate is the first maintenance action the decision log requires.
 ~~`S-5` edit-after-approval / removal~~ — **fully resolved:** ~~`OQ-10`~~ **Decided** (`E7` committed, revision lifecycle defined, no fourth listing status) **and** ~~`OQ-11`~~ **Decided** (unpublish/republish committed as **publication state**, again **no fourth listing status**; `R-11`/`R-12` pending-revision interaction recorded) · ~~`S-6` location attributes (`OQ-6`)~~ **resolved — `OQ-6` Decided** ·
 `S-7` review-data shape (`OQ-14` dependency) · `S-8` audit entries (`OQ-14`, `NOQ-8`) ·
 `S-9` anti-spam data (`OQ-9`) · `S-10` duplicate representation (`OQ-12`) ·
-`S-11` rejected retention & purge (`OQ-13`). **A cell that fills a seam with a guessed field
+~~`S-11` rejected retention & purge~~ — **resolved:** ~~`OQ-13`~~ **Decided** (90 days from rejection for both covered record types, then purge as a system obligation; representation still `DDM-9`/`ADR-006`). **A cell that fills a seam with a guessed field
 has answered `DG-1` by the back door.**
 
 ### Deferred vs excluded (`docs/12`, `docs/03`)
