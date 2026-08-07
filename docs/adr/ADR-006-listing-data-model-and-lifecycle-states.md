@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | **Proposed** |
+| **Status** | **Accepted** |
 | **Date** | 2026-08-07 |
 | **Decision owner** | **Joe S.** — product owner / architecture owner (`docs/13`, *Gate summary*) |
 | **Decision gate** | `DG-1` — **data design**, **Resolved 2026-08-04**. All six hard blockers Decided |
@@ -23,10 +23,11 @@ type, index, or constraint, and it names no field. Those are `DG-2` (`ADR-002`, 
 deferrals* and *Open questions this decision must NOT answer* — those sections are not
 boilerplate here; together they are half the point of writing this ADR at all.
 
-**Proposed is not Accepted.** Per `docs/adr/README.md`, a `Proposed` ADR is *"drafted and
-under review. The decision is **not yet in force**; nothing may depend on it."* No downstream
-work — `DG-2`, `P0b`, `P1`–`P5` — may rely on this document until it is **Accepted** through
-the normal review and merge decision.
+**Accepted, and therefore in force.** Per `docs/adr/README.md`, an `Accepted` ADR is
+*"Decided and **in force**. Work may rely on it."* The architecture owner accepted this
+decision on 2026-08-07. Downstream architecture and technology work may now rely on it —
+but **an ADR records a decision; it does not open a gate.** `DG-2` remains Unresolved, and
+`P0b` and `P1`–`P5` remain blocked by it.
 
 ---
 
@@ -409,16 +410,16 @@ records that cost rather than resolving it. `OQ-9`, `OQ-14`/`NOQ-8`, `NOQ-9`, `N
 `DDM-8` and `DDM-9`, both of which remain unresolved and neither of which this decision
 narrows beyond the logical requirements stated above.
 
-**Downstream implications for `DG-2`:** once this ADR is **Accepted**, the technology decision
-will know the aggregate boundary and the atomicity unit a store must support; the concept count
-and relationship shape the MVP requires; that the read model must be arranged so the public path
-cannot express a non-approved request; that three orthogonal dimensions must be representable
-without collapsing; that retention and an idempotent, all-or-nothing purge obligation must be
-expressible; and that **no permanent-deletion capability exists in the MVP**. Hosting, runtime,
-continuous integration, and test tooling remain independent of it. **While this ADR is
-`Proposed`, `DG-2` may rely on none of that** — `docs/adr/README.md` is explicit that a
-proposed decision is not in force and nothing may depend on it. **`P0b` and `P1`–`P5` remain
-blocked by `DG-2` regardless of this ADR's status.**
+**Downstream implications for `DG-2`:** now that this ADR is **Accepted**, the technology
+decision knows the aggregate boundary and the atomicity unit a store must support; the concept
+count and relationship shape the MVP requires; that the read model must be arranged so the
+public path cannot express a non-approved request; that three orthogonal dimensions must be
+representable without collapsing; that retention and an idempotent, all-or-nothing purge
+obligation must be expressible; and that **no permanent-deletion capability exists in the
+MVP**. Hosting, runtime, continuous integration, and test tooling remain independent of it.
+**`DG-2` may now rely on this decision — but acceptance decides nothing that `DG-2` owns.**
+`DG-2` remains **Unresolved**, held by its technology-stack hard blocker, and **`P0b` and
+`P1`–`P5` remain blocked by it.**
 
 **Reversibility:** **expensive, and deliberately so.** Reversing the single-concept conclusion
 after `P1` would mean re-deriving identity across the lifecycle and re-proving `DI-1`–`DI-11`;
@@ -447,7 +448,7 @@ now, at zero data volume, which is precisely why the chain insisted on deciding 
 | **A proposal becomes reachable through a public path.** | `DI-10` breached and, with it, `BI-1`/`BI-4` — a trust failure rather than a correctness failure. | `DI-10` is stated over **paths**, not queries, and the public read model is required to be unable to express the request at all (`ADR-001`). |
 | **Purge is implemented as an ordinary deletion, or as an administrator action.** | The system obligation becomes a manual step that will not be run, or acquires deletion semantics `DDM-9` never chose. | The decision states purge as an obligation with properties — system-driven, all-or-nothing, idempotent, non-altering — and `docs/09` records that it is deliberately not an operation. |
 | **The `S-7` shape is chosen without the retention rule in mind.** | The approved 90-day lifecycle becomes unenforceable, and the history needed was never recorded — irrecoverably. | Recorded as a finding here; `docs/08` already instructs that `S-7` be resolved with `S-8`. The response is to carry the constraint into that decision, **not** to pre-empt it. |
-| **This `Proposed` ADR is treated as binding.** | Work proceeds on a decision that has not been accepted, which is the gate-bypass `IR-1` names. | Stated in the header and again in *Consequences*: `Proposed` is not in force, and nothing may depend on it until it is **Accepted**. |
+| **Acceptance is mistaken for a gate opening.** | Work behind `DG-2` or `DG-3` starts because "the architecture is decided" — the gate-bypass `IR-1` names. | `docs/adr/README.md`: *"An ADR records a decision. It does not open a gate."* Stated again in the header and in *Consequences*: `DG-2` remains Unresolved, and `P0b` and `P1`–`P5` remain blocked. |
 
 ## Open questions this decision must NOT answer
 
