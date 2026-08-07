@@ -1590,8 +1590,8 @@ supported by the existing C6 actions), and **OQ-15** (abuse escalation — a hum
 process, not a component).
 
 > **The shortest useful summary of this section.** Of the seventeen questions in the
-> table above, **six are Decided** — OQ-6, OQ-7, OQ-8/8b, OQ-10, NOQ-2, and NOQ-3.
-> **Eleven remain open.**
+> table above, **eight are Decided** — OQ-6, OQ-7, OQ-8/8b, OQ-10, OQ-11, OQ-13, NOQ-2,
+> and NOQ-3. **Nine remain open.**
 >
 > **Data design (DD-1) no longer waits on any DG-1 product question** — OQ-13 was the last,
 > and **ADR-006 is now Accepted** (2026-08-07) and therefore **in force**. The
