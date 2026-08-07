@@ -971,8 +971,10 @@ approved-listing revisions under one uniform rule. Both requirements are now
 **Must**, and **neither had to be amended**. The implication has been accepted
 rather than deferred: **a purge capability is a requirement**, committed as a
 **system obligation** rather than an administrator action. The architecture states
-the obligation and still chooses **no mechanism** — that remains DD-1, DDM-9, and
-ADR-006.
+the obligation and still chooses **no mechanism**. ADR-006 settles the **logical**
+half of DD-1 and likewise chooses no mechanism; the physical representation of
+retention and purge **remains DDM-9, which is unresolved** — see ADR-006 and, in
+docs/08, DDM-9.
 
 ---
 
@@ -1592,7 +1594,9 @@ process, not a component).
 > **Eleven remain open.**
 >
 > **Data design (DD-1) no longer waits on any DG-1 product question** — OQ-13 was the last,
-> and **ADR-006 is now Ready to write** rather than Blocked. Writing it is separate work. The store-selection preconditions this document set — NOQ-2
+> and **ADR-006 has now been drafted and is Proposed** — under review, and **not
+> yet in force**. Writing it was separate work; accepting it is separate again. The
+> store-selection preconditions this document set — NOQ-2
 > and NOQ-3, via DD-3 — are answered; the technology selection itself is not.
 >
 > **Two are cheap now and expensive later, and should be answered early: NOQ-5**
@@ -1614,7 +1618,7 @@ applied — judged against *Technology-selection criteria* above.
 | **ADR-003** | Data-store product | Hard requirements 3, 4, 5; DD-3. **Blocked by NOQ-2 and NOQ-3** |
 | **ADR-004** | Administrator authentication mechanism | DD-4, NOQ-9 |
 | **ADR-005** | Hosting platform and runtime model | DD-5. Must not reopen the rejected decomposition of Option D |
-| **ADR-006** | Listing data model and lifecycle states | DD-1. **No longer blocked by a DG-1 product question** — OQ-6, OQ-7, OQ-8/8b, OQ-10, OQ-11, OQ-13 all Decided. **Ready to write; not drafted, not Accepted** |
+| **ADR-006** | Listing data model and lifecycle states | DD-1. **No longer blocked by a DG-1 product question** — OQ-6, OQ-7, OQ-8/8b, OQ-10, OQ-11, OQ-13 all Decided. **Drafted and Proposed (2026-08-07, issue #61); under review, not Accepted, not in force.** It discharges DD-1 **logically only** — the physical representation remains DDM-1–DDM-10, and in particular **DDM-8 and DDM-9, both still unresolved** |
 | **ADR-007** | Search approach | DD-14. **Blocked by OQ-4.** A dedicated index requires *measured* justification |
 | **ADR-008** | Anti-spam approach | DD-6. **Blocked by OQ-9.** Must be weighed against NFR-ACC-01/02 |
 | **ADR-009** | Audit-logging approach | DD-7. **Blocked by OQ-14** |
@@ -1655,7 +1659,9 @@ owner's to answer.
 
 **Of those questions, OQ-6, OQ-7, OQ-8/8b, OQ-10, OQ-11, OQ-13, NOQ-2, and NOQ-3 are Decided.**
 **No DG-1 hard blocker remains: data design (DD-1) and ADR-006 are unblocked on the product
-side.** Neither has been written, and DG-2 still governs the technology they depend on.
+side.** **ADR-006 has now been drafted and is Proposed** — under review, not
+Accepted, and **not in force**; DG-2 still governs the technology they depend on,
+and remains Unresolved.
 **OQ-9 and NOQ-5 are cheap now and expensive later**, and should be answered early —
 not because the architecture cannot proceed without them, but because answering them
 *later* is what would make them expensive.

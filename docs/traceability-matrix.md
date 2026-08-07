@@ -301,7 +301,7 @@ gate is the first maintenance action the decision log requires.
 | `ADR-003` | Data-store product | Pending | `NOQ-2`, `NOQ-3` (`DD-3`) |
 | `ADR-004` | Administrator authentication mechanism | Pending | `NOQ-9` (`DD-4`) |
 | `ADR-005` | Hosting platform & runtime model | Pending | `DG-2` (`DD-5`) |
-| `ADR-006` | Listing data model & lifecycle states | **Ready to write** | **Nothing** — ~~`OQ-6/7/8/8b/10/11/13`~~ all **Decided**, `DG-1` **Resolved** (`DD-1`). May now be drafted; **not written, not Proposed, not Accepted** |
+| [`ADR-006`](adr/ADR-006-listing-data-model-and-lifecycle-states.md) | Listing data model & lifecycle states | **Proposed** — 2026-08-07 (issue #61) | **Nothing** — ~~`OQ-6/7/8/8b/10/11/13`~~ all **Decided**, `DG-1` **Resolved** (`DD-1`). Drafted and **under review**; **not Accepted, not in force** — no work may depend on it yet. Discharges `DD-1` **logically only**; `DDM-8` and `DDM-9` remain **unresolved** |
 | `ADR-007` | Search approach | Pending | `OQ-4` (`DD-14`) |
 | `ADR-008` | Anti-spam approach | Pending | `OQ-9` (`DD-6`) |
 | `ADR-009` | Audit-logging approach | Pending | `OQ-14`/`NOQ-8` (`DD-7`) |
@@ -345,7 +345,7 @@ gate is the first maintenance action the decision log requires.
 ~~`S-5` edit-after-approval / removal~~ — **fully resolved:** ~~`OQ-10`~~ **Decided** (`E7` committed, revision lifecycle defined, no fourth listing status) **and** ~~`OQ-11`~~ **Decided** (unpublish/republish committed as **publication state**, again **no fourth listing status**; `R-11`/`R-12` pending-revision interaction recorded) · ~~`S-6` location attributes (`OQ-6`)~~ **resolved — `OQ-6` Decided** ·
 `S-7` review-data shape (`OQ-14` dependency) · `S-8` audit entries (`OQ-14`, `NOQ-8`) ·
 `S-9` anti-spam data (`OQ-9`) · `S-10` duplicate representation (`OQ-12`) ·
-~~`S-11` rejected retention & purge~~ — **resolved:** ~~`OQ-13`~~ **Decided** (90 days from rejection for both covered record types, then purge as a system obligation; representation still `DDM-9`/`ADR-006`). **A cell that fills a seam with a guessed field
+~~`S-11` rejected retention & purge~~ — **resolved:** ~~`OQ-13`~~ **Decided** (90 days from rejection for both covered record types, then purge as a system obligation; representation still `DDM-9` — unresolved; `ADR-006` (Proposed) settles the logical lifecycle only). **A cell that fills a seam with a guessed field
 has answered `DG-1` by the back door.**
 
 ### Deferred vs excluded (`docs/12`, `docs/03`)
@@ -356,7 +356,8 @@ has answered `DG-1` by the back door.**
   `S7` two-version view. **The revision *storage* mechanism remains `DDM-8` — open.**
 - **Committed by `OQ-11`:** `OP-9` unpublish/republish, and the `S6` unpublish and republish
   capabilities with their required reason and explicit confirmation. **The *representation* of
-  publication state remains `ADR-006`/`DDM-9` — open**, and the control's form is undrawn.
+  publication state remains `DDM-9` — open** (`ADR-006`, Proposed, settles the logical concept
+  and selects no representation), and the control's form is undrawn.
 - **Deferred (not built, not needed):** outcome notification (`OQ-2`, `DD-16`), report-
   inaccuracy path (`OQ-1`), API versioning (`AQ-5`), redundancy/caching/dedicated search index.
 - **Excluded by `docs/03` (not deferred):** business-owner accounts, listing claiming, reviews,

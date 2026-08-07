@@ -372,8 +372,9 @@ stateDiagram-v2
 ```
 
 This second diagram describes a **product concept**, not a stored field, a status value,
-an enum, a flag, a timestamp, a table, or any other representation — all of which remain
-`ADR-006` and `DDM-9`. *Pending* and *rejected* records are not publicly available for
+an enum, a flag, a timestamp, a table, or any other representation. `ADR-006` (Proposed)
+decides the **logical** concept; the **representation remains `DDM-9`, which is
+unresolved**. *Pending* and *rejected* records are not publicly available for
 reasons already settled elsewhere, and publication state does not apply to them.
 
 **In words, because the diagram alone is not the specification.** A record enters the
@@ -771,7 +772,8 @@ requirement rather than a nice-to-have**. `OQ-13` committed **purge execution to
 as a system obligation** (`FR-AUD-06`) precisely because a retention period with no
 mechanism to enforce it is retention forever with extra paperwork. It is not an
 administrator-invoked action and needs no per-record decision. **How it is carried out —
-soft delete, hard delete, or otherwise — remains `DDM-9` and `ADR-006`.**
+soft delete, hard delete, or otherwise — remains `DDM-9`, which is unresolved.** `ADR-006`
+(Proposed) settles the **logical** obligation and selects **no** representation for it.
 
 **Retention questions the model records and does not answer:**
 
@@ -981,7 +983,7 @@ contribution to them.
 | `S-8` | Audit entries — whether `E5` exists. | `OQ-14`, `NOQ-8` |
 | `S-9` | Anti-spam data — whether `E6` exists and what it holds. | `OQ-9` |
 | `S-10` | Duplicate representation. | `OQ-12` |
-| ~~`S-11`~~ **Resolved** | Rejected-record retention and purge. **Filled by `OQ-13` (2026-08-04):** rejected initial submissions and rejected approved-listing revisions are retained **90 days from rejection**, administrator-visible only, terminal, then purge-eligible and purged; purge is a committed **system obligation**. **Only the policy is fixed — the representation of retention and purge remains `DDM-9` and `ADR-006`.** | ~~`OQ-13`~~ — **Decided** |
+| ~~`S-11`~~ **Resolved** | Rejected-record retention and purge. **Filled by `OQ-13` (2026-08-04):** rejected initial submissions and rejected approved-listing revisions are retained **90 days from rejection**, administrator-visible only, terminal, then purge-eligible and purged; purge is a committed **system obligation**. **Only the policy is fixed.** `ADR-006` (Proposed) settles the *logical* lifecycle; **the representation of retention and purge remains `DDM-9`, which is unresolved.** | ~~`OQ-13`~~ — **Decided** |
 
 ---
 
@@ -1003,6 +1005,19 @@ above: an open question is a *product* decision someone must make; a deferred de
 | `DDM-8` | **Revision storage and the representation of the effective public version** — row update, version record, pointer, copy, immutable history, or otherwise. | **Still open, and now meaningful.** `OQ-10` committed `E7` and fixed *which information the public sees and when*; it selected **no** persistence mechanism. "Becomes the effective public version" is policy language, not a storage design. | — (open; physical) |
 | `DDM-9` | **Soft-delete vs. hard-delete** representation, **and the representation of publication state and of purge** — status value, flag, timestamp, separate structure, or otherwise. | **Still open, and now fully meaningful.** `OQ-11` is Decided: it authorises **reversible unpublishing**, excludes **permanent deletion** from the MVP, and fixes publication state as a **product concept** — selecting **no** representation. `OQ-13` is Decided: it commits **purge as a system obligation** for rejected records — and likewise selects **no** representation. **Whether a purge is a physical destruction or a logical marking is precisely what this question still owns**, and both decisions deliberately left it here. | ~~`OQ-13`~~, ~~`OQ-11`~~ — **both Decided, both select no representation** |
 | `DDM-10` | **Migration and schema-evolution tooling.** | Out of scope for a logical model entirely. | — |
+
+**`DDM-8` and `DDM-9` are not `ADR-006`'s to decide, and the boundary is worth stating
+plainly.** `ADR-006` (Proposed, issue #61) settles the **logical** listing model and its
+lifecycle states — durable listing identity, the three-value status set and its transitions,
+publication state as a dimension distinct from status, the revision lifecycle, the effective
+public version, the projection, and retention and purge stated as rules and derived
+conditions. It selects **no physical representation for any of them**. **`DDM-8` therefore
+remains responsible for revision storage and for how the effective public version is carried,
+and `DDM-9` remains responsible for the representation of publication state, of retention and
+purge, and for soft-delete versus hard-delete — and both remain unresolved.** What `ADR-006`
+does supply is the set of **logical requirements those later representations must satisfy**;
+**once `ADR-006` is Accepted, `DDM-8` and `DDM-9` must conform to it**, and while it is merely
+`Proposed` it constrains nothing.
 
 **`DDM-6` is worth a second look**, because it is the one most likely to be mistaken for a
 logical decision. Whether withheld contact fields sit on the same record as public ones, or
