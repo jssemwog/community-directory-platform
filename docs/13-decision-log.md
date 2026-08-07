@@ -108,8 +108,9 @@ whose *cost* behaves like a blocker.
 hard blockers outright: they **must be answered before data design starts.** **All six are now
 Decided** — `OQ-6` and `OQ-7` (2026-07-31), `OQ-10` (2026-08-02), `OQ-8`/`OQ-8b`
 (2026-08-03), and `OQ-11` and `OQ-13` (2026-08-04). **No hard blocker remains, so `DG-1` is
-Resolved.** `ADR-006` is **no longer blocked by a `DG-1` product question** and is **Ready to
-write** — it has not been drafted and is **not Accepted**. **`DG-1`'s two shaping inputs,
+Resolved.** `ADR-006` is **no longer blocked by a `DG-1` product question**; it was
+drafted and **Accepted 2026-08-07** (issue #61) and is now **in force**.
+**`DG-1`'s two shaping inputs,
 `OQ-4` and `OQ-5`, remain Unresolved**; per `docs/12` they block no phase, which is why the
 gate clears without them. **Clearing `DG-1` does not start `P1`:** `P1` is hard-blocked by
 `DG-1` *and* `DG-2`, and `DG-2` is still Unresolved.

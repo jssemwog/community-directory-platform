@@ -7,8 +7,9 @@ later**.
 `docs/07-system-architecture.md` names the ADRs this project needs. Until now, **nothing held
 them.** This directory is that place.
 
-**It holds one decision.** `ADR-001` is **Accepted**; every other ADR is **blocked** on a
-question the product owner has not been asked. See *The register*.
+**It holds two decisions in force.** `ADR-001` and `ADR-006` are both **Accepted**; every
+other ADR is **blocked** on a question the product owner has not been asked. See *The
+register*.
 
 ---
 
@@ -124,7 +125,7 @@ forgotten.
 | **`ADR-003`** | **Data-store product** | **`DG-2`** | **`NOQ-2`** (availability) · **`NOQ-3`** (backup / RPO / RTO) — `DD-3` | **Blocked** |
 | **`ADR-004`** | Administrator authentication mechanism | **`DG-3`** | **`NOQ-9`** — `DD-4`. *The boundary is settled; the mechanism is not* | **Blocked** |
 | **`ADR-005`** | Hosting platform and runtime model | **`DG-2`** | The technology decision — `DD-5` | **Blocked** |
-| **`ADR-006`** | **Listing data model and lifecycle states** | **`DG-1`** — **Resolved 2026-08-04** | **Nothing.** `OQ-6`, `OQ-7`, `OQ-8`/`OQ-8b`, `OQ-10`, `OQ-11`, and `OQ-13` are all **Decided** — `DD-1` | **Ready to write** |
+| **[`ADR-006`](ADR-006-listing-data-model-and-lifecycle-states.md)** | **Listing data model and lifecycle states** | **`DG-1`** — **Resolved 2026-08-04** | **Nothing.** `OQ-6`, `OQ-7`, `OQ-8`/`OQ-8b`, `OQ-10`, `OQ-11`, and `OQ-13` are all **Decided** — `DD-1` | **Accepted** — 2026-08-07 (issue #61). *In force; work may rely on it.* |
 | **`ADR-007`** | Search approach | **`DG-1`** | **`OQ-4`** — `DD-14`. *A dedicated index requires **measured** justification* | **Blocked** |
 | **`ADR-008`** | Anti-spam approach | **`DG-3`** | **`OQ-9`** — `DD-6`. *Must be weighed against `NFR-ACC-01/02`* | **Blocked** |
 | **`ADR-009`** | Audit-logging approach | **`DG-3`** | **`OQ-14`** — and `NOQ-8`, **taken as one decision** (`DD-7`). **Irreversible if answered late** (`IR-7`) | **Blocked** |
@@ -137,18 +138,26 @@ forgotten.
 > blocked on open product questions.** `docs/07` defers them rather than guessing, and this
 > directory does the same.
 
-**Eleven of twelve cannot be written today.** That is not a backlog to work around; it is the
+**Ten of twelve still cannot be written.** That is not a backlog to work around; it is the
 measure of what `DG-1`, `DG-2`, and `DG-3` are holding. See `docs/13-decision-log.md`.
 
-**`ADR-006` is now `Ready to write`, and the distinction matters.** It began blocked on six
+**`ADR-006` is now `Accepted`, and the distinction matters.** It began blocked on six
 `DG-1` questions; all six are now answered — `OQ-6` and `OQ-7` (2026-07-31), `OQ-10`
 (2026-08-02), `OQ-8`/`OQ-8b` (2026-08-03), and `OQ-11` and `OQ-13` (2026-08-04). `DG-1` is
-**Resolved**, so the gate that held this ADR is open and its status moves from **Blocked** to
-**Ready to write**. **That means only that it may now be drafted.** No file exists, nothing
-is Proposed, and nothing is **Accepted** — no work may rely on it. Every one of those six
-decisions *narrowed* `ADR-006` without filling any of it: each settled a **product**
-question and deliberately left **representation** to this ADR and to `DDM-8`/`DDM-9` —
-`OQ-11` for publication state, `OQ-13` for retention and purge.
+**Resolved**, the gate that held this ADR opened, the ADR was drafted, reviewed, and
+**accepted by the architecture owner on 2026-08-07**. It is therefore **in force**, and work
+may rely on it. **Acceptance opens no gate:** `DG-2` remains Unresolved, and `P0b` and
+`P1`–`P5` remain blocked by it.
+
+**What `ADR-006` decides, and what it deliberately does not.** Every one of those six product
+decisions *narrowed* `ADR-006` without filling it: each settled a **product** question and
+selected **no representation**. `ADR-006` accordingly decides the **logical model and its
+lifecycle states** — and **does not resolve `DDM-8` or `DDM-9`**. **`DDM-8` remains
+responsible for the physical revision-storage representation and for how the effective public
+version is carried; `DDM-9` remains responsible for the physical lifecycle and removal
+representation — publication state, retention, purge, and any deletion semantics.** Both
+remain **unresolved**. `ADR-006` states the *logical requirements* their later representations
+must satisfy, and **now that it is Accepted those decisions must conform to it**.
 
 ---
 
