@@ -64,7 +64,7 @@ until it is answered. That is a harder deadline than a calendar date, and an hon
 |---|---|---|---|---|---|---|
 | **`DG-0`** | Process | **Joe S.** — maintainer | **Open** | Nothing | — | — |
 | **`DG-1`** | **Data design** | **Joe S.** — product owner | **Resolved** — 2026-08-04 | ~~**All of `P1`**~~; the product-decision blocker on `P1` is removed. **`P1` remains blocked by `DG-2`.** | 6 — **6 Decided, 0 Unresolved** | 2 |
-| **`DG-2`** | **Technology** | **Joe S.** — product owner | **Unresolved** | The **`P0b` scaffold** and all of `P1` | 2 | 2 |
+| **`DG-2`** | **Technology** | **Joe S.** — product owner | **Unresolved** | The **`P0b` scaffold** and all of `P1` | 3 — **2 Decided, 1 Unresolved** | 2 |
 | **`DG-3`** | **Build-time** | **Joe S.** — product owner | **Unresolved** | `P3`, `P4`, and the *verifiability* of `P2` | 3 | 2 |
 | **`DG-4`** | **Release** | **Joe S.** — product owner | **Unresolved** | The **release decision**, not the build | — | — |
 
