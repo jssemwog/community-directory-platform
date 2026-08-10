@@ -993,18 +993,19 @@ docs/08, DDM-9.
 | **Credential exposure** | The store credential is server-side only, never shipped to a client, and never logged. Administrator credentials are never stored or transmitted in readable form. | NFR-SEC-08 |
 | **A leak through the operational plane** | No credentials and no non-public submission content in logs (NFR-OBS-02); backups carry live-data confidentiality (NFR-BACK-04). | NFR-OBS-02, NFR-BACK-04 |
 | **Over-collection of personal data** | Collect only the defined listing fields; nothing extra "just in case". | NFR-PRIV-04 |
-| **Publishing a field the submitter never meant to be public** | C4 projects to the **public field set** before data leaves the domain. **Which fields those are is OQ-7 — and until it is answered, this control has no content.** | FR-DATA-11, NFR-PRIV-01/02 |
+| **Publishing a field the submitter never meant to be public** | C4 projects to the **public field set** before data leaves the domain. **Which fields those are is settled by OQ-7 — Decided 2026-07-31 — so this control now has content; its enforcement mechanism remains DDM-6, open.** | FR-DATA-11, NFR-PRIV-01/02 |
 
 **The honest summary.** The confidentiality and integrity story is strong *by
 construction* on the read and publish paths: those guarantees follow from the shape
-of the architecture rather than from remembering to check. It is **weakest at two
-points, and both are open questions rather than design gaps.** OQ-7 means nobody
-has yet said which fields are public, so the projection is currently an empty
-promise. OQ-9 means nothing yet stops a script from filling the pending queue with
-thousands of submissions — which, given that A-1 assumes manual review is
-practical, is not merely a nuisance but an attack on the operating model itself.
-Both are carried into *Risks* and *Open questions*. **Neither should be allowed to
-reach implementation unanswered.**
+of the architecture rather than from remembering to check. It was **weakest at two
+points, both open questions rather than design gaps — and one of them is now
+answered.** OQ-7 is **Decided 2026-07-31**: an explicit public projection, so the C4
+projection has content rather than being an empty promise (R-2, closed); what remains
+there is its enforcement mechanism, **DDM-6, open**. OQ-9 still means nothing yet stops
+a script from filling the pending queue with thousands of submissions — which, given
+that A-1 assumes manual review is practical, is not merely a nuisance but an attack on
+the operating model itself. Both are carried into *Risks* and *Open questions*.
+**OQ-9 must not be allowed to reach implementation unanswered.**
 
 ---
 
@@ -1047,17 +1048,19 @@ architecture invests accordingly.
   they contain every pending and rejected submission (NFR-BACK-04).
 - Periodic verification that a backup is actually restorable (NFR-BACK-05).
 
-**What is not committed — and cannot be, until the numbers exist.** Backup
-*frequency*, the **recovery point objective** (how much data loss is tolerable),
-and the **recovery time objective** (how much downtime is tolerable) are **NOQ-3,
-and they are undecided**. This is not a detail: the recovery point objective is the
-difference between hourly snapshots and continuous point-in-time recovery, and
-those are materially different capabilities with materially different costs and
-different candidate products. Likewise the availability target (NOQ-2) is the
-difference between one instance and a redundant deployment. **DD-8 and DD-9 cannot
-be closed, and the store product cannot be responsibly chosen, until NOQ-2 and
-NOQ-3 are answered.** The architecture deliberately does not paper over this by
-inventing a number.
+**What is now committed — and what still is not.** Backup *frequency*, the **recovery
+point objective** (how much data loss is tolerable), and the **recovery time objective**
+(how much downtime is tolerable) are **NOQ-3, Decided 2026-07-30**: daily backups, a
+recovery point objective of up to 24 hours, and a recovery time objective of one business
+day. The availability target (NOQ-2) is **Decided 2026-07-30**: 99% over a rolling monthly
+window, excluding announced maintenance. **What is still not committed is the mechanism.**
+The recovery point objective is the difference between hourly snapshots and continuous
+point-in-time recovery, and those are materially different capabilities with materially
+different costs and different candidate products; the availability target is the difference
+between one instance and a redundant deployment. **DD-8 and DD-9 therefore remain open, and
+the store product still cannot be responsibly chosen** — no longer because the numbers are
+missing, but because the technology stack itself is undecided (DG-2). The architecture did
+not paper over this by inventing a number.
 
 ---
 
@@ -1410,8 +1413,8 @@ is visible.
 | **DD-5** | Hosting platform and runtime model (long-running instance versus serverless runtime) | Both satisfy the architecture; statelessness keeps both open | NFR-OPS-04. **Does not reopen the rejected decomposition of Option D** |
 | **DD-6** | Anti-spam mechanism | **OQ-9 is unanswered.** The seam (C11) is fixed; the mechanism is not | **OQ-9.** Must be weighed against NFR-ACC-01/02 and the low-friction principle in the vision |
 | **DD-7** | Whether an audit log exists, and its shape | **OQ-14 / NOQ-8 unanswered.** The design of C6 makes it cheap either way | **OQ-14.** Note the stakeholder cost of "no" (`02`: administrators need audit trails) |
-| **DD-8** | Availability target, and whether redundancy is deployed | **NOQ-2 unanswered.** 99% and 99.9% are different architectures | **NOQ-2.** Statelessness preserves both options |
-| **DD-9** | Backup frequency, recovery point objective, recovery time objective | **NOQ-3 unanswered.** These determine backup *capability*, not merely schedule | **NOQ-3.** Feeds DD-3 |
+| **DD-8** | Availability target, and whether redundancy is deployed | **No longer blocked by NOQ-2** — **Decided 2026-07-30**: 99% over a rolling monthly window, announced maintenance excluded. **DD-8 is not thereby closed** — the target is committed; whether redundancy is deployed to meet it is a deployment decision still to be taken | **NOQ-2 — Decided.** Statelessness preserves both options |
+| **DD-9** | Backup frequency, recovery point objective, recovery time objective | **No longer blocked by NOQ-3** — **Decided 2026-07-30**: daily backups, RPO up to 24 hours, RTO one business day, restore tested before launch and at least quarterly, at least one independent off-provider copy refreshed weekly. **DD-9 is not thereby closed** — these fix the required backup *capability*, not merely a schedule; the mechanism that delivers it is still to be chosen | **NOQ-3 — Decided.** Feeds DD-3 |
 | **DD-10** | Accessibility standard and level | **NOQ-5 unanswered.** Conformance cannot be verified against an unnamed standard | **NOQ-5.** Cheap now, expensive later — **decide early** |
 | **DD-11** | Supported browser, device, and assistive-technology matrix | **NOQ-6 unanswered.** It defines what "works" means for testing | **NOQ-6** |
 | **DD-12** | Performance thresholds, and the load at which they hold | **NOQ-1 and NOQ-4 unanswered.** Without them NFR-PERF-* is untestable and NFR-SCALE-01 has no content | **NOQ-1, NOQ-4.** Also gates any future decision to add caching or a search index |
@@ -1449,10 +1452,10 @@ architectural teeth.
 | # | Risk | Impact | Likelihood | Mitigation |
 |---|---|---|---|---|
 | **R-1** | **OQ-9 (anti-spam) stays unanswered into implementation.** An unauthenticated public form with no safeguard is the most exposed surface in the system | **High.** Bulk automated submissions do not merely create noise — they overwhelm the manual review capacity that **assumption A-1 depends on**. This is an attack on the operating model, not just on the data | **Medium–High** | Answer **OQ-9 before build**. The C11 seam is reserved for it. Note that the accessible answers (rate limiting, a honeypot, throttled review) are *not* the obvious ones — a visual challenge would collide with NFR-ACC-01/02 |
-| **R-2** | **OQ-7 (public versus withheld fields) stays unanswered.** The public-field projection in C4 is the control that enforces NFR-PRIV-01/02 — and it is currently **empty** | **High.** A submitter private phone number published without intent is exactly the kind of trust failure `01-vision.md` exists to prevent | **Medium** | Answer **OQ-7 before data design (DD-1)**. Until then the safe default is to treat *nothing* as public until it is explicitly listed |
+| ~~**R-2**~~ **Closed 2026-07-31** | ~~**OQ-7 (public versus withheld fields) stays unanswered.** The public-field projection in C4 is the control that enforces NFR-PRIV-01/02 — and it is currently **empty**~~ | ~~**High.** A submitter private phone number published without intent is exactly the kind of trust failure `01-vision.md` exists to prevent~~ | **Closed** | **OQ-7 Decided 2026-07-31 gave the C4 projection its content** — an explicit public projection separating public, administrator-visible, audit-only, and not-collected information (`docs/08` *Field classification*, seam S-2 resolved) — so the control this row called an empty promise is no longer empty. Residual: the projection must be built as an **enforced control, not a convention** (`docs/12` IR-2), and its enforcement mechanism remains **DDM-6, open** |
 | **R-3** | ~~**OQ-10 (edit-after-approval) resolves to "secondary review".**~~ **Realised and accepted — OQ-10 Decided 2026-08-02.** It did resolve to secondary review. A revision (E7) is stored separately from the effective public version; **no new lifecycle state was needed** — the listing stays *approved* while carrying a pending revision | **Retired as a risk.** The data-design and C6 change was taken **before DD-1 and before any record exists**, which is the cheap end of the asymmetry this row was written to protect | — | **Closed.** The structural cost was paid deliberately at zero data volume. Superseded by **R-3b** below, which carries the residual risk the decision introduces |
 | **R-3b** | **The FR-ADM-10b atomic administrator operation weakens the two-step protection it is an exception to.** Creating and approving a revision in one action removes the pause between "typed" and "publicly visible", and with a sole maintainer the proposing and approving party are the same person — so the second review is procedural, not independent | **Medium.** The realistic failure is an accidental or unreviewed change to live public information — the same failure the revision lifecycle exists to prevent, reachable through the sanctioned path rather than around it | **Medium** *(rises with administrator count and edit volume)* | **The safeguards are mandatory and are the mitigation, not the intent:** every validation and authorization check that applies to a separately submitted revision applies here (FR-VAL-04, VR-6) — **no privileged bypass and no direct unvalidated overwrite**; **nothing becomes publicly visible before those checks succeed** (DI-10); **any failure leaves the currently approved listing unchanged** (DI-3, NFR-DATA-03). The operation must be a **distinct deliberate action**, never the incidental result of saving (docs/09 OP-6, docs/10 S7). **Revisit when a second administrator joins** — the exception exists because independent review is currently unavailable, not because it is unwanted |
-| **R-4** | **There are no numbers.** NOQ-1 (thresholds), NOQ-2 (availability), NOQ-3 (RPO/RTO), and NOQ-4 (load) are all open, so NFR-PERF-*, NFR-REL-*, NFR-BACK-*, and NFR-SCALE-01 are currently **not testable** — and DD-3 cannot be responsibly closed | **Medium–High.** An architecture cannot be validated against targets that do not exist, and a store product cannot be chosen against an unknown recovery point objective | **High** (they are open today) | Answer NOQ-1 through NOQ-4 before technology selection. Meanwhile the design deliberately assumes "small" (A-5, A-6) and **says so** rather than hiding it |
+| **R-4** | **There are no numbers — for two of the four.** NOQ-1 (thresholds) and NOQ-4 (load) are still open, so NFR-PERF-* and NFR-SCALE-01 are currently **not testable** — and DD-3 cannot be responsibly closed. **NOQ-2 and NOQ-3 are Decided 2026-07-30**, so NFR-REL-* and NFR-BACK-* now have targets to test against | **Medium–High.** An architecture cannot be validated against targets that do not exist | **High** (NOQ-1 and NOQ-4 are open today) | Answer **NOQ-1 and NOQ-4** before technology selection; NOQ-2 and NOQ-3 are answered. Meanwhile the design deliberately assumes "small" (A-5, A-6) and **says so** rather than hiding it |
 | **R-5** | **A-5 and A-6 are wrong** — the corpus or the traffic is materially larger than assumed | **Medium.** Search and browse are the first things to degrade (NFR-PERF-06) | **Low–Medium** | Statelessness allows scaling out; C4 isolates search, so a store-level full-text index or (as a last resort) a dedicated index is an additive change. **Measure before adding** (DD-14) |
 | **R-6** | **The administrative surface is the likeliest place for a security mistake** (TB-3), because it lives inside the same application as the public surface | **High** if breached: every pending and rejected submission | **Low** *(if tested)* | C8 gates server-side on **every** request, including direct-URL and non-browser access. **This boundary must carry explicit automated test coverage** (NFR-MAINT-03) — it is the single highest-value test in the suite |
 | **R-7** | **Backups exist but the restore has never been run.** The most common failure mode of small-team backup strategy | **Critical.** The one failure the project cannot absorb (D-9) | **Medium** | NFR-BACK-02 requires a **tested** procedure and NFR-BACK-05 requires periodic verification. This is the strongest argument for having a non-production environment to rehearse in |
@@ -1531,7 +1534,7 @@ table above. That table is the primary driver-to-requirement trace.
 | **Performance** (PERF-01..06) | A small corpus, indexed filtered queries, and a single in-process hop; no network fan-out on the read path | **Thresholds and load: NOQ-1, NOQ-4 (DD-12).** Currently untestable |
 | **Availability and reliability** (REL-01..06) | Stateless instances; a managed platform; atomic writes; a distinct error state; read/write path separation, which is what enables NFR-REL-06 | **The target: NOQ-2 (DD-8)** |
 | **Security** (SEC-01..08) | The C8 gate (server-side, every request); capability narrowing in C4 and C5; server-side validation in C7; HTTPS; no client-held store credential | **Auth mechanism: DD-4. Anti-spam: OQ-9 / DD-6. Credential strength: NOQ-9** |
-| **Privacy** (PRIV-01..05) | The public-field projection in C4; a store with no public route; TB-5 protecting logs and backups | **Public field set: OQ-7 (R-2). Retention: OQ-13 — Decided, 90 days from rejection then purge; R-9 closed** |
+| **Privacy** (PRIV-01..05) | The public-field projection in C4; a store with no public route; TB-5 protecting logs and backups | **Public field set: OQ-7 — Decided, an explicit public projection (`docs/08` *Field classification*); R-2 closed, residual DDM-6. Retention: OQ-13 — Decided, 90 days from rejection then purge; R-9 closed** |
 | **Accessibility** (ACC-01..05) | Server-rendered semantic content; server-rendered error and status states; non-color conveyance as a component contract | **Standard and level: NOQ-5 (DD-10)** |
 | **Usability** (USA-01..06) | No account on the read path; field-level validation with input preserved; three distinct states; confirmations that state the resulting status | — |
 | **Responsive** (RESP-01..04) | Responsive layout in C1 and C2; the administrative interface usable at tablet size and above (C3) | **Device matrix: NOQ-6 (DD-11)** |
@@ -1621,7 +1624,7 @@ applied — judged against *Technology-selection criteria* above.
 | **ADR-007** | Search approach | DD-14. **Blocked by OQ-4.** A dedicated index requires *measured* justification |
 | **ADR-008** | Anti-spam approach | DD-6. **Blocked by OQ-9.** Must be weighed against NFR-ACC-01/02 |
 | **ADR-009** | Audit-logging approach | DD-7. **Blocked by OQ-14** |
-| **ADR-010** | Backup, recovery, and availability posture | DD-8, DD-9. **Blocked by NOQ-2 and NOQ-3.** Feeds ADR-003 |
+| **ADR-010** | Backup, recovery, and availability posture | DD-8, DD-9. **No longer blocked — NOQ-2 and NOQ-3 are both Decided 2026-07-30. Ready to write** (eligible to be commissioned; not drafted, not Proposed, not Accepted). Feeds ADR-003 |
 | **ADR-011** | Accessibility standard, level, and supported matrix | DD-10, DD-11. **Blocked by NOQ-5 and NOQ-6** |
 | **ADR-012** | Testing strategy — with the TB-3 administrative boundary as its highest-value target | NFR-MAINT-03, R-6 |
 
