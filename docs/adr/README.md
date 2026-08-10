@@ -7,9 +7,10 @@ later**.
 `docs/07-system-architecture.md` names the ADRs this project needs. Until now, **nothing held
 them.** This directory is that place.
 
-**It holds two decisions in force.** `ADR-001` and `ADR-006` are both **Accepted**; every
-other ADR is **blocked** on a question the product owner has not been asked. See *The
-register*.
+**It holds two decisions in force.** `ADR-001` and `ADR-006` are both **Accepted**;
+`ADR-010` is **Ready to write** — its prerequisite questions are answered, though nothing is
+drafted yet; and every remaining ADR is either **Blocked** on a question the product owner
+has not been asked, or **Not yet writable**. See *The register*.
 
 ---
 
@@ -129,7 +130,7 @@ forgotten.
 | **`ADR-007`** | Search approach | **`DG-1`** | **`OQ-4`** — `DD-14`. *A dedicated index requires **measured** justification* | **Blocked** |
 | **`ADR-008`** | Anti-spam approach | **`DG-3`** | **`OQ-9`** — `DD-6`. *Must be weighed against `NFR-ACC-01/02`* | **Blocked** |
 | **`ADR-009`** | Audit-logging approach | **`DG-3`** | **`OQ-14`** — and `NOQ-8`, **taken as one decision** (`DD-7`). **Irreversible if answered late** (`IR-7`) | **Blocked** |
-| **`ADR-010`** | Backup, recovery, and availability posture | **`DG-2`** | **`NOQ-2`, `NOQ-3`** — `DD-8`, `DD-9`. **Feeds `ADR-003`** | **Blocked** |
+| **`ADR-010`** | Backup, recovery, and availability posture | **`DG-2`** | **Nothing.** ~~**`NOQ-2`, `NOQ-3`**~~ both **Decided** — 2026-07-30 — `DD-8`, `DD-9`. **Feeds `ADR-003`** | **Ready to write** — its named prerequisite questions are answered. *No file exists yet: not drafted, not `Proposed`, not `Accepted`.* |
 | **`ADR-011`** | Accessibility standard, level, and supported matrix | **`DG-3`** | **`NOQ-5`, `NOQ-6`** — `DD-10`, `DD-11` | **Blocked** |
 | **`ADR-012`** | Testing strategy — with the administrative boundary as its highest-value target | **`DG-2`** (tooling) · **`DG-4`** (depth) | `docs/07` names **no blocking question of its own** — but the **test tooling follows `ADR-002`**, which is blocked, and testing **depth** is `DG-4`. **It cannot be written in full until `ADR-002` lands** | **Not yet writable** |
 
