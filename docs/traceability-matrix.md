@@ -132,7 +132,7 @@ blocking question is from `docs/06`'s own NFR→NOQ mapping.
 | **NFR-MAINT-01…05** | Codebase, tests, config | `DG-2` (tooling) | Committed; test tooling → `DG-2` | pending |
 | **NFR-OBS-01…06** | `C12`; `DD-13` | `NOQ-7` (OBS-06), `OQ-14`/`NOQ-8` (OBS-05) | Committed; OBS-05 **Conditional**, OBS-06 retention **Blocked** (`NOQ-7`) — exclusion rule **not** deferred | pending |
 | **NFR-DATA-01…06** | `DI-1`–`DI-7` | — | Committed | pending |
-| **NFR-BACK-01…06** | `DD-9`; store capability | `NOQ-3` — **Decided** | Committed; **RPO/RTO Decided** (`NOQ-3`, 2026-07-30): daily backups, RPO ≤ 24 h, RTO 1 business day, ≥ weekly off-provider copy (`NFR-BACK-06`), equal confidentiality for all copies | pending |
+| **NFR-BACK-01…06** | `DD-9`; store capability | `NOQ-3` — **Decided** | Committed; **RPO/RTO Decided** (`NOQ-3`, 2026-07-30): daily backups, RPO ≤ 24 h, RTO 1 business day, ~~≥ weekly off-provider copy~~ off-provider copy **no more than 24 h behind the live data** (`NFR-BACK-06`, **amended R1, 2026-08-18** — the 24 h RPO covers provider loss), equal confidentiality for all copies | pending |
 | **NFR-SCALE-01…04** | `PA-1`; `DD-12` | `NOQ-1`, `NOQ-4` (shaping) | **Blocked/shaped** — carries `PA-1` ("small") | pending |
 | **NFR-COMP-01…04** | Supported matrix | `NOQ-6` | Committed (behavior); **matrix Blocked** (`NOQ-6`) | pending |
 | **NFR-OPS-01…05** | Operational procedures | — (carries `PA-1`–`PA-3`) | Committed | pending |
