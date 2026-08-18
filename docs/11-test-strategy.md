@@ -227,15 +227,17 @@ able to save a record that a lister could not have submitted.**
 | **Responsive behavior** | Yes — core flows usable at phone size; admin at tablet/desktop. | Device/browser matrix: **`NOQ-6`**. |
 | **Usability** | Partly — states are distinguishable and confirmations state outcomes. | *Understandability* is a human judgment (**T6**). |
 | **Performance** | **No.** | **`NOQ-1`, `NOQ-4`.** |
-| **Availability** | **No.** | **`NOQ-2`.** |
-| **Backup / recovery** | **No.** | **`NOQ-3`.** |
+| **Availability** | **Yes, against a stated target** — **99% over a rolling monthly window, excluding announced maintenance** (`NOQ-2` **Decided 2026-07-30**; `NFR-REL-02`). Verified by **measurement** over that window (`NFR-REL-01`). | — |
+| **Backup / recovery** | **Yes, against stated objectives** — an **RPO of up to 24 hours** and an **RTO of one business day**, with a restore **tested before launch and at least quarterly** (`NOQ-3` **Decided 2026-07-30**; `NFR-BACK-01`–`NFR-BACK-03`, `NFR-BACK-05`). Provider loss is held to the same 24-hour objective (`NFR-BACK-06`, as amended). | Backup **mechanics** — retention, rotation, deletion and the restoration procedure — remain **deferred** (`NFR-BACK-04`). |
 
-**Performance, availability and recovery cannot be tested, and saying so is the honest
-finding rather than a gap in this document.** A performance test asserts that something is
-fast *enough*; "enough" is `NOQ-1`, and it does not exist. A recovery test asserts data
-loss within a tolerance; the tolerance is `NOQ-3`, and it does not exist. **Writing such a
-test today would mean inventing the target it measures against** — and an invented target,
-once encoded in a passing test, will be cited later as though someone approved it.
+**Performance cannot be tested, and saying so is the honest finding rather than a gap in this
+document.** A performance test asserts that something is fast *enough*; "enough" is `NOQ-1`,
+and it does not exist. **Writing such a test today would mean inventing the target it measures
+against** — and an invented target, once encoded in a passing test, will be cited later as
+though someone approved it. **Availability and recovery are no longer in that position:**
+`NOQ-2` fixed the availability target and `NOQ-3` fixed the recovery objectives, so a recovery
+test now has a tolerance to assert against. What remains deferred there is the **mechanism**,
+not the target.
 
 What *can* be done now, and should be: **establish that these are measurable** — that the
 system can be observed, that a backup can be taken and restored at all. Measurement without
@@ -844,8 +846,8 @@ is the whole point of naming them separately.
 **Category 3 — Blocked. Cannot be a gate, because the target does not exist.**
 
 - **Performance** — `NOQ-1`, `NOQ-4`.
-- **Availability** — `NOQ-2`.
-- **Backup and recovery** — `NOQ-3`.
+- ~~**Availability** — `NOQ-2`.~~ **`NOQ-2` Decided 2026-07-30** — the target exists (99% over a rolling monthly window, announced maintenance excluded), so availability is no longer blocked for want of one.
+- ~~**Backup and recovery** — `NOQ-3`.~~ **`NOQ-3` Decided 2026-07-30** — the objectives exist (RPO up to 24 hours; RTO one business day), so recovery is no longer blocked for want of a tolerance.
 - **Accessibility conformance level** — `NOQ-5`.
 - **Browser/device support matrix** — `NOQ-6`.
 
@@ -896,8 +898,8 @@ becomes the decision (**T4**).
 | ~~**`OQ-13`**~~ **Decided** | — nothing is untestable here any longer, except **representation** (`ADR-006`/`DDM-8`/`DDM-9`) and **backup mechanics** | **Yes:** both covered record types enter the retained state; the period begins at rejection; administrator visibility and reason visibility; public and submitter invisibility; terminality; rejected revisions non-public and the approved listing unaffected; `DI-11` unbreached; expiry produces eligibility; purge occurs as an obligation, all-or-nothing and idempotent; purge alters no approved listing; unpublished listings excluded; audit behavior unasserted; no category-specific retention; restoration does not reactivate |
 | **`OQ-14`** audit logging | **Any audit emission.** *(Note the asymmetry: history not captured cannot be reconstructed later.)* | — |
 | **`NOQ-1` / `NOQ-4`** performance / load | **Any performance threshold.** | Only that performance is **measurable**. |
-| **`NOQ-2`** availability | Any availability target. | — |
-| **`NOQ-3`** backup / recovery | Any recovery point or time objective. | Only that a backup can be taken and restored **at all**. |
+| ~~**`NOQ-2`**~~ **Decided** | — nothing is untestable here any longer for want of a target: it is **99% over a rolling monthly window, announced maintenance excluded** (`NFR-REL-02`) | **Yes:** availability against that stated target, by **measurement** over the stated window (`NFR-REL-01`) |
+| ~~**`NOQ-3`**~~ **Decided** | — nothing is untestable here any longer for want of a target, except **backup mechanics**, which remain deferred (`NFR-BACK-04`) | **Yes:** recovery against a stated tolerance — **RPO up to 24 hours**, **RTO one business day** — and a restore **tested before launch and at least quarterly** (`NFR-BACK-01`–`NFR-BACK-03`, `NFR-BACK-05`); provider loss is held to the same 24-hour objective (`NFR-BACK-06`, as amended) |
 | **`NOQ-5`** accessibility standard | **Any conformance level or contrast ratio.** | Yes — the accessibility **behaviors** (`UA-1`–`UA-6`). |
 | **`NOQ-6`** browser/device matrix | Conformance to a support matrix. | Yes — behavior at representative sizes. |
 | **`NOQ-7`** log retention / sensitive data | What logs may retain. | Yes — that **credentials never appear** in logs (`NFR-SEC-08`). |
@@ -926,7 +928,7 @@ absence reads as a decision.
 | Third-party or partner API consumption | The MVP has one first-party client (`docs/09`). |
 | API versioning / cross-version compatibility | No version scheme is adopted (`docs/09` `AQ-5`). |
 | Load, stress, soak, capacity testing | **Blocked, not excluded** — `NOQ-1`, `NOQ-4`. |
-| Disaster-recovery drills | **Blocked, not excluded** — `NOQ-3`. |
+| Disaster-recovery drills | ~~**Blocked, not excluded** — `NOQ-3`.~~ **`NOQ-3` no longer blocks them** (`NOQ-3` Decided 2026-07-30). **Still not an MVP commitment on this row:** the committed obligation is the restore test of `NFR-BACK-02` and `NFR-BACK-05`; a wider drill remains unscheduled, and removing the stale blocker does not add one. |
 | Penetration testing / formal security audit | Not an MVP commitment. The boundary invariants are tested regardless — they are not a substitute for an audit, and an audit is not a substitute for them. |
 
 **The distinction between *excluded* and *blocked* matters.** An excluded area will not be
@@ -957,8 +959,8 @@ quietly becomes a missing performance *test*, permanently.
 | ~~`OQ-13`~~ **Decided** | Rejected retention / purge? | **Retention and purge tests are now specifiable.** 90 days from rejection, then purge as a system obligation. **No representation or backup-mechanics tests** — those remain `ADR-006`/`DDM-9` and the backup requirements. |
 | `OQ-14` | Audit logging? | **No audit tests — and the omission is irreversible for every action taken meanwhile.** |
 | `NOQ-1`, `NOQ-4` | Performance thresholds; expected load? | **No threshold can be asserted.** |
-| `NOQ-2` | Availability target? | No availability target asserted. |
-| `NOQ-3` | Backup / recovery targets? | No recovery objective asserted; only that backup and restore work **at all**. |
+| ~~`NOQ-2`~~ **Decided** | Availability target? | **A target is now asserted** — 99% over a rolling monthly window, announced maintenance excluded. |
+| ~~`NOQ-3`~~ **Decided** | Backup / recovery targets? | **Objectives are now asserted** — RPO up to 24 hours; RTO one business day; restore tested before launch and at least quarterly. Provider loss is held to the same 24-hour objective (`NFR-BACK-06`, as amended). **Backup mechanics remain untestable.** |
 | `NOQ-5` | Accessibility standard / contrast? | **No conformance level asserted.** Behaviors tested. |
 | `NOQ-6` | Browser/device/support matrix? | No support claim. |
 | `NOQ-7` | Log retention; sensitive-data definition? | Credential exclusion testable; retention is not. |
