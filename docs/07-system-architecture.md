@@ -1624,7 +1624,7 @@ applied — judged against *Technology-selection criteria* above.
 | **ADR-007** | Search approach | DD-14. **Blocked by OQ-4.** A dedicated index requires *measured* justification |
 | **ADR-008** | Anti-spam approach | DD-6. **Blocked by OQ-9.** Must be weighed against NFR-ACC-01/02 |
 | **ADR-009** | Audit-logging approach | DD-7. **Blocked by OQ-14** |
-| **ADR-010** | Backup, recovery, and availability posture | DD-8, DD-9. **Drafted and `Proposed` 2026-08-19 (issue #69)** — single-instance availability posture; recovery capability finer than the ordinary scheduled-backup interval; independent copy no more than 24 hours behind committed live data. **Not yet in force — nothing may depend on it, and DD-8/DD-9 are not thereby closed.** Feeds ADR-003 |
+| **ADR-010** | Backup, recovery, and availability posture | DD-8, DD-9. **Accepted 2026-08-19 (issue #69); in force.** Single-instance availability posture; recovery capability finer than the ordinary scheduled-backup interval; independent copy no more than 24 hours behind committed live data. **It discharges DD-8 and DD-9** — the posture and the required capability are decided; **the mechanism and the store are not** (DD-3, DD-5, ADR-003, ADR-005). Feeds ADR-003 |
 | **ADR-011** | Accessibility standard, level, and supported matrix | DD-10, DD-11. **Blocked by NOQ-5 and NOQ-6** |
 | **ADR-012** | Testing strategy — with the TB-3 administrative boundary as its highest-value target | NFR-MAINT-03, R-6 |
 

@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | **Proposed** |
+| **Status** | **Accepted** |
 | **Date** | 2026-08-19 |
 | **Decision owner** | **Joe S.** — product owner / architecture owner (`docs/13`, *Gate summary*) |
 | **Decision gate** | **`DG-2`** |
@@ -259,14 +259,20 @@ This states the **required outcome**. It selects **no physical representation** 
 | **Journeys** | Indirect. No journey changes. The availability target is measured against the **public read path** (`V1`–`V7`), which `NFR-REL-02` prioritises over administrative tools (`A1`–`A7`). |
 | **Components** | `C4` (public read projection), `C6` (moderation and status), `C7` (validation), `C9` (data access), `C12` (operational plane). The store itself is reached only server-side over a private path (`ADR-001`, hard requirement 4). |
 | **Invariants** | Must not breach: `DI-3` (atomicity), `DI-8` (durable identity), `DI-10` (pending revision never public), `DI-11` (at most one pending revision); `BI-1`, `BI-4`, `BI-6` — a restore must not expose what the boundary invariants protect. |
-| **Documents amended** | `docs/adr/README.md` (register status and the in-force summary); `docs/07-system-architecture.md` (the `ADR-010` register row); `docs/traceability-matrix.md` (the `ADR-010` row). **`DD-8` and `DD-9` are deliberately not marked closed** — this ADR is `Proposed`, and `docs/adr/README.md` records that a `Proposed` decision is *"not yet in force; nothing may depend on it."* They are discharged only on acceptance. |
+| **Documents amended** | `docs/adr/README.md` (register status and the in-force summary); `docs/07-system-architecture.md` (the `ADR-010` register row); `docs/traceability-matrix.md` (the `ADR-010` row). **`DD-8` and `DD-9` are discharged by this acceptance** — the availability posture and the required recovery capability are now decided. **The mechanism is not:** the store, its backup and point-in-time implementation, and the hosting and deployment model all remain open (`DD-3`, `DD-5`, `DDM-1`, `ADR-003`, `ADR-005`). |
 | **Issue / pull request** | Issue **#69**. Pull request: *to be recorded when opened.* Prerequisite work: Issue **#70** / PR **#72** (`R1` applied to the requirements), Issue **#71** / PR **#73** (test-strategy synchronization). Prerequisite decisions: closed issues **#43** (`NOQ-2`), **#44** (`NOQ-3`). |
 
 ---
 
-**Status note.** This ADR is **`Proposed`**. The product owner has made the underlying
-decisions — the Option B posture and ruling `R1` — and this document records them in the
-repository's ADR form. **Being drafted does not make it `Accepted`.** Until it is accepted,
-the decision is **not in force and nothing may depend on it**: `DG-2` remains **Unresolved**,
-the technology stack remains **Unresolved**, **`ADR-003` is not promoted**, `DD-8` and `DD-9`
-remain open, and **no implementation is authorized**.
+**Status note.** This ADR is **`Accepted`** — accepted by the product owner on **2026-08-19**
+(issue #69) and therefore **in force**. Work may rely on it, and later decisions must conform
+to it. It **discharges `DD-8` and `DD-9`**: the availability posture and the required recovery
+capability are decided.
+
+**Acceptance opens no gate.** `ADR-010` now supplies the capability constraints `ADR-003` must
+respect, but **`ADR-003` is not thereby decided, promoted, or begun** — commissioning it is a
+separate governed action. **No store, provider, product, mechanism, hosting platform, or
+deployment topology is selected.** **`DG-2` remains Unresolved** — its technology-stack blocker
+is untouched, and the accounting stays three hard blockers, two Decided, one Unresolved. The
+**technology stack remains Unresolved**, and **no implementation is authorized**: `P0b` and
+`P1`–`P5` remain blocked by `DG-2`.

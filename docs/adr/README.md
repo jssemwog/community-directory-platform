@@ -7,10 +7,9 @@ later**.
 `docs/07-system-architecture.md` names the ADRs this project needs. Until now, **nothing held
 them.** This directory is that place.
 
-**It holds two decisions in force.** `ADR-001` and `ADR-006` are both **Accepted**;
-`ADR-010` is **Proposed** — drafted and under review, **not yet in force**, so nothing may
-depend on it; and every remaining ADR is either **Blocked** on a question the product owner
-has not been asked, or **Not yet writable**. See *The register*.
+**It holds three decisions in force.** `ADR-001`, `ADR-006` and `ADR-010` are all
+**Accepted**; every remaining ADR is either **Blocked** on a question the product owner has
+not been asked, or **Not yet writable**. See *The register*.
 
 ---
 
@@ -130,7 +129,7 @@ forgotten.
 | **`ADR-007`** | Search approach | **`DG-1`** | **`OQ-4`** — `DD-14`. *A dedicated index requires **measured** justification* | **Blocked** |
 | **`ADR-008`** | Anti-spam approach | **`DG-3`** | **`OQ-9`** — `DD-6`. *Must be weighed against `NFR-ACC-01/02`* | **Blocked** |
 | **`ADR-009`** | Audit-logging approach | **`DG-3`** | **`OQ-14`** — and `NOQ-8`, **taken as one decision** (`DD-7`). **Irreversible if answered late** (`IR-7`) | **Blocked** |
-| **[`ADR-010`](ADR-010-backup-recovery-availability-posture.md)** | Backup, recovery, and availability posture | **`DG-2`** | **Nothing.** ~~**`NOQ-2`, `NOQ-3`**~~ both **Decided** — 2026-07-30, `NOQ-3` amended by ruling **R1** 2026-08-18 — `DD-8`, `DD-9`. **Feeds `ADR-003`** | **Proposed** — 2026-08-19 (issue #69). *Drafted and under review; **not yet in force**, and nothing may depend on it. Acceptance is a separate owner action.* |
+| **[`ADR-010`](ADR-010-backup-recovery-availability-posture.md)** | Backup, recovery, and availability posture | **`DG-2`** | **Nothing.** ~~**`NOQ-2`, `NOQ-3`**~~ both **Decided** — 2026-07-30, `NOQ-3` amended by ruling **R1** 2026-08-18 — `DD-8`, `DD-9`. **Feeds `ADR-003`** | **Accepted** — 2026-08-19 (issue #69). *In force; work may rely on it.* It discharges `DD-8` and `DD-9`; the **mechanism** and the store remain open (`ADR-003`, `DD-3`, `DD-5`). |
 | **`ADR-011`** | Accessibility standard, level, and supported matrix | **`DG-3`** | **`NOQ-5`, `NOQ-6`** — `DD-10`, `DD-11` | **Blocked** |
 | **`ADR-012`** | Testing strategy — with the administrative boundary as its highest-value target | **`DG-2`** (tooling) · **`DG-4`** (depth) | `docs/07` names **no blocking question of its own** — but the **test tooling follows `ADR-002`**, which is blocked, and testing **depth** is `DG-4`. **It cannot be written in full until `ADR-002` lands** | **Not yet writable** |
 
@@ -139,7 +138,7 @@ forgotten.
 > blocked on open product questions.** `docs/07` defers them rather than guessing, and this
 > directory does the same.
 
-**Ten of twelve still cannot be written.** That is not a backlog to work around; it is the
+**Nine of twelve still cannot be written.** That is not a backlog to work around; it is the
 measure of what `DG-1`, `DG-2`, and `DG-3` are holding. See `docs/13-decision-log.md`.
 
 **`ADR-006` is now `Accepted`, and the distinction matters.** It began blocked on six
