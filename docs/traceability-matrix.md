@@ -305,7 +305,7 @@ gate is the first maintenance action the decision log requires.
 | `ADR-007` | Search approach | Pending | `OQ-4` (`DD-14`) |
 | `ADR-008` | Anti-spam approach | Pending | `OQ-9` (`DD-6`) |
 | `ADR-009` | Audit-logging approach | Pending | `OQ-14`/`NOQ-8` (`DD-7`) |
-| `ADR-010` | Backup, recovery & availability posture | Pending | **Nothing** — ~~`NOQ-2`, `NOQ-3`~~ both **Decided** (`DD-8`, `DD-9`). **Ready to write**; not drafted |
+| [`ADR-010`](adr/ADR-010-backup-recovery-availability-posture.md) | Backup, recovery & availability posture | **Proposed** — 2026-08-19 (issue #69) | **Nothing** — ~~`NOQ-2`, `NOQ-3`~~ both **Decided** (`DD-8`, `DD-9`); `NOQ-3` amended by **R1**. **Drafted, not in force**; acceptance is separate |
 | `ADR-011` | Accessibility standard, level & supported matrix | Pending | `NOQ-5`, `NOQ-6` |
 | `ADR-012` | Testing strategy | Pending | — (`NFR-MAINT-03`, `R-6`) |
 
