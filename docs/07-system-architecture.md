@@ -1617,7 +1617,7 @@ applied — judged against *Technology-selection criteria* above.
 |---|---|---|
 | **ADR-001** | **Adopt a modular monolith with a server-enforced public/administrative boundary; reject microservices and browser-direct data access** | *This document.* The one ADR that can be written **now**. It records the recommendation above and, critically, records **why the mini lab shape was rejected on the requirements** (R-10) |
 | **ADR-002** | Application language and framework | Hard requirements 1, 2, 6; DD-2 |
-| **ADR-003** | Data-store product | Hard requirements 3, 4, 5; DD-3. **Blocked by NOQ-2 and NOQ-3** |
+| **ADR-003** | Data-store product | Hard requirements 3, 4, 5; DD-3. **No longer blocked** — NOQ-2 and NOQ-3 are both **Decided 2026-07-30** (NOQ-3 amended by ruling R1, 2026-08-18), and **Accepted ADR-010** supplies the recovery-capability filter DD-3 required. **Ready to write** — owner ruling 2026-08-19 (issue #75): eligible to be commissioned; **not drafted, not Proposed, not Accepted, not begun**. **No store, provider, or technology stack is selected, and DG-2 remains Unresolved** |
 | **ADR-004** | Administrator authentication mechanism | DD-4, NOQ-9 |
 | **ADR-005** | Hosting platform and runtime model | DD-5. Must not reopen the rejected decomposition of Option D |
 | **ADR-006** | Listing data model and lifecycle states | DD-1. **No longer blocked by a DG-1 product question** — OQ-6, OQ-7, OQ-8/8b, OQ-10, OQ-11, OQ-13 all Decided. **Accepted 2026-08-07 (issue #61); in force.** It discharges DD-1 **logically only** — the physical representation remains DDM-1–DDM-10, and in particular **DDM-8 and DDM-9, both still unresolved** |
