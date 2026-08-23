@@ -246,8 +246,9 @@ Stating only what is undisputed:
 **Positive:**
 
 - The domain model `ADR-006` fixes is expressible directly, with the lifecycle invariants
-  `DI-1`, `DI-2`, `DI-10`, and `DI-11` enforceable declaratively by the store rather than by
-  application convention.
+  `DI-1` and `DI-11` enforceable declaratively by the store rather than by application
+  convention, and `DI-2` and `DI-10` enforceable server-side above it — `DI-10` being a
+  read-path property that no store constrains.
 - Mature transaction and integrity behaviour satisfies hard requirement 3 and `NFR-DATA-01`,
   `NFR-DATA-03`, and `NFR-DATA-06` without the architecture working around the store.
 - Recovery capabilities align with `ADR-010`'s filter natively, so eligibility does not depend on
@@ -317,7 +318,7 @@ supersedes this one**, never by editing this file into agreement.
 | **`DDM-5`** — location normalization | No representation of locality, administrative area, country, or postal code is chosen |
 | **`DDM-6`** — physical separation of non-public attributes | No representation of the `S-2` boundary or of per-contact public-display designations is chosen |
 | **`DDM-7`** — audit-entry storage (`OQ-14` open) | No audit storage location or shape is chosen. Whether `E5` exists at all is not this decision's to settle |
-| **`DDM-8`** — revision storage and the effective public version | No revision representation is chosen. `DI-10` and `DI-11` are stated as invariants the store must be able to enforce, not as a physical design |
+| **`DDM-8`** — revision storage and the effective public version | No revision representation is chosen. `DI-11` is stated as an invariant the store must be able to enforce, and `DI-10` as one the server must enforce; neither determines the physical revision representation |
 | **`DDM-9`** — soft versus hard delete, publication state, and purge representation | No representation is chosen. `OQ-11` and `OQ-13` are settled product questions; their physical form is not |
 | **`DDM-10`** — migration and schema-evolution tooling | No tooling is selected. It is outside a product decision entirely |
 | **`ADR-002`** — application language and framework | No language, framework, ORM, or data-access library is named or implied |
