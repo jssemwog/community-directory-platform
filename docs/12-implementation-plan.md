@@ -223,7 +223,7 @@ and none is assigned retrospectively here. Its authoritative status lives in the
 | Work | Blocked on |
 |---|---|
 | **`ADR-002`** language and application framework | `DG-2`; `docs/07` hard requirements 1, 2, 6 |
-| **`ADR-003`** data-store product | **`DG-2`** — technology stack; `docs/07` `DD-3`. ~~`NOQ-2`, `NOQ-3`~~ are **both Decided**, and **Accepted `ADR-010`** supplies the recovery-capability filter `DD-3` required, so **`ADR-003` is Ready to write** — owner ruling 2026-08-19 (issue #75): eligible to be commissioned; **not drafted, not `Proposed`, not `Accepted`, not begun**. **No store, provider, or technology stack is selected, and `DG-2` remains Unresolved.** |
+| **`ADR-003`** data-store product | **`DG-2`** — technology stack; `docs/07` `DD-3`. ~~`NOQ-2`, `NOQ-3`~~ are **both Decided**, and **Accepted `ADR-010`** supplies the recovery-capability filter `DD-3` required, so **`ADR-003` is `Proposed`** — drafted 2026-08-23 (issue #81), on the owner selection ruling of 2026-08-23: **PostgreSQL under a managed operating posture**. *Under review and **not in force**; **not `Accepted`**.* **The named provider is deferred; no schema or index is decided; `DD-3` and `DDM-1` are not discharged; and `DG-2` remains Unresolved.** |
 | **`ADR-004`** administrator authentication mechanism | `NOQ-9` — `DD-4`. *(The boundary is settled; the mechanism is not.)* |
 | **`ADR-005`** hosting platform and runtime model | `DD-5` |
 | Repository scaffold, project structure along the `C1`–`C12` seams, local development setup | `ADR-002` |
