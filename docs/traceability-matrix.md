@@ -298,7 +298,7 @@ gate is the first maintenance action the decision log requires.
 |---|---|---|---|
 | `ADR-001` | Modular monolith; reject microservices & browser-direct | **Accepted** (issue #29) | — |
 | `ADR-002` | Language & framework | Pending | `DG-2` (`DD-2`) |
-| `ADR-003` | Data-store product | **Ready to write** — owner ruling 2026-08-19 (issue #75); **not drafted, not `Proposed`, not `Accepted`, not begun** | **Nothing** — ~~`NOQ-2`, `NOQ-3`~~ both **Decided** (`DD-3`); `NOQ-3` amended by **R1**. Recovery-capability filter supplied by Accepted [`ADR-010`](adr/ADR-010-backup-recovery-availability-posture.md). **No store, provider, or technology stack selected; `DG-2` remains Unresolved** |
+| [`ADR-003`](adr/ADR-003-data-store-product.md) | Data-store product | **Accepted** — 2026-08-23 (issue #81); **in force**. **PostgreSQL under a managed operating posture**; **discharges `DD-3`** | **Nothing** — ~~`NOQ-2`, `NOQ-3`~~ both **Decided** (`DD-3`); `NOQ-3` amended by **R1**. Recovery-capability filter supplied by Accepted [`ADR-010`](adr/ADR-010-backup-recovery-availability-posture.md). **Named provider deferred, so `DDM-1` is not fully discharged; no schema or index decided; `DG-2` remains Unresolved** |
 | `ADR-004` | Administrator authentication mechanism | Pending | `NOQ-9` (`DD-4`) |
 | `ADR-005` | Hosting platform & runtime model | Pending | `DG-2` (`DD-5`) |
 | [`ADR-006`](adr/ADR-006-listing-data-model-and-lifecycle-states.md) | Listing data model & lifecycle states | **Accepted** — 2026-08-07 (issue #61) | **Nothing** — ~~`OQ-6/7/8/8b/10/11/13`~~ all **Decided**, `DG-1` **Resolved** (`DD-1`). **In force**; work may rely on it. Discharges `DD-1` **logically only**; `DDM-8` and `DDM-9` remain **unresolved** |
