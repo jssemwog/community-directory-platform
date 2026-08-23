@@ -2,18 +2,20 @@
 
 | Field | Value |
 |---|---|
-| **Status** | `Proposed` |
-| **Date** | `2026-08-23` |
+| **Status** | **Accepted** |
+| **Date** | 2026-08-23 |
 | **Decision owner** | Joe S. — product owner |
 | **Decision gate** | `DG-2` — technology. **Unresolved.** This ADR contributes to the technology-decision work; it does not close the gate |
 | **Related open questions** | **Depends on:** ~~`NOQ-2`~~ **Decided** 2026-07-30 · ~~`NOQ-3`~~ **Decided** 2026-07-30, amended by ruling **R1** 2026-08-18. **Carried as shaping inputs, not blockers:** `NOQ-1`, `NOQ-4` (`PA-1`). **Must NOT answer:** `OQ-4`, `OQ-5`, `OQ-14`, `NOQ-9`, and `DDM-2`–`DDM-10` — see *Open questions this decision must NOT answer* |
 | **Supersedes** | *none* |
 | **Superseded by** | *none* |
 
-> **`Proposed` means not in force.** Per `docs/adr/README.md`, a `Proposed` ADR is *"drafted and
-> under review. The decision is **not yet in force**; nothing may depend on it."* `DD-3` is not
-> discharged, `DDM-1` is not discharged, `DG-2` is not resolved, and **no implementation is
-> authorized** by this document.
+> **Accepted, and therefore in force.** Per `docs/adr/README.md`, an `Accepted` ADR is *"Decided
+> and **in force**. Work may rely on it."* The product owner accepted this decision on
+> 2026-08-23. **`DD-3` is discharged** by it. But **an ADR records a decision; it does not open a
+> gate**: `DDM-1` is **not fully discharged** — the named managed service and vendor remain
+> deferred — `ADR-010`'s provider-capability validation remains outstanding, **`DG-2` remains
+> Unresolved**, and **no implementation is authorized** by this document.
 
 ---
 
@@ -230,7 +232,7 @@ ADR names none.
 
 Stating only what is undisputed:
 
-- **`ADR-003` is `Proposed`.** It is not in force.
+- **`ADR-003` is `Accepted`** and in force. **It does not thereby close `DG-2`.**
 - **`DG-2` remains Unresolved**, and the `P0b` scaffold and all of `P1` remain blocked by it.
 - **This ADR contributes to the technology-decision work**; other technology decisions remain
   outstanding, including the application language and framework (`ADR-002`) and the hosting
@@ -301,7 +303,7 @@ supersedes this one**, never by editing this file into agreement.
 | **`R-10` — the rejected shape returns through the back door.** A managed store is selected legitimately, and browser-direct access arrives with it | Reintroduces every disqualifying property `docs/07` rejected on the requirements | This ADR restates hard requirement 4 as a standing **disqualifier** and records the *"managed is hosting, browser-direct is architecture"* distinction in its own section. The provider decision must be checked against it |
 | **A provider name leaks in and becomes the decision by habit** | The deferred provider decision is made by drift rather than by ruling | This ADR names no provider. The deferral is stated in the Decision itself, not only in prose |
 | **Provider capability is assumed from technology capability** | `ADR-010` is treated as discharged when it is not | Recorded as an explicit **downstream dependency** in *Recovery boundary*; this ADR states plainly that it does not validate any provider |
-| **`Proposed` is treated as `Accepted`** | Work depends on a decision not in force — the `IR-1` gate-bypass failure | Status is stated in the header table, in a callout, and in the `DG-2` section. `DD-3` and `DDM-1` are deliberately **not** discharged by this draft |
+| **`Accepted` is treated as a gate opening** | Implementation proceeds on the strength of this ADR while `DG-2` is still Unresolved — the `IR-1` gate-bypass failure | The header callout and the `DG-2` section both state that this ADR opens no gate. `DDM-1` is deliberately **not fully discharged**, and `P0b` and `P1`–`P5` remain blocked |
 | **Managed operation costs more than "modest"** | A Medium-weighted criterion is breached after the fact | The posture is reversible to self-managed without touching the domain model; the assumption is recorded above as falsifiable |
 | **Schema decisions creep in during implementation** and settle `DDM-*` silently | Questions the product owner was never asked get answered in code | *Open questions this decision must NOT answer* names them; `IP-9` requires a new ADR whenever implementation forces a decision the chain did not make |
 
@@ -337,7 +339,7 @@ supersedes this one**, never by editing this file into agreement.
 | **Journeys** | `V2`–`V4`, `V6` (browse, search, filter over approved listings); `L2` (submission); `A4`, `A5` (moderation) |
 | **Components** | `C6` — the only component that writes lifecycle status; the read/write path separation `docs/07` describes |
 | **Invariants** | Must not breach: `BI-1`, `BI-4`, `BI-6`, `BI-8`; `DI-1`, `DI-2`, `DI-3`, `DI-5`, `DI-8`, `DI-10`, `DI-11` |
-| **Decisions** | `DD-3` (**not discharged** — this ADR is `Proposed`); `DDM-1` (**not discharged**); `DG-2` (**Unresolved**); hard requirements 3, 4, 5; `NOQ-2`, `NOQ-3`/`R1` |
+| **Decisions** | `DD-3` (**discharged** — this ADR is `Accepted` and in force); `DDM-1` (**not fully discharged** — the named service and vendor remain deferred); `DG-2` (**Unresolved**); hard requirements 3, 4, 5; `NOQ-2`, `NOQ-3`/`R1` |
 | **Related ADRs** | `ADR-001` (Accepted — the boundary and `R-10`); `ADR-006` (Accepted — the model judged against); `ADR-010` (Accepted — the recovery-capability filter, *feeds* this ADR); `ADR-002`, `ADR-005`, `ADR-007`, `ADR-012` (open, and not decided here) |
-| **Documents amended** | `docs/adr/README.md`, `docs/07-system-architecture.md`, `docs/12-implementation-plan.md`, `docs/traceability-matrix.md`, `docs/08-data-model.md` — **lifecycle status only.** `DD-3` and `DDM-1` are **not** marked discharged, because a `Proposed` ADR is not in force |
+| **Documents amended** | `docs/adr/README.md`, `docs/07-system-architecture.md`, `docs/12-implementation-plan.md`, `docs/traceability-matrix.md`, `docs/08-data-model.md` — the `Accepted` lifecycle status, and the **discharge of `DD-3`**. `DDM-1` is **not** marked fully discharged, because the named managed service and vendor remain deferred |
 | **Issue / pull request** | Issue #81 — `architecture: decide MVP data-store product in ADR-003`. Pull request #82 — `docs: propose ADR-003 PostgreSQL datastore decision` |

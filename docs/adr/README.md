@@ -7,9 +7,8 @@ later**.
 `docs/07-system-architecture.md` names the ADRs this project needs. Until now, **nothing held
 them.** This directory is that place.
 
-**It holds three decisions in force.** `ADR-001`, `ADR-006` and `ADR-010` are all
-**Accepted**. `ADR-003` is **`Proposed`** — drafted and under review, and therefore **not in
-force**; every remaining ADR is either **Blocked** on a question the product owner has
+**It holds four decisions in force.** `ADR-001`, `ADR-003`, `ADR-006` and `ADR-010` are all
+**Accepted**; every remaining ADR is either **Blocked** on a question the product owner has
 not been asked, or **Not yet writable**. See *The register*.
 
 ---
@@ -123,7 +122,7 @@ forgotten.
 |---|---|---|---|---|
 | **`ADR-001`** | Adopt a modular monolith with a server-enforced public/administrative boundary; **reject microservices and browser-direct data access** — and record **why the mini lab shape was rejected on the requirements** (`R-10`) | `DG-0` | **Nothing** | **Accepted** — 2026-07-24 (issue #29). *The only decision taken so far.* |
 | **`ADR-002`** | Application language and framework | **`DG-2`** | The technology decision (hard requirements 1, 2, 6; `DD-2`) | **Blocked** |
-| **[`ADR-003`](ADR-003-data-store-product.md)** | **Data-store product** | **`DG-2`** | **Nothing.** ~~**`NOQ-2`** (availability) · **`NOQ-3`** (backup / RPO / RTO)~~ both **Decided** — 2026-07-30, `NOQ-3` amended by ruling **R1** 2026-08-18 — `DD-3`. **Fed by `ADR-010`** (Accepted), which supplies the recovery-capability filter `DD-3` required | **`Proposed`** — drafted 2026-08-23 (issue #81), on the owner selection ruling of 2026-08-23. *Under review and **not in force**; nothing may depend on it. **Not `Accepted`.** The selected alternative is PostgreSQL under a **managed** operating posture; **the named provider is deferred**. `DD-3` and `DDM-1` are **not discharged**, no schema or index is decided, and `DG-2` remains **Unresolved**.* |
+| **[`ADR-003`](ADR-003-data-store-product.md)** | **Data-store product** | **`DG-2`** | **Nothing.** ~~**`NOQ-2`** (availability) · **`NOQ-3`** (backup / RPO / RTO)~~ both **Decided** — 2026-07-30, `NOQ-3` amended by ruling **R1** 2026-08-18 — `DD-3`. **Fed by `ADR-010`** (Accepted), which supplies the recovery-capability filter `DD-3` required | **Accepted** — 2026-08-23 (issue #81). *In force; work may rely on it.* The decision is **PostgreSQL under a managed operating posture**. It **discharges `DD-3`**. **The named provider is deferred**, so `DDM-1` is **not fully discharged**; no schema or index is decided; `ADR-010`'s provider-capability validation remains outstanding; and **`DG-2` remains Unresolved** — this ADR opens no gate. |
 | **`ADR-004`** | Administrator authentication mechanism | **`DG-3`** | **`NOQ-9`** — `DD-4`. *The boundary is settled; the mechanism is not* | **Blocked** |
 | **`ADR-005`** | Hosting platform and runtime model | **`DG-2`** | The technology decision — `DD-5` | **Blocked** |
 | **[`ADR-006`](ADR-006-listing-data-model-and-lifecycle-states.md)** | **Listing data model and lifecycle states** | **`DG-1`** — **Resolved 2026-08-04** | **Nothing.** `OQ-6`, `OQ-7`, `OQ-8`/`OQ-8b`, `OQ-10`, `OQ-11`, and `OQ-13` are all **Decided** — `DD-1` | **Accepted** — 2026-08-07 (issue #61). *In force; work may rely on it.* |
@@ -138,7 +137,7 @@ forgotten.
 > **`ADR-003` and `ADR-006` — the two most consequential and the hardest to reverse — were both
 > held behind open product questions.** `docs/07` deferred them rather than guessing, and this
 > directory did the same. **`ADR-003`'s prerequisite questions are now answered and it is
-> `Proposed`** — under review and **not in force**; the named provider remains **deferred**, and
+> `Accepted`** — in force since 2026-08-23; the named provider remains **deferred**, and
 > `DG-2` remains **Unresolved**.
 
 **Eight of twelve still cannot be written.** That is not a backlog to work around; it is the
