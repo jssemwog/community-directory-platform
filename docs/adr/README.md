@@ -121,7 +121,7 @@ forgotten.
 | ADR | Decision | Gate | Blocked by | Status |
 |---|---|---|---|---|
 | **`ADR-001`** | Adopt a modular monolith with a server-enforced public/administrative boundary; **reject microservices and browser-direct data access** — and record **why the mini lab shape was rejected on the requirements** (`R-10`) | `DG-0` | **Nothing** | **Accepted** — 2026-07-24 (issue #29). *The only decision taken so far.* |
-| **`ADR-002`** | Application language and framework | **`DG-2`** | The technology decision (hard requirements 1, 2, 6; `DD-2`) | **Blocked** |
+| **`ADR-002`** | Application language and framework | **`DG-2`** | **Nothing.** ~~The technology decision~~ — **no open question is named**; hard requirements 1, 2, 6 and `DD-2` are stated **inputs**, and `NOQ-1`/`NOQ-4` are **shaping inputs** that do not block (carried as `PA-1`). **Fed by `ADR-003`** (Accepted), which fixes the store the stack must integrate with | **Ready to write** |
 | **[`ADR-003`](ADR-003-data-store-product.md)** | **Data-store product** | **`DG-2`** | **Nothing.** ~~**`NOQ-2`** (availability) · **`NOQ-3`** (backup / RPO / RTO)~~ both **Decided** — 2026-07-30, `NOQ-3` amended by ruling **R1** 2026-08-18 — `DD-3`. **Fed by `ADR-010`** (Accepted), which supplies the recovery-capability filter `DD-3` required | **Accepted** — 2026-08-23 (issue #81). *In force; work may rely on it.* The decision is **PostgreSQL under a managed operating posture**. It **discharges `DD-3`**. **The named provider is deferred**, so `DDM-1` is **not fully discharged**; no schema or index is decided; `ADR-010`'s provider-capability validation remains outstanding; and **`DG-2` remains Unresolved** — this ADR opens no gate. |
 | **`ADR-004`** | Administrator authentication mechanism | **`DG-3`** | **`NOQ-9`** — `DD-4`. *The boundary is settled; the mechanism is not* | **Blocked** |
 | **`ADR-005`** | Hosting platform and runtime model | **`DG-2`** | The technology decision — `DD-5` | **Blocked** |
@@ -131,7 +131,7 @@ forgotten.
 | **`ADR-009`** | Audit-logging approach | **`DG-3`** | **`OQ-14`** — and `NOQ-8`, **taken as one decision** (`DD-7`). **Irreversible if answered late** (`IR-7`) | **Blocked** |
 | **[`ADR-010`](ADR-010-backup-recovery-availability-posture.md)** | Backup, recovery, and availability posture | **`DG-2`** | **Nothing.** ~~**`NOQ-2`, `NOQ-3`**~~ both **Decided** — 2026-07-30, `NOQ-3` amended by ruling **R1** 2026-08-18 — `DD-8`, `DD-9`. **Feeds `ADR-003`** | **Accepted** — 2026-08-19 (issue #69). *In force; work may rely on it.* It discharges `DD-8` and `DD-9`; the **mechanism** and the store remain open (`ADR-003`, `DD-3`, `DD-5`). |
 | **`ADR-011`** | Accessibility standard, level, and supported matrix | **`DG-3`** | **`NOQ-5`, `NOQ-6`** — `DD-10`, `DD-11` | **Blocked** |
-| **`ADR-012`** | Testing strategy — with the administrative boundary as its highest-value target | **`DG-2`** (tooling) · **`DG-4`** (depth) | `docs/07` names **no blocking question of its own** — but the **test tooling follows `ADR-002`**, which is blocked, and testing **depth** is `DG-4`. **It cannot be written in full until `ADR-002` lands** | **Not yet writable** |
+| **`ADR-012`** | Testing strategy — with the administrative boundary as its highest-value target | **`DG-2`** (tooling) · **`DG-4`** (depth) | `docs/07` names **no blocking question of its own** — but the **test tooling follows `ADR-002`**, which is **`Ready to write`** but not yet written, and testing **depth** is `DG-4`. **It cannot be written in full until `ADR-002` lands** | **Not yet writable** |
 
 > **Note the ordering, and why it is not an accident.** `ADR-001` is writable immediately.
 > **`ADR-003` and `ADR-006` — the two most consequential and the hardest to reverse — were both
@@ -140,7 +140,7 @@ forgotten.
 > `Accepted`** — in force since 2026-08-23; the named provider remains **deferred**, and
 > `DG-2` remains **Unresolved**.
 
-**Eight of twelve still cannot be written.** That is not a backlog to work around; it is the
+**Seven of twelve still cannot be written.** That is not a backlog to work around; it is the
 measure of what `DG-1`, `DG-2`, and `DG-3` are holding. See `docs/13-decision-log.md`.
 
 **`ADR-006` is now `Accepted`, and the distinction matters.** It began blocked on six
