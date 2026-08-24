@@ -297,7 +297,7 @@ gate is the first maintenance action the decision log requires.
 | ADR | Decision | Status | Blocked by |
 |---|---|---|---|
 | `ADR-001` | Modular monolith; reject microservices & browser-direct | **Accepted** (issue #29) | — |
-| `ADR-002` | Language & framework | **Ready to write** | **Nothing** — no open question named; `DD-2` is the deferred decision it discharges; `NOQ-1`/`NOQ-4` are shaping inputs (`PA-1`). **`DG-2` remains Unresolved and `ADR-002` remains one of its constituents** |
+| [`ADR-002`](adr/ADR-002-application-language-and-framework.md) | Language & framework | **Proposed** — 2026-08-24 (issue #85); **under review, not in force**. The proposal is **TypeScript + Next.js**. **`DD-2` not discharged** | **Nothing** — no open question named; `DD-2` is the deferred decision it will discharge **on acceptance**; `NOQ-1`/`NOQ-4` are shaping inputs (`PA-1`). **`DG-2` remains Unresolved and `ADR-002` remains one of its constituents**; `ADR-005` remains open |
 | [`ADR-003`](adr/ADR-003-data-store-product.md) | Data-store product | **Accepted** — 2026-08-23 (issue #81); **in force**. **PostgreSQL under a managed operating posture**; **discharges `DD-3`** | **Nothing** — ~~`NOQ-2`, `NOQ-3`~~ both **Decided** (`DD-3`); `NOQ-3` amended by **R1**. Recovery-capability filter supplied by Accepted [`ADR-010`](adr/ADR-010-backup-recovery-availability-posture.md). **Named provider deferred, so `DDM-1` is not fully discharged; no schema or index decided; `DG-2` remains Unresolved** |
 | `ADR-004` | Administrator authentication mechanism | Pending | `NOQ-9` (`DD-4`) |
 | `ADR-005` | Hosting platform & runtime model | Pending | `DG-2` (`DD-5`) |
