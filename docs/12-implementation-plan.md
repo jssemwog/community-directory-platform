@@ -226,8 +226,8 @@ and none is assigned retrospectively here. Its authoritative status lives in the
 | **`ADR-003`** data-store product | **`DG-2`** — technology stack; `docs/07` `DD-3`. ~~`NOQ-2`, `NOQ-3`~~ are **both Decided**, and **Accepted `ADR-010`** supplies the recovery-capability filter `DD-3` required, so **`ADR-003` is `Accepted`** — 2026-08-23 (issue #81); **in force**. The decision is **PostgreSQL under a managed operating posture**, and **it discharges `DD-3`**. **The named provider is deferred, so `DDM-1` is not fully discharged; no schema or index is decided; and `DG-2` remains Unresolved — `P0b` and `P1` stay blocked.** |
 | **`ADR-004`** administrator authentication mechanism | `NOQ-9` — `DD-4`. *(The boundary is settled; the mechanism is not.)* |
 | **`ADR-005`** hosting platform and runtime model | `DD-5` |
-| Repository scaffold, project structure along the `C1`–`C12` seams, local development setup | `ADR-002` |
-| Continuous-integration pipeline; automated checks | `ADR-002`; the testing tool follows from it |
+| Repository scaffold, project structure along the `C1`–`C12` seams, local development setup | ~~`ADR-002`~~ **Accepted** — 2026-08-25 (issue #85); **TypeScript and Next.js**, discharging `DD-2`. **`P0b` remains blocked by `DG-2`**, which is still **Unresolved** |
+| Continuous-integration pipeline; automated checks | ~~`ADR-002`~~ **Accepted**; the testing tool still follows from it via `ADR-012`, and **CI's own gate classification remains unresolved** (`CONTRIBUTING.md`). **`DG-2` remains Unresolved** |
 | Deployment path to a non-production environment | `ADR-003`, `ADR-005` |
 
 **Exit criteria.** `ADR-001`–`ADR-005` merged; a scaffold that builds, runs, and executes an

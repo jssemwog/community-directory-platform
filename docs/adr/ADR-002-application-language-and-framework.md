@@ -2,15 +2,15 @@
 
 | Field | Value |
 |---|---|
-| **Status** | **Proposed** |
-| **Date** | 2026-08-24 |
+| **Status** | **Accepted** |
+| **Date** | 2026-08-25 |
 | **Decision owner** | Joe S. — product owner |
 | **Decision gate** | `DG-2` — technology. **Unresolved.** This ADR contributes to the technology-decision work; it does not close the gate |
 | **Related open questions** | **Carried as shaping inputs, not blockers:** `NOQ-1`, `NOQ-4` (`PA-1`). **Must NOT answer:** `NOQ-9`, `OQ-4`, `OQ-9`, `OQ-14` / `NOQ-8`, `NOQ-5`, `NOQ-6`, `DDM-1`–`DDM-10`, `DU-1`, `DA-8` — see *Open questions this decision must NOT answer* |
 | **Supersedes** | *none* |
 | **Superseded by** | *none* |
 
-> **Proposed, and therefore NOT in force.** Per `docs/adr/README.md`, a `Proposed` ADR is *"Drafted and under review. The decision is **not yet in force**; nothing may depend on it."* The product owner has made the technology **selection** recorded below, and this document records that selection for review. It is **not** `Accepted`. **`DD-2` is not discharged**, **`DG-2` remains Unresolved**, `ADR-005` remains open, and **no implementation is authorized.**
+> **Accepted, and therefore in force.** Per `docs/adr/README.md`, an `Accepted` ADR is *"Decided and **in force**. Work may rely on it."* The product owner accepted this decision on 2026-08-25, following the governed candidate comparison and the detailed review recorded on issue #85. **`DD-2` is discharged** by it. But **an ADR records a decision; it does not open a gate**: **`DG-2` remains Unresolved** — `ADR-005` is still outstanding and the gate's exact closure scope remains ambiguous — the compensating obligations **O-1**–**O-12** below are binding rather than advisory, and **no implementation is authorized** by this document.
 
 ---
 
@@ -212,10 +212,10 @@ Six candidates were compared under identical hard filters, criteria, weighting c
 | **Journeys** | `V1`–`V4` (browse, search, filter); `L2` (submission); `A3`–`A7` (administrative review and moderation) |
 | **Components** | `C1`–`C12` as in-process seams; `C7` (validation); `C8` (administrative boundary); `C9` (sole data-access path, owns transactions); `C10` (audit emission — conditional, not decided here) |
 | **Invariants** | Must not breach: `BI-1`, `BI-3`, `BI-6`, `BI-8`; `DI-1`–`DI-11`, in particular `DI-10` and `DI-11` |
-| **Decisions** | `DD-2` — **NOT discharged**; this ADR is `Proposed`, not in force. `DG-2` — **Unresolved**. Hard requirements 1, 2, 6 (and 3, 4, 5 inherited via `C9` and `R-10`). `NOQ-1`, `NOQ-4` carried as `PA-1`. Owner rulings **R-A** (ORM/data-access outside this ADR) and **R-B** (inseparable frontend/router consequences only) |
+| **Decisions** | `DD-2` — **discharged** by this ADR, `Accepted` 2026-08-25 and in force. `DG-2` — **Unresolved**; `ADR-005` remains outstanding and this ADR opens no gate. Hard requirements 1, 2, 6 (and 3, 4, 5 inherited via `C9` and `R-10`). `NOQ-1`, `NOQ-4` carried as `PA-1`. Owner rulings **R-A** (ORM/data-access outside this ADR) and **R-B** (inseparable frontend/router consequences only) |
 | **Related ADRs** | `ADR-001` (Accepted — the boundary and `R-10`; not reopened); `ADR-003` (Accepted — PostgreSQL under a managed posture; not reopened); `ADR-006` (Accepted — the model this stack must express; not reopened); `ADR-010` (Accepted — the availability and recovery posture; not reopened); `ADR-004`, `ADR-005`, `ADR-007`, `ADR-008`, `ADR-009`, `ADR-011`, `ADR-012` (open, and not decided here) |
-| **Documents amended** | `docs/adr/README.md` and `docs/traceability-matrix.md` — the `Proposed` lifecycle status only. **`DD-2` is not marked discharged and `DG-2` is not marked Resolved**, because this ADR is not `Accepted` and is not in force |
-| **Issue / pull request** | Issue #85 — `architecture: decide the MVP application language and framework in ADR-002`. Pull request — **to be assigned** |
+| **Documents amended** | `docs/adr/README.md`, `docs/traceability-matrix.md`, `docs/07-system-architecture.md`, `docs/12-implementation-plan.md` — the `Accepted` lifecycle status, and the **discharge of `DD-2`**. **`DG-2` is NOT marked Resolved**, because acceptance opens no gate: `ADR-005` remains outstanding and the gate's closure scope remains ambiguous. `docs/13-decision-log.md` is untouched, so `DG-2`'s status and its hard-blocker accounting are unchanged, and **K-3 at `docs/12-implementation-plan.md` line 225 is left byte-identical** |
+| **Issue / pull request** | Issue #85 — `architecture: decide the MVP application language and framework in ADR-002`. Pull request #86 — `docs: propose ADR-002 TypeScript and Next.js application stack` |
 
 ### Sources consulted
 
