@@ -7,9 +7,9 @@ later**.
 `docs/07-system-architecture.md` names the ADRs this project needs. Until now, **nothing held
 them.** This directory is that place.
 
-**It holds four decisions in force.** `ADR-001`, `ADR-003`, `ADR-006` and `ADR-010` are all
-**Accepted**; every remaining ADR is either **Blocked** on a question the product owner has
-not been asked, or **Not yet writable**. See *The register*.
+**It holds six decisions in force.** `ADR-001`, `ADR-002`, `ADR-003`, `ADR-005`, `ADR-006` and
+`ADR-010` are all **Accepted**; every remaining ADR is either **Blocked** on a question the
+product owner has not been asked, or **Not yet writable**. See *The register*.
 
 ---
 
@@ -124,7 +124,7 @@ forgotten.
 | **[`ADR-002`](ADR-002-application-language-and-framework.md)** | Application language and framework | **`DG-2`** | **Nothing.** ~~The technology decision~~ — **no open question is named**; hard requirements 1, 2, 6 and `DD-2` are stated **inputs**, and `NOQ-1`/`NOQ-4` are **shaping inputs** that do not block (carried as `PA-1`). **Fed by `ADR-003`** (Accepted), which fixes the store the stack must integrate with | **Accepted** — 2026-08-25 (issue #85). *In force; work may rely on it.* The decision is **TypeScript + Next.js**, the product owner's selection from the governed candidate comparison. **It discharges `DD-2`.** The compensating obligations **O-1**–**O-12** are binding. **`ADR-005` remains open; `DG-2` remains Unresolved** — this ADR opens no gate — and no ORM/data-access technology, hosting provider, authentication mechanism, test tooling, CI, named PostgreSQL provider, schema, or separable frontend technology is selected. |
 | **[`ADR-003`](ADR-003-data-store-product.md)** | **Data-store product** | **`DG-2`** | **Nothing.** ~~**`NOQ-2`** (availability) · **`NOQ-3`** (backup / RPO / RTO)~~ both **Decided** — 2026-07-30, `NOQ-3` amended by ruling **R1** 2026-08-18 — `DD-3`. **Fed by `ADR-010`** (Accepted), which supplies the recovery-capability filter `DD-3` required | **Accepted** — 2026-08-23 (issue #81). *In force; work may rely on it.* The decision is **PostgreSQL under a managed operating posture**. It **discharges `DD-3`**. **The named provider is deferred**, so `DDM-1` is **not fully discharged**; no schema or index is decided; `ADR-010`'s provider-capability validation remains outstanding; and **`DG-2` remains Unresolved** — this ADR opens no gate. |
 | **`ADR-004`** | Administrator authentication mechanism | **`DG-3`** | **`NOQ-9`** — `DD-4`. *The boundary is settled; the mechanism is not* | **Blocked** |
-| **[`ADR-005`](ADR-005-hosting-platform-and-runtime-model.md)** | Hosting platform and runtime model | **`DG-2`** | **Nothing.** ~~The technology decision~~ — **no open question is named**; `DD-5` is a stated **input** (`docs/07` records that **both** runtime shapes satisfy the architecture), `NOQ-2` is **Decided** 2026-07-30, and `NOQ-1`/`NOQ-4` are **shaping inputs** that do not block (carried as `PA-1`). **Fed by `ADR-010`** (Accepted — the availability and recovery posture it must host), **`ADR-003`** (Accepted — the managed PostgreSQL it must reach) and **`ADR-002`** (Accepted — whose Node.js runtime requirement is a framework *consequence*, not an `ADR-005` decision). **It must not reopen the rejected decomposition of Option D** (`docs/07`) | **Proposed** — 2026-08-26 (issue #89). *Drafted and **under review**; **not in force**, and nothing may depend on it.* The proposal is **Render, with the Next.js modular monolith deployed as a long-running Node.js web service**, the product owner's selection from the governed candidate comparison. **`DD-5` is not discharged**; **`DG-2` remains Unresolved** — acceptance would complete its final substantive decision but would **open no gate**, leaving a separate governed `Resolved` synchronization still required — and no named PostgreSQL provider, ORM/data-access technology, authentication mechanism, test tooling, CI, container technology, observability product, or Render service tier is selected. |
+| **[`ADR-005`](ADR-005-hosting-platform-and-runtime-model.md)** | Hosting platform and runtime model | **`DG-2`** | **Nothing.** ~~The technology decision~~ — **no open question is named**; `DD-5` is a stated **input** (`docs/07` records that **both** runtime shapes satisfy the architecture), `NOQ-2` is **Decided** 2026-07-30, and `NOQ-1`/`NOQ-4` are **shaping inputs** that do not block (carried as `PA-1`). **Fed by `ADR-010`** (Accepted — the availability and recovery posture it must host), **`ADR-003`** (Accepted — the managed PostgreSQL it must reach) and **`ADR-002`** (Accepted — whose Node.js runtime requirement is a framework *consequence*, not an `ADR-005` decision). **It must not reopen the rejected decomposition of Option D** (`docs/07`) | **Accepted** — 2026-08-27 (issue #91). *In force; work may rely on it.* Published as `Proposed` 2026-08-26 (issue #89, PR #90). The decision is **Render, with the Next.js modular monolith deployed as a long-running Node.js web service**, the product owner's selection from the governed candidate comparison. **It discharges `DD-5`.** The compensating obligations **O-1**–**O-9** are binding. **`DG-2` remains Unresolved** — this acceptance completes its final substantive decision but **opens no gate**, so a separate governed `Resolved` synchronization is still required — and no named PostgreSQL provider, ORM/data-access technology, authentication mechanism, test tooling, CI, container technology, observability product, or Render service tier is selected. |
 | **[`ADR-006`](ADR-006-listing-data-model-and-lifecycle-states.md)** | **Listing data model and lifecycle states** | **`DG-1`** — **Resolved 2026-08-04** | **Nothing.** `OQ-6`, `OQ-7`, `OQ-8`/`OQ-8b`, `OQ-10`, `OQ-11`, and `OQ-13` are all **Decided** — `DD-1` | **Accepted** — 2026-08-07 (issue #61). *In force; work may rely on it.* |
 | **`ADR-007`** | Search approach | **`DG-1`** | **`OQ-4`** — `DD-14`. *A dedicated index requires **measured** justification* | **Blocked** |
 | **`ADR-008`** | Anti-spam approach | **`DG-3`** | **`OQ-9`** — `DD-6`. *Must be weighed against `NFR-ACC-01/02`* | **Blocked** |
@@ -143,13 +143,15 @@ forgotten.
 **Six of twelve still cannot be written.** That is not a backlog to work around; it is the
 measure of what `DG-1`, `DG-2`, and `DG-3` are holding. See `docs/13-decision-log.md`.
 
-**`DG-2`'s closure scope — owner ruling, 2026-08-26 (issue #87).** **`ADR-005` is the final
-remaining substantive `DG-2` constituent.** `ADR-002`, `ADR-003` and `ADR-010` are `Accepted` and
-their `DG-2` work is complete; `NOQ-2` and `NOQ-3` are **Decided**. **`ADR-004` is `DG-3`**,
-**`ADR-012` does not block `DG-2`** (its **depth** half is `DG-4`), **CI is `P0b` work this gate's
-closure unblocks**, and **`DDM-1`'s deferred named managed provider does not block closure**.
-**`DG-2` remains `Unresolved` until `ADR-005` is `Accepted`** — and, as always here, **an ADR
-records a decision; it does not open a gate.**
+**`DG-2`'s closure scope — owner ruling, 2026-08-26 (issue #87).** **`ADR-005` was the final
+remaining substantive `DG-2` constituent, and it is now `Accepted`** — 2026-08-27 (issue #91).
+`ADR-002`, `ADR-003` and `ADR-010` are `Accepted` and their `DG-2` work is complete; `NOQ-2` and
+`NOQ-3` are **Decided**. **`ADR-004` is `DG-3`**, **`ADR-012` does not block `DG-2`** (its
+**depth** half is `DG-4`), **CI is `P0b` work this gate's closure unblocks**, and **`DDM-1`'s
+deferred named managed provider does not block closure**. **`DG-2`'s substantive decisions are
+therefore complete — and `DG-2` is still `Unresolved`.** As always here, **an ADR records a
+decision; it does not open a gate**: the gate proceeds to `Resolved` only through a **separate
+governed synchronization**, and until that lands `P0b` and `P1`–`P5` remain blocked.
 
 **`ADR-006` is now `Accepted`, and the distinction matters.** It began blocked on six
 `DG-1` questions; all six are now answered — `OQ-6` and `OQ-7` (2026-07-31), `OQ-10`
