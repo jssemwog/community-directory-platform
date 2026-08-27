@@ -2,15 +2,15 @@
 
 | Field | Value |
 |---|---|
-| **Status** | **Proposed** |
-| **Date** | 2026-08-26 |
+| **Status** | **Accepted** |
+| **Date** | 2026-08-27 |
 | **Decision owner** | Joe S. — product owner |
 | **Decision gate** | `DG-2` — technology. **Unresolved.** This ADR is `DG-2`'s **final remaining substantive constituent** (owner ruling, issue #87 / PR #88); it does not close the gate |
 | **Related open questions** | **Carried as shaping inputs, not blockers:** `NOQ-1`, `NOQ-4` (`PA-1`). **Must NOT answer:** `NOQ-9` (`ADR-004`, `DG-3`), `NOQ-5`, `NOQ-6`, `NOQ-7`, `OQ-4`, `OQ-9`, `OQ-14` / `NOQ-8`, `DDM-1`–`DDM-10`, `DU-1`, `DA-8` — see *Open questions this decision must NOT answer* |
 | **Supersedes** | *none* |
 | **Superseded by** | *none* |
 
-> **Proposed, and therefore NOT in force.** Per `docs/adr/README.md`, a `Proposed` ADR is *"Drafted and under review. The decision is **not yet in force**; nothing may depend on it."* The product owner has made the hosting **selection** recorded below, and this document records that selection for review. It is **not** `Accepted`. **`DD-5` is not discharged**, **`DG-2` remains Unresolved**, and **no implementation is authorized.** Even on acceptance, **an ADR records a decision; it does not open a gate** — `DG-2` proceeds to `Resolved` only through a **separate governed synchronization**.
+> **Accepted, and therefore in force.** Per `docs/adr/README.md`, an `Accepted` ADR is *"Decided and **in force**. Work may rely on it."* The product owner accepted this decision on 2026-08-27, following the governed candidate comparison, the `Proposed`-stage publication recorded on issue #89 and merged by **PR #90**, and the detailed review recorded on issue #91. **`DD-5` is discharged** by it. But **an ADR records a decision; it does not open a gate**: **`DG-2` remains Unresolved** — this ADR completes the gate's **final remaining substantive decision**, and `DG-2` proceeds to `Resolved` only through a **separate governed synchronization** — the compensating obligations **O-1**–**O-9** below are binding rather than advisory, and **no implementation is authorized** by this document.
 
 ---
 
@@ -123,8 +123,8 @@ These are the conditions on which the accepted tradeoffs rest. They are **bindin
 | **O-5** | **Secrets remain server-only.** Configuration and secrets are held in server-side environment configuration, never in client bundles, never in logs or error messages (`NFR-SEC-08`, `NFR-OBS-02`). |
 | **O-6** | **PostgreSQL access remains server-side.** The application connects to the external managed PostgreSQL from the server over an encrypted connection; `C9` remains the sole data-access path and there is no browser-direct access (`ADR-001`, `ADR-002` `O-1`, `NFR-SEC-04`). |
 | **O-7** | **Authorization stays in the application.** The hosting platform does not replace the server-enforced public/administrative boundary at `C8`, which is checked on every request (`NFR-SEC-01`, `NFR-SEC-02`). |
-| **O-8** | **Availability and observability are validated before launch.** That the deployed configuration can meet `NFR-REL-02`, and that `NFR-OBS-01`/`NFR-OBS-03`/`NFR-OBS-06` are satisfied — including any retention beyond platform defaults — is demonstrated before release. **The mechanism is not selected here.** |
-| **O-9** | **A migration path stays viable.** The exit path recorded under *Reversibility* remains real; if a decision would make leaving Render materially harder, it is taken deliberately and recorded, not absorbed. |
+| **O-8** | **Availability and observability are validated before launch, against recorded evidence.** Before the first production release, the deployed configuration must be shown — in writing, against the deployed service rather than against platform marketing — to (a) run always-on per **O-1**, (b) emit the logs `NFR-OBS-01` requires and expose the health signal `NFR-OBS-03` requires, and (c) retain those logs for at least the period `NFR-OBS-06` requires, stating the configured retention explicitly where it exceeds the platform default. `NFR-REL-02`'s 99% target is measured over a rolling month and therefore **cannot** be demonstrated before launch; what must be shown beforehand is that the deployed configuration contains **no known impediment** to meeting it, and that the measurement itself is in place. **Release without this record does not satisfy the obligation. The mechanism and the observability product are not selected here.** |
+| **O-9** | **Decisions outside this ADR do not quietly narrow the exit path.** `O-2` binds the *application* to a portable Node server and `O-3` bars unnecessary *Render-specific* dependencies; `O-9` covers what neither reaches — **later hosting-, runtime- and deployment-adjacent decisions**, including those taken under other ADRs or during implementation, which are individually reasonable yet cumulatively make leaving Render materially harder than the **bounded** classification under *Reversibility* claims. Such a decision is **taken deliberately and recorded, with the reversibility cost named**, and the *Reversibility* classification is re-examined rather than assumed to survive. This bars neither ordinary Render configuration nor `O-1`'s always-on posture, and it asserts no provider-neutrality absolute. |
 
 ## Reversibility
 
@@ -177,15 +177,15 @@ Migrating away from Render while retaining **TypeScript**, **Next.js** and **Pos
 | **Free-tier posture reaches production** | The public directory sleeps and the availability target fails outright | **O-1**, stated as an architectural obligation |
 | **Render-specific coupling accumulates quietly** | The bounded reversibility recorded above degrades toward moderate or worse | **O-2**, **O-3**, **O-9** |
 | **The datastore provider is chosen by co-location rather than by decision** | `DDM-1` is discharged silently and `ADR-010`'s capability validation is skipped | Recorded above and under *Open questions this decision must NOT answer*; **Render PostgreSQL is not selected** |
-| **`Proposed` is treated as a gate opening** | Implementation proceeds on the strength of a document that is not in force — the `IR-1` gate-bypass failure | The header callout and the *`DG-2` boundary* section both state that this ADR is **not** in force and opens no gate |
+| **Acceptance is treated as a gate opening** | Implementation proceeds because the last substantive `DG-2` decision is taken, even though the gate is still `Unresolved` — the `IR-1` gate-bypass failure | The header callout and the *`DG-2` boundary* section both state that this ADR **opens no gate**, that `DG-2` remains `Unresolved` pending a **separate governed synchronization**, and that `P0b` and `P1`–`P5` stay blocked |
 | **Cost is not validated before launch** | An unbudgeted running cost is discovered late | Tier and sizing deferred with **future cost validation required**; no dollar amount is committed |
 
 ## `DG-2` boundary
 
 - **`ADR-005` is `DG-2`'s final remaining substantive architecture decision** — owner ruling, **issue #87** / **PR #88**, 2026-08-26.
-- **This ADR is `Proposed`.** It is **not in force**, **`DD-5` is not discharged**, and nothing may depend on it.
+- **This ADR is `Accepted`.** It is **in force**, **`DD-5` is discharged**, and work may rely on the hosting and runtime decision it records.
 - **`DG-2` remains Unresolved**, and the `P0b` scaffold and all of `P1` remain blocked by it.
-- **Acceptance will complete `DG-2`'s remaining substantive decision — and will not, by itself, resolve `DG-2`.** *An ADR records a decision; it does not open a gate.* A **separate governed `DG-2` → `Resolved` synchronization** remains required afterward, exactly as `docs/13-decision-log.md` records.
+- **This acceptance completes `DG-2`'s remaining substantive decision — and does not, by itself, resolve `DG-2`.** *An ADR records a decision; it does not open a gate.* A **separate governed `DG-2` → `Resolved` synchronization** remains required, exactly as `docs/13-decision-log.md` records. **Until that synchronization lands, `DG-2` is `Unresolved` and nothing it blocks is unblocked.**
 - **`ADR-004` remains under `DG-3`**; **`ADR-012` does not block `DG-2`** and testing depth is `DG-4`; **CI is `P0b` / derivative work**; **`DDM-1`'s deferred named provider does not block closure**. None is touched here.
 - **No implementation is authorized.** `P0b` and `P1`–`P5` remain blocked.
 
@@ -213,11 +213,11 @@ Migrating away from Render while retaining **TypeScript**, **Next.js** and **Pos
 | **Journeys** | `V1`–`V4` (browse, search, filter — the availability target's subject); `L2` (submission); `A3`–`A7` (administrative review) |
 | **Components** | `C1`–`C12` as in-process seams within one deployable artifact; `C8` (administrative boundary, server-enforced on every request); `C9` (sole data-access path to the external managed PostgreSQL) |
 | **Invariants** | Must not breach: `BI-1`, `BI-6`, `BI-8`; `DI-1`–`DI-11`. This ADR decides nothing about them |
-| **Decisions** | `DD-5` — **NOT discharged**; this ADR is `Proposed`, not in force. `DG-2` — **Unresolved**; this ADR is its final remaining substantive constituent and **opens no gate**. `NOQ-2` (Decided), `NOQ-3`/`R1` (Decided) — inputs. `NOQ-1`, `NOQ-4` — shaping inputs, carried as `PA-1`. `DDM-1` — untouched. `NFR-OPS-04` — the requirement `DD-5` cites |
+| **Decisions** | `DD-5` — **discharged** by this `Accepted` ADR (2026-08-27): Render, with a long-running Node.js web-service runtime. `DG-2` — **Unresolved**; this ADR completes its final remaining substantive decision and **opens no gate**. `NOQ-2` (Decided), `NOQ-3`/`R1` (Decided) — inputs. `NOQ-1`, `NOQ-4` — shaping inputs, carried as `PA-1`. `DDM-1` — untouched. `NFR-OPS-04` — the requirement `DD-5` cites |
 | **Related ADRs** | `ADR-001` (Accepted — the monolith and the boundary; not reopened); `ADR-002` (Accepted — TypeScript and Next.js, whose Node.js runtime this hosts; not reopened); `ADR-003` (Accepted — PostgreSQL under a managed posture, provider deferred; not reopened); `ADR-006` (Accepted — the model; not reopened); `ADR-010` (Accepted — the availability and recovery posture; not reopened); `ADR-004`, `ADR-007`, `ADR-008`, `ADR-009`, `ADR-011`, `ADR-012` (open, and not decided here) |
 | **Governance** | **Issue #87 / PR #88** — the owner ruling of 2026-08-26 establishing that `DG-2`'s remaining closure scope is `ADR-005` alone. That ruling **prospectively supersedes** the closure-scope ambiguity recorded in `Accepted` `ADR-002` and `ADR-010`, which remain **unedited** historical records under the register's *superseding, not editing* rule |
-| **Documents amended** | `docs/adr/README.md` and `docs/traceability-matrix.md` — the **`Proposed` lifecycle status only**. **`DD-5` is not marked discharged and `DG-2` is not marked Resolved**, because a `Proposed` ADR is not in force. `docs/07-system-architecture.md` and `docs/13-decision-log.md` are **untouched**, following the `ADR-002` Proposed-stage precedent (issue #85) |
-| **Issue / pull request** | Issue #89 — `architecture: decide the MVP application hosting platform and runtime model in ADR-005`. Pull request — **to be assigned** |
+| **Documents amended** | **At acceptance:** `docs/adr/README.md`, `docs/traceability-matrix.md`, `docs/07-system-architecture.md`, `docs/12-implementation-plan.md` — the `Accepted` lifecycle status, and the **discharge of `DD-5`**. **`DG-2` is NOT marked Resolved**, because acceptance opens no gate; the formal `Resolved` transition is a **separate governed synchronization**. `docs/13-decision-log.md` is **untouched**, following the `ADR-002` (PR #86) and `ADR-003` (PR #82) acceptance precedents, so `DG-2`'s status and its hard-blocker accounting are unchanged. **At the earlier `Proposed` stage (PR #90):** `docs/adr/README.md` and `docs/traceability-matrix.md` only |
+| **Issue / pull request** | **Proposed:** issue #89 — `architecture: decide the MVP application hosting platform and runtime model in ADR-005`; pull request #90 — `docs: propose ADR-005 Render hosting and long-running Node runtime`, merged 2026-08-27. **Accepted:** issue #91 — `architecture: accept ADR-005 Render hosting and long-running Node runtime`; acceptance pull request — **to be assigned** |
 
 ### Sources consulted
 
@@ -227,6 +227,7 @@ External claims in this ADR rest on current primary sources, accessed **2026-08-
 |---|---|
 | Next.js — Deploying (`nextjs.org/docs/app/getting-started/deploying`) | A **Node.js server** and a **Docker container** each support **"All"** Next.js features, while **adapters** "vary"; verified adapters are Vercel and Bun; Render and Fly.io have official Next.js deployment templates under the Next.js organisation |
 | Render — Web Services (`render.com/docs/web-services`) | Web services run as **long-running, persistent processes**; Node.js supported; zero-downtime deploys, configurable health checks, instant rollback, autoscaling |
+| Render — Fully Managed TLS Certificates (`render.com/docs/tls`) | TLS certificates are **issued and automatically renewed** by the platform for the default subdomain and added custom domains, and **`HTTP` requests are automatically redirected to `HTTPS`** — the basis for this ADR's *managed routing and TLS termination* claim and for **O-5**/**O-6**'s encrypted-transport expectation. **No certificate authority, DNS or CDN configuration is selected by citing it** |
 | Render — Pricing and free services (`render.com/pricing`, `render.com/docs/free`) | Paid instances run continuously; **free web services spin down after 15 minutes of inactivity**; workspace plan plus usage-based compute |
 | Vercel — Limits (`vercel.com/docs/limits`) | Function duration 10 s default / 60 s maximum on Hobby, 15 s / 300 s on Pro; **runtime logs retained 1 hour on Hobby, 1 day on Pro, 3 days on Enterprise** — used only for the rejected-alternative rationale |
 | Vercel — Enterprise Service Level Agreement (`vercel.com/legal/sla`) | The published **99.99% uptime commitment applies to Enterprise**; no uptime guarantee is documented for lower plans — used only for the rejected-alternative rationale |
