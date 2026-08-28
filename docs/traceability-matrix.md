@@ -20,7 +20,8 @@ owner was never asked** — that is a defect in this document, not a fact about 
 
 **It is technology-neutral.** No language, framework, data store, hosting platform, test
 runner, CI system, or authentication mechanism appears here, and none may be added. That
-choice is `DG-2`, and `DG-2` is open.
+choice is `DG-2`, and ~~`DG-2` is open~~ **`DG-2` is `Resolved`** (2026-08-27, issue #93).
+**This matrix stays technology-neutral even so:** the decisions live in their ADRs, never here.
 
 ---
 
@@ -74,9 +75,10 @@ distinction from `docs/12`/`docs/13`, carried here unchanged:
 
 ### Why the downstream columns are empty
 
-`P0a` (process foundation) is the only work done; `P0b` and everything after are blocked by
-`DG-2` (technology) and `DG-1` (data design). **No entity, field, operation, screen, or test
-exists yet.** Every "Issue · PR · Test" cell below therefore reads *pending*. When application
+`P0a` (process foundation) is the only work done. ~~`P0b` and everything after are blocked by
+`DG-2` (technology) and `DG-1` (data design).~~ **Both gates are now `Resolved`** — `DG-1`
+2026-08-04, `DG-2` 2026-08-27 — so **`P0b` is eligible and `P1` is gate-clear**, but no such
+work has been commissioned. **No entity, field, operation, screen, or test exists yet.** Every "Issue · PR · Test" cell below therefore reads *pending*. When application
 work begins, the issue that builds a row fills that row's downstream cell **in the same pull
 request**.
 
@@ -256,7 +258,7 @@ work, and a shaping input is not overstated into a block.
 | `OQ-5` category model — cardinality, curation | `DG-1` | *Shaping input* | `S-3` representation (membership enforced regardless) | Unresolved | `S-3` |
 | `NOQ-2` availability target | `DG-2` | **Hard blocker** | Store & hosting selection | **Decided (2026-07-30)** | `ADR-003`, `ADR-010` |
 | `NOQ-3` backup / RPO / RTO | `DG-2` | **Hard blocker** | Store selection (capability) | **Decided (2026-07-30)** | `ADR-003`, `ADR-010` |
-| Technology stack | `DG-2` | **Hard blocker** | `P0b` and everything after | **Unresolved** — ~~`ADR-005` alone remains~~ **its substantive decisions are complete** (`ADR-005` **Accepted** 2026-08-27, issue #91), but an ADR opens no gate, so the gate awaits a **separate governed `Resolved` synchronization** | ~~`ADR-002`–`ADR-005`~~ `ADR-002` (**Accepted**), `ADR-003` (**Accepted**), `ADR-010` (**Accepted**), `ADR-005` (**Accepted**). **`ADR-004` is `DG-3`**, not a `DG-2` constituent |
+| Technology stack | `DG-2` | **Hard blocker** | ~~`P0b` and everything after~~ — **discharged: `P0b` eligible, `P1` gate-clear; `P3`/`P4`/`P2`-verifiability remain `DG-3`, release remains `DG-4`** | **Resolved** — 2026-08-27 (issue #93). ~~`ADR-005` alone remains~~ **its substantive decisions are complete** (`ADR-005` **Accepted** 2026-08-27, issue #91, PR #92); an ADR opens no gate, so the gate was closed by the **separate governed `Resolved` synchronization** it required | ~~`ADR-002`–`ADR-005`~~ `ADR-002` (**Accepted**), `ADR-003` (**Accepted**), `ADR-010` (**Accepted**), `ADR-005` (**Accepted**). **`ADR-004` is `DG-3`**, not a `DG-2` constituent |
 | `NOQ-1` performance thresholds | `DG-2` | *Shaping input* | Informs tech selection; carried as `PA-1` | Unresolved | — |
 | `NOQ-4` expected first-release load | `DG-2` | *Shaping input* | As `NOQ-1`; first to revisit if `PA-1` wrong | Unresolved | — |
 | `OQ-9` anti-spam behavior | `DG-3` | **Hard blocker** | `P3` `C11` mechanism (seam built) | Unresolved | `S-9`, `ADR-008` |
@@ -285,7 +287,7 @@ work, and a shaping input is not overstated into a block.
 |---|---|---|---|
 | `DG-0` | Process | **Open** | Nothing — `P0a` proceeds |
 | `DG-1` | Data design | Unresolved | All of `P1`; transitively `P2`–`P4` |
-| `DG-2` | Technology | Unresolved | `P0b` scaffold and all of `P1` |
+| `DG-2` | Technology | **Resolved** — 2026-08-27 (issue #93) | ~~`P0b` scaffold and all of `P1`~~ — discharged: `P0b` eligible, `P1` gate-clear |
 | `DG-3` | Build-time | Unresolved | `P3`, `P4`; verifiability of `P2` |
 | `DG-4` | Release | Unresolved | The release decision, not the build |
 
@@ -297,10 +299,10 @@ gate is the first maintenance action the decision log requires.
 | ADR | Decision | Status | Blocked by |
 |---|---|---|---|
 | `ADR-001` | Modular monolith; reject microservices & browser-direct | **Accepted** (issue #29) | — |
-| [`ADR-002`](adr/ADR-002-application-language-and-framework.md) | Language & framework | **Accepted** — 2026-08-25 (issue #85, PR #86); **in force**. The decision is **TypeScript + Next.js**; **discharges `DD-2`** | **Nothing** — no open question named; `NOQ-1`/`NOQ-4` are shaping inputs (`PA-1`). **`DG-2` remains Unresolved and `ADR-002` remains one of its constituents**; `ADR-005` remains open; obligations `O-1`–`O-12` binding; **implementation remains unauthorized** |
-| [`ADR-003`](adr/ADR-003-data-store-product.md) | Data-store product | **Accepted** — 2026-08-23 (issue #81); **in force**. **PostgreSQL under a managed operating posture**; **discharges `DD-3`** | **Nothing** — ~~`NOQ-2`, `NOQ-3`~~ both **Decided** (`DD-3`); `NOQ-3` amended by **R1**. Recovery-capability filter supplied by Accepted [`ADR-010`](adr/ADR-010-backup-recovery-availability-posture.md). **Named provider deferred, so `DDM-1` is not fully discharged; no schema or index decided; `DG-2` remains Unresolved** |
+| [`ADR-002`](adr/ADR-002-application-language-and-framework.md) | Language & framework | **Accepted** — 2026-08-25 (issue #85, PR #86); **in force**. The decision is **TypeScript + Next.js**; **discharges `DD-2`** | **Nothing** — no open question named; `NOQ-1`/`NOQ-4` are shaping inputs (`PA-1`). ~~**`DG-2` remains Unresolved**~~ **`DG-2` is `Resolved`** (2026-08-27, issue #93) **and `ADR-002` was one of its constituents**; ~~`ADR-005` remains open~~ `ADR-005` is **Accepted** (2026-08-27, issue #91); obligations `O-1`–`O-12` binding; **implementation remains unauthorized** |
+| [`ADR-003`](adr/ADR-003-data-store-product.md) | Data-store product | **Accepted** — 2026-08-23 (issue #81); **in force**. **PostgreSQL under a managed operating posture**; **discharges `DD-3`** | **Nothing** — ~~`NOQ-2`, `NOQ-3`~~ both **Decided** (`DD-3`); `NOQ-3` amended by **R1**. Recovery-capability filter supplied by Accepted [`ADR-010`](adr/ADR-010-backup-recovery-availability-posture.md). **Named provider deferred, so `DDM-1` is not fully discharged; no schema or index decided; ~~`DG-2` remains Unresolved~~ **`DG-2` is `Resolved`** (2026-08-27, issue #93)** |
 | `ADR-004` | Administrator authentication mechanism | Pending | `NOQ-9` (`DD-4`) |
-| [`ADR-005`](adr/ADR-005-hosting-platform-and-runtime-model.md) | Hosting platform & runtime model | **Accepted** — 2026-08-27 (issue #91, PR #92); **in force**. Published as `Proposed` 2026-08-26 (issue #89, PR #90). The decision is **Render + a long-running Node.js web service**; **discharges `DD-5`** | **Nothing** — ~~`DG-2` (`DD-5`)~~; `DD-5` is a stated **input** and `NOQ-2` is **Decided**. **`DG-2` membership stands**, and this acceptance completes `DG-2`'s **final remaining substantive decision** (owner ruling, issue #87) — but it **opens no gate**, so `DG-2` remains **Unresolved** pending a separate governed `Resolved` synchronization; obligations `O-1`–`O-9` binding; named PostgreSQL provider still deferred (`DDM-1`); **implementation remains unauthorized** |
+| [`ADR-005`](adr/ADR-005-hosting-platform-and-runtime-model.md) | Hosting platform & runtime model | **Accepted** — 2026-08-27 (issue #91, PR #92); **in force**. Published as `Proposed` 2026-08-26 (issue #89, PR #90). The decision is **Render + a long-running Node.js web service**; **discharges `DD-5`** | **Nothing** — ~~`DG-2` (`DD-5`)~~; `DD-5` is a stated **input** and `NOQ-2` is **Decided**. **`DG-2` membership stands**, and this acceptance completes `DG-2`'s **final remaining substantive decision** (owner ruling, issue #87) — but it **opened no gate**, so ~~`DG-2` remains **Unresolved** pending a separate governed `Resolved` synchronization~~ **`DG-2` was resolved by that separate governed synchronization — `Resolved` 2026-08-27 (issue #93)**; obligations `O-1`–`O-9` binding; named PostgreSQL provider still deferred (`DDM-1`); **implementation remains unauthorized** |
 | [`ADR-006`](adr/ADR-006-listing-data-model-and-lifecycle-states.md) | Listing data model & lifecycle states | **Accepted** — 2026-08-07 (issue #61) | **Nothing** — ~~`OQ-6/7/8/8b/10/11/13`~~ all **Decided**, `DG-1` **Resolved** (`DD-1`). **In force**; work may rely on it. Discharges `DD-1` **logically only**; `DDM-8` and `DDM-9` remain **unresolved** |
 | `ADR-007` | Search approach | Pending | `OQ-4` (`DD-14`) |
 | `ADR-008` | Anti-spam approach | Pending | `OQ-9` (`DD-6`) |

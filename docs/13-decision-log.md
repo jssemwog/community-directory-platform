@@ -16,7 +16,9 @@ decision that has actually been taken — with its reference — or you are maki
 
 **It is technology-neutral.** No language, framework, data store, hosting platform,
 continuous-integration system, or deployment approach appears here, and none may be added by
-this document. That choice is `DG-2`, and `DG-2` is open.
+this document. That choice is `DG-2`, and ~~`DG-2` is open~~ — **`DG-2` is `Resolved`**
+(2026-08-27, issue #93). **This document stays technology-neutral even so:** the decisions
+themselves live in their ADRs and in `docs/07`, never here.
 
 ---
 
@@ -63,16 +65,19 @@ until it is answered. That is a harder deadline than a calendar date, and an hon
 | Gate | Subject | Owner | Status | Blocks | Hard blockers | Shaping inputs |
 |---|---|---|---|---|---|---|
 | **`DG-0`** | Process | **Joe S.** — maintainer | **Open** | Nothing | — | — |
-| **`DG-1`** | **Data design** | **Joe S.** — product owner | **Resolved** — 2026-08-04 | ~~**All of `P1`**~~; the product-decision blocker on `P1` is removed. **`P1` remains blocked by `DG-2`.** | 6 — **6 Decided, 0 Unresolved** | 2 |
-| **`DG-2`** | **Technology** | **Joe S.** — product owner | **Unresolved** | The **`P0b` scaffold** and all of `P1` | 3 — **2 Decided, 1 Unresolved** | 2 |
+| **`DG-1`** | **Data design** | **Joe S.** — product owner | **Resolved** — 2026-08-04 | ~~**All of `P1`**~~; the product-decision blocker on `P1` is removed. ~~**`P1` remains blocked by `DG-2`.**~~ — **`DG-2` is now `Resolved` too, so `P1` is gate-clear.** | 6 — **6 Decided, 0 Unresolved** | 2 |
+| **`DG-2`** | **Technology** | **Joe S.** — product owner | **Resolved** — 2026-08-27 (issue #93) | ~~The **`P0b` scaffold** and all of `P1`~~; both gate blockers are removed. **`P0b` is now eligible to start; `P1` is gate-clear but still follows `P0b`.** | 3 — **3 Decided, 0 Unresolved** | 2 |
 | **`DG-3`** | **Build-time** | **Joe S.** — product owner | **Unresolved** | `P3`, `P4`, and the *verifiability* of `P2` | 3 | 2 |
 | **`DG-4`** | **Release** | **Joe S.** — product owner | **Unresolved** | The **release decision**, not the build | — | — |
 
 > **`DG-0` is open. Everything else is not.**
 >
-> **Until `DG-1` and `DG-2` clear, the only implementation work that can honestly proceed is
-> the stack-neutral half of Phase 0 (`P0a`).** That is not a scheduling inconvenience to route
-> around. It is the plan telling the truth.
+> ~~**Until `DG-1` and `DG-2` clear, the only implementation work that can honestly proceed is
+> the stack-neutral half of Phase 0 (`P0a`).**~~ **Both have now cleared** — `DG-1` **Resolved**
+> 2026-08-04, `DG-2` **Resolved** 2026-08-27 — so **`P0b` is eligible** and `P1` is gate-clear.
+> That was not a scheduling inconvenience to route around. It was the plan telling the truth,
+> and the gates held until the decisions were actually taken. **`DG-3` and `DG-4` remain
+> `Unresolved`**, and clearing a gate makes work *eligible*; it does not start it.
 
 **Every gate now has a named accountable owner.** `docs/02-stakeholders.md` names no individual
 at the organisation level; **Joe S.** is the person currently holding the product-owner role
@@ -112,8 +117,10 @@ Resolved.** `ADR-006` is **no longer blocked by a `DG-1` product question**; it 
 drafted and **Accepted 2026-08-07** (issue #61) and is now **in force**.
 **`DG-1`'s two shaping inputs,
 `OQ-4` and `OQ-5`, remain Unresolved**; per `docs/12` they block no phase, which is why the
-gate clears without them. **Clearing `DG-1` does not start `P1`:** `P1` is hard-blocked by
-`DG-1` *and* `DG-2`, and `DG-2` is still Unresolved.
+gate clears without them. **Clearing `DG-1` did not start `P1`:** `P1` is hard-blocked by
+`DG-1` *and* `DG-2`, and ~~`DG-2` is still Unresolved~~ — **`DG-2` is now `Resolved` too**
+(2026-08-27, issue #93), so **`P1` is gate-clear**. It still follows `P0b` in the plan's
+sequence, and being gate-clear is not the same as being started.
 
 > **A note on the count, because it is easy to get wrong.** `OQ-8` and `OQ-8b` are **one row
 > of the six**, as they have been since this gate was written — a single hard blocker that
@@ -165,18 +172,32 @@ belongs to **`DG-4`**; **CI** is `P0b` / derivative implementation-enablement wo
 closure unblocks; and **`DDM-1`'s deferred named managed provider** does not block closure, though
 it must still satisfy `ADR-010`'s capability constraints whenever a provider is chosen.
 
-**`DG-2` is `Unresolved` today** because `ADR-005` is outstanding. **Once `ADR-005` is `Accepted`,
-`DG-2` may proceed to its governed `Resolved` synchronization.** The ruling defines the closure
-**condition**; it does **not** close the gate, it selects no technology, and it authorizes no
-implementation — `P0b` and `P1`–`P5` remain blocked.
+~~**`DG-2` is `Unresolved` today** because `ADR-005` is outstanding.~~ **`ADR-005` was `Accepted`
+on 2026-08-27 (issue #91, PR #92), discharging `DD-5`, and the governed `Resolved` synchronization
+the ruling required is this one.**
+
+**`DG-2` is `Resolved` — 2026-08-27, issue #93.** All three hard blockers are satisfied: `NOQ-2`
+and `NOQ-3` are **Decided**, and the technology stack itself — language, framework, store,
+hosting — is settled by `ADR-002`, `ADR-003` and `ADR-005`, all `Accepted`, discharging `DD-2`,
+`DD-3` and `DD-5`. **This synchronization selects no technology and makes no new architecture
+decision;** it records a gate whose constituents were already complete.
+
+**What resolving `DG-2` does, and what it does not.** **`P0b` becomes eligible to start** and
+**`P1` becomes gate-clear** — `DG-1` cleared on 2026-08-04. It is **not** a start order: eligible
+work still has to be commissioned. **`DG-3` and `DG-4` remain `Unresolved`**, so `P3`, `P4` and
+the *verifiability* of `P2` stay blocked by `DG-3`, and the release decision stays `DG-4`.
+**`ADR-004` remains blocked by `DG-3`** even though it sits in the `P0b` table; **`ADR-012`**
+remains unwritten with its depth half under `DG-4`; **CI** remains unselected `P0b` work; and
+**`DDM-1`'s named managed provider remains deferred**, still owing `ADR-010`'s capability
+constraints whenever it is chosen.
 
 | ID | Question | Class | Status | Needed by | Blocks or shapes | Source | Outcome |
 |---|---|---|---|---|---|---|---|
-| `NOQ-2` | **Availability target?** | **Hard blocker** | **Decided** | **Before store and hosting selection** | Store and hosting selection. *99% and 99.9% are different deployments* | `docs/06`; `docs/07` `DD-3` | **Decided 2026-07-30 (Joe S.):** **99%** availability for the public directory over a **rolling monthly** window, **excluding announced maintenance**; the public read path takes priority over administrative tools. Recorded in `docs/06` `NFR-REL-01/02/05`. **`DG-2` remains Unresolved** (the technology-stack and `NOQ-3` blockers are still open). |
-| `NOQ-3` | **Backup / RPO / RTO?** | **Hard blocker** | **Decided** | **Before store selection** | Store selection. Determines the store's required **capability**, not just a schedule | `docs/06`; `docs/07` `DD-3` | **Decided 2026-07-30 (Joe S.):** **daily** backups; **RPO up to 24 hours**; **RTO one business day**; a restore **tested before launch and at least quarterly** thereafter; ~~**at least one independent backup copy off the primary provider, refreshed at least weekly**~~; and **equivalent confidentiality, access control, and protection for every copy** (live, provider-managed, exported, and independent). Recorded in `docs/06` `NFR-BACK-01`–`NFR-BACK-06`. **Amended 2026-08-18 (Joe S.) — ruling R1:** there is **one recovery point objective for the MVP recovery posture — a maximum tolerated data loss of 24 hours** — and it applies to **every in-scope recovery scenario**, including **complete loss of, or loss of access to, the primary provider**, accidental deletion or operator error, and data corruption. **There is no weaker provider-loss objective.** The original *refreshed at least weekly* guarantee is therefore **superseded**: a weekly minimum permits an independent copy up to seven days old and cannot satisfy the 24-hour objective under provider loss. **The independent copy must instead be no more than 24 hours behind the committed state of the live data** (`NFR-BACK-06`, as amended) — a constraint on **staleness, not cadence**, because backup generation and copy transfer lags compound. **No mechanism, product, or provider is selected**, the 24-hour RPO and one-business-day RTO values are **unchanged**, and this amendment does **not** extend any finer-grained recovery capability to provider loss. Recorded on issue #69; applied by issue #70. **`DG-2` remains Unresolved** (the technology-stack blocker is still open). |
+| `NOQ-2` | **Availability target?** | **Hard blocker** | **Decided** | **Before store and hosting selection** | Store and hosting selection. *99% and 99.9% are different deployments* | `docs/06`; `docs/07` `DD-3` | **Decided 2026-07-30 (Joe S.):** **99%** availability for the public directory over a **rolling monthly** window, **excluding announced maintenance**; the public read path takes priority over administrative tools. Recorded in `docs/06` `NFR-REL-01/02/05`. ~~**`DG-2` remains Unresolved** (the technology-stack and `NOQ-3` blockers are still open).~~ **`DG-2` is `Resolved`** (2026-08-27, issue #93); `NOQ-3` was **Decided** 2026-07-30 and the technology-stack blocker is discharged. |
+| `NOQ-3` | **Backup / RPO / RTO?** | **Hard blocker** | **Decided** | **Before store selection** | Store selection. Determines the store's required **capability**, not just a schedule | `docs/06`; `docs/07` `DD-3` | **Decided 2026-07-30 (Joe S.):** **daily** backups; **RPO up to 24 hours**; **RTO one business day**; a restore **tested before launch and at least quarterly** thereafter; ~~**at least one independent backup copy off the primary provider, refreshed at least weekly**~~; and **equivalent confidentiality, access control, and protection for every copy** (live, provider-managed, exported, and independent). Recorded in `docs/06` `NFR-BACK-01`–`NFR-BACK-06`. **Amended 2026-08-18 (Joe S.) — ruling R1:** there is **one recovery point objective for the MVP recovery posture — a maximum tolerated data loss of 24 hours** — and it applies to **every in-scope recovery scenario**, including **complete loss of, or loss of access to, the primary provider**, accidental deletion or operator error, and data corruption. **There is no weaker provider-loss objective.** The original *refreshed at least weekly* guarantee is therefore **superseded**: a weekly minimum permits an independent copy up to seven days old and cannot satisfy the 24-hour objective under provider loss. **The independent copy must instead be no more than 24 hours behind the committed state of the live data** (`NFR-BACK-06`, as amended) — a constraint on **staleness, not cadence**, because backup generation and copy transfer lags compound. **No mechanism, product, or provider is selected**, the 24-hour RPO and one-business-day RTO values are **unchanged**, and this amendment does **not** extend any finer-grained recovery capability to provider loss. Recorded on issue #69; applied by issue #70. ~~**`DG-2` remains Unresolved** (the technology-stack blocker is still open)~~ **`DG-2` is `Resolved`** (2026-08-27, issue #93). |
 | `NOQ-1` | Performance thresholds? | *Shaping input* | Unresolved | Carried as `PA-1` | `DD-2`, `DD-5`, `DD-12`. **Informs technology selection; does not block it.** **No threshold is asserted anywhere — and none may be invented** | `docs/06`; `docs/11` Cat. 3 | — |
 | `NOQ-4` | Expected first-release load? | *Shaping input* | Unresolved | Carried as `PA-1` | As `NOQ-1`. Everything assumes **"small"** (`PA-1`); if that is wrong, **this is the first decision to revisit** (`DD-12`) | `docs/06`; `docs/07` `A-5`, `A-6` | — |
-| **Technology stack** | ~~Language, framework, store, hosting, authentication, CI, test tooling~~ **Language, framework, store, hosting** — narrowed by **owner ruling 2026-08-26 (issue #87)**: authentication is `DG-3` (`ADR-004`, `NOQ-9`), CI is `P0b` work this gate unblocks, and test tooling does not block `DG-2` (depth is `DG-4`) | **Hard blocker** | Unresolved — **`ADR-005` alone remains** | **Before `P0b` and everything after it** | **`P0b` and everything after it.** Only `ADR-001` — the architecture *shape* — is decidable today | `docs/07` | ~~Lands as `ADR-002`–`ADR-005` (issues #28, #29)~~ — **`ADR-002` `Accepted` 2026-08-25 (issue #85), `ADR-003` `Accepted` 2026-08-23 (issue #81), `ADR-010` `Accepted` 2026-08-19 (issue #69).** **`ADR-005` is the final remaining substantive constituent**; when it is `Accepted`, `DG-2` may proceed to its governed `Resolved` synchronization. **`ADR-004` is not part of this blocker** |
+| **Technology stack** | ~~Language, framework, store, hosting, authentication, CI, test tooling~~ **Language, framework, store, hosting** — narrowed by **owner ruling 2026-08-26 (issue #87)**: authentication is `DG-3` (`ADR-004`, `NOQ-9`), CI is `P0b` work this gate unblocks, and test tooling does not block `DG-2` (depth is `DG-4`) | **Hard blocker** | ~~Unresolved — **`ADR-005` alone remains**~~ — **Decided** 2026-08-27 | **Before `P0b` and everything after it** | ~~**`P0b` and everything after it.** Only `ADR-001` — the architecture *shape* — is decidable today~~ — **discharged: `P0b` is eligible and `P1` is gate-clear.** `P3`, `P4` and `P2`'s *verifiability* remain `DG-3`; the release decision remains `DG-4` | `docs/07` | ~~Lands as `ADR-002`–`ADR-005` (issues #28, #29)~~ — **`ADR-002` `Accepted` 2026-08-25 (issue #85), `ADR-003` `Accepted` 2026-08-23 (issue #81), `ADR-010` `Accepted` 2026-08-19 (issue #69).** ~~**`ADR-005` is the final remaining substantive constituent**; when it is `Accepted`, `DG-2` may proceed to its governed `Resolved` synchronization.~~ — **`ADR-005` `Accepted` 2026-08-27 (issue #91, PR #92), and that synchronization is complete (issue #93).** **`ADR-004` is not part of this blocker** |
 
 **The two shaping inputs are carried, not resolved.** `PA-1` — *the directory is small at first
 release* — **is** that stated assumption. It is load-bearing: if it is false, store, indexing,
