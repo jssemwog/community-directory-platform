@@ -1,0 +1,44 @@
+# MVP CI pipeline — issue #97 (P0b).
+#
+# Validates that a pull request still installs and builds. It deliberately runs
+# no tests: test-tooling selection is ADR-012's tooling half and testing depth
+# is DG-4, both separately governed. A placeholder suite would claim testing
+# that does not exist, so none is added here.
+#
+# Type validation is not a separate step. `next build` runs TypeScript as an
+# explicit build phase and fails on a type error, so the build below *is* the
+# existing type-validation mechanism being consumed — not a new one.
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+
+# Least privilege. The job reads the repository and builds it: it writes
+# nothing back, publishes nothing, deploys nothing, and uses no secret.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Pinned to the version README.md records development against, which
+          # satisfies the ">=20.9.0" engines floor in package.json. Dependency
+          # caching is deliberately omitted — the tree is small, and caching is
+          # a deferred bounded optimisation (issue #97, deferred decision 2).
+          node-version: "22.12.0"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
