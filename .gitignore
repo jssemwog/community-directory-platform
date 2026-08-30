@@ -1,2 +1,18 @@
 bash.exe.stackdump
 *.stackdump
+
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+next-env.d.ts
+
+# Environment files — never committed
+.env
+.env.*
+!.env.example
+
+# TypeScript incremental build info
+*.tsbuildinfo
