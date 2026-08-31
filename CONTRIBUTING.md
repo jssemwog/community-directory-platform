@@ -128,11 +128,12 @@ with admin rights; it is recorded here so the configuration is discoverable and 
   pushes.
 - **One approving review is required**, matching *Review and approval workflow* above.
 - **Review conversations must be resolved** before merging.
-- **No status check is required — yet, and deliberately.** There is no continuous-integration
-  pipeline: CI and its test tooling follow from `ADR-002` and are `P0b` work, **blocked by
-  `DG-2`**. Requiring a check now would either block every merge against a check that never
-  reports, or quietly presuppose the stack. **The required status check is added in `P0b`, by
-  the issue that builds the pipeline** — not here.
+- **The MVP CI `build` check is required.** A pull request cannot be merged until the `CI`
+  workflow's `build` job succeeds against it. The check installs dependencies deterministically
+  (`npm ci`) and runs the production build, which is where TypeScript validation happens — so a
+  type error blocks the merge. **It runs no tests:** test tooling is `ADR-012`'s tooling half and
+  testing depth is `DG-4`, both still open. The requirement was added in `P0b`, once the pipeline
+  it depends on existed.
 - **Squash is the only enabled merge method.** Merge commits and rebase merges are disabled, so
   every commit on `main` is a squashed pull request with its number appended.
 - **Force pushes to `main` are blocked, and `main` cannot be deleted.** Linear history is
