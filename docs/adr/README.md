@@ -8,8 +8,9 @@ later**.
 them.** This directory is that place.
 
 **It holds six decisions in force.** `ADR-001`, `ADR-002`, `ADR-003`, `ADR-005`, `ADR-006` and
-`ADR-010` are all **Accepted**; every remaining ADR is either **Blocked** on a question the
-product owner has not been asked, or **Not yet writable**. See *The register*.
+`ADR-010` are all **Accepted**; **`ADR-013` is `Proposed`** and therefore **not** in force; every
+remaining ADR is either **Blocked** on a question the product owner has not been asked, or
+**Not yet writable**. See *The register*.
 
 ---
 
@@ -114,7 +115,8 @@ new reality destroys the only evidence of what was believed and when.
 
 ## The register
 
-**Every ADR named by `docs/07-system-architecture.md`.** The blocked ones are listed **so that
+**Every ADR named by `docs/07-system-architecture.md`, and every later ADR the chain did not
+anticipate** (`ADR-013` onward). The blocked ones are listed **so that
 their absence is visible** — a decision nobody can see is not being waited for, it is being
 forgotten.
 
@@ -132,6 +134,7 @@ forgotten.
 | **[`ADR-010`](ADR-010-backup-recovery-availability-posture.md)** | Backup, recovery, and availability posture | **`DG-2`** | **Nothing.** ~~**`NOQ-2`, `NOQ-3`**~~ both **Decided** — 2026-07-30, `NOQ-3` amended by ruling **R1** 2026-08-18 — `DD-8`, `DD-9`. **Feeds `ADR-003`** | **Accepted** — 2026-08-19 (issue #69). *In force; work may rely on it.* It discharges `DD-8` and `DD-9`; the **mechanism** and the store remain open (`ADR-003`, `DD-3`, `DD-5`). |
 | **`ADR-011`** | Accessibility standard, level, and supported matrix | **`DG-3`** | **`NOQ-5`, `NOQ-6`** — `DD-10`, `DD-11` | **Blocked** |
 | **`ADR-012`** | Testing strategy — with the administrative boundary as its highest-value target | **`DG-2`** (tooling) · **`DG-4`** (depth) | `docs/07` names **no blocking question of its own** — but the **test tooling follows `ADR-002`**, which is now **`Accepted`** and in force, and testing **depth** is `DG-4`. **It cannot be written in full until `ADR-002` lands** | **Not yet writable** |
+| **[`ADR-013`](ADR-013-managed-postgresql-provider.md)** | **Named managed PostgreSQL provider** — the service and vendor `ADR-003` deferred (`DDM-1`) | **`DG-2`** — **Resolved** 2026-08-27 (issue #93) | **Nothing.** `ADR-003` (Accepted) fixed the engine and the managed posture and **deferred the named provider**, requiring *"a separate, explicit product-owner ruling"*; `ADR-010` (Accepted) supplies the capability filter. **Not named by `docs/07`** — a decision the chain did not anticipate, taking `ADR-013` under *Numbering and filenames* | **Proposed** — 2026-09-01 (issue #101). *Under review; **not** in force, and nothing may depend on it.* The proposed decision is **DigitalOcean Managed PostgreSQL**. **`DDM-1` is not discharged** by a `Proposed` ADR, and on acceptance would be discharged **only** as to the named provider; `ADR-010`'s independent off-provider copy, its restore rehearsals and its provider-capability validation remain **outstanding**; **Render remains the application host only**; and no region, tier, sizing, provisioning, ORM, migration, schema, authentication, secret or connectivity decision is made |
 
 > **Note the ordering, and why it is not an accident.** `ADR-001` is writable immediately.
 > **`ADR-003` and `ADR-006` — the two most consequential and the hardest to reverse — were both
