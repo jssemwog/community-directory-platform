@@ -2,15 +2,15 @@
 
 | Field | Value |
 |---|---|
-| **Status** | **Proposed** |
-| **Date** | 2026-09-01 |
+| **Status** | **Accepted** |
+| **Date** | 2026-09-03 |
 | **Decision owner** | Joe S. — product owner |
 | **Decision gate** | `DG-2` — technology. **Resolved** 2026-08-27 (issue #93). This ADR takes the **named-provider** decision `ADR-003` deferred; it opens no gate and authorizes no implementation |
 | **Related open questions** | **Depends on** (all Decided): ~~`NOQ-2`~~ 2026-07-30 · ~~`NOQ-3`~~ 2026-07-30, amended by ruling **R1** 2026-08-18. **Carried as shaping inputs, not blockers:** `NOQ-1`, `NOQ-4` (`PA-1`). **Must NOT answer:** `DDM-2`–`DDM-10`, `OQ-4`, `OQ-9`, `OQ-14` / `NOQ-8`, `NOQ-9` (`ADR-004`, `DG-3`), `NOQ-5`, `NOQ-6`, `NOQ-7` — see *Open questions this decision must NOT answer* |
 | **Supersedes** | *none* |
 | **Superseded by** | *none* |
 
-> **Proposed, and therefore not in force.** Per `docs/adr/README.md`, a `Proposed` ADR is *"Drafted and under review. The decision is **not yet in force**; nothing may depend on it."* This document records the product owner's named-provider selection for review; **acceptance is a separate governed step**, following the `ADR-005` `Proposed` → `Accepted` precedent (issue #89 / PR #90, then issue #91 / PR #92). **`DDM-1` is not yet discharged by this document**, no database is provisioned, no account exists, and **no implementation is authorized**.
+> **Accepted, and therefore in force.** Per `docs/adr/README.md`, an `Accepted` ADR is *"Decided and **in force**. Work may rely on it."* The product owner accepted this decision on **2026-09-03**, following the `Proposed`-stage publication recorded on issue #101 and merged by **PR #102** on 2026-09-01, and the separate governed acceptance step recorded on **issue #103** — the `ADR-005` `Proposed` → `Accepted` precedent (issue #89 / PR #90, then issue #91 / PR #92). **`DDM-1` is discharged by this ADR only as to the named managed service and vendor**; `DDM-2`–`DDM-10` are untouched. Acceptance **provisions nothing**: no database exists, no account exists, no region, tier, sizing or PostgreSQL version is selected, and **no implementation is authorized** by this document. **`ADR-010` is not discharged** — its independent off-provider copy, its restore rehearsals and its provider-capability validation all remain **outstanding**.
 
 ---
 
@@ -108,7 +108,7 @@ Four candidates were compared, spanning the serverless, developer-platform, co-l
 
 ### Positive
 
-- **`DDM-1`'s named-provider half becomes decidable and, on acceptance, decided** — deliberately, on recorded evidence, rather than by a connection string.
+- **`DDM-1`'s named-provider half is decided** — deliberately, on recorded evidence, rather than by a connection string.
 - **The datastore stays independent of the application host**, preserving `ADR-005`'s recorded boundary in practice and not only in principle.
 - **Backup and point-in-time recovery map to `ADR-010` by documented mechanisms**, not by interpretation.
 - **Ordinary PostgreSQL connectivity** from the long-running Node service, with no adaptation of `C9`.
@@ -142,8 +142,8 @@ Four candidates were compared, spanning the serverless, developer-platform, co-l
 | **Naming a provider is mistaken for satisfying `ADR-010`** | The independent off-provider copy and the restore rehearsal are assumed done | The *`ADR-010` compatibility* table states which obligations remain outstanding, and names the independent copy as **not satisfied** |
 | **Mutable provider facts harden into architecture** | Pricing, plan names or version support are treated as durable commitments | Every such fact is recorded as decision-time evidence with an access date, and **none is normative**; re-verification before provisioning is required |
 | **The tier is chosen by inference from this ADR** | A purchasing decision is made without being made | **No tier, sizing or region is selected**; the capabilities a production-sensible configuration must have are stated as obligations instead |
-| **`Proposed` is treated as in force** | Provisioning or connectivity work begins on the strength of a draft | The header callout states that this ADR is **not in force**, that `DDM-1` is not yet discharged, and that acceptance is a **separate governed step** |
-| **Provisioning follows acceptance automatically** | An account, a cluster and a billing commitment appear without their own authorization | Provisioning is **Authorization D** on issue #101, a **separate later work unit**; nothing here authorizes it |
+| ~~**`Proposed` is treated as in force**~~ — **discharged at acceptance, 2026-09-03** | Provisioning or connectivity work begins on the strength of a draft | ~~The header callout states that this ADR is **not in force**, that `DDM-1` is not yet discharged, and that acceptance is a **separate governed step**~~ — the separate governed acceptance step was performed (issue #103), so this ADR **is** in force. **The risk it guarded against does not transfer to provisioning**: being in force still authorizes no account, cluster or connectivity — see the row below |
+| **Provisioning follows acceptance automatically** | An account, a cluster and a billing commitment appear without their own authorization | Provisioning requires a **separately commissioned and explicitly authorized later work unit**; nothing in this ADR or its acceptance authorizes it |
 
 ## Deferred decisions
 
@@ -174,7 +174,7 @@ Each remains open, and none is decided or narrowed by this ADR: DigitalOcean **a
 | **Render deployment and database-connectivity configuration** | **Untouched.** `ADR-005`'s tier, sizing and deployment configuration remain unselected |
 | **PostgreSQL version** | **Untouched.** Supported versions are a mutable provider fact; version selection is a provisioning and runtime choice |
 | **`NOQ-1`, `NOQ-4`** — performance thresholds and expected load | **Carried as `PA-1`**, not answered |
-| **Implementation** | **Not authorized.** This ADR is `Proposed`; provisioning is a separate later work unit |
+| **Implementation** | **Not authorized.** Acceptance puts the **named-provider decision** in force and nothing more; provisioning remains a separate later work unit |
 
 ## Traceability
 
@@ -183,11 +183,11 @@ Each remains open, and none is decided or narrowed by this ADR: DigitalOcean **a
 | **Requirements** | `NFR-BACK-01`–`NFR-BACK-06` (as amended by ruling `R1`) — the capability filter; `NFR-REL-01`, `NFR-REL-02`, `NFR-REL-05` (availability, announced maintenance); `NFR-SEC-04`, `NFR-SEC-08` (protection in transit; secrets); `NFR-OPS-01`, `NFR-OPS-04` (operable by a small team; proportionate infrastructure); `NFR-SCALE-01` (at `PA-1`) |
 | **Components** | `C9` — the sole data-access path to the external managed PostgreSQL |
 | **Invariants** | Must not breach: `DI-1`–`DI-11`. This ADR decides nothing about them |
-| **Decisions** | `DDM-1` — the **named managed service and vendor**; **not discharged while this ADR is `Proposed`**, and on acceptance discharged **only** as to the named provider. `DD-3` — already discharged by `ADR-003`; untouched. `DG-2` — **Resolved** 2026-08-27 (issue #93); this ADR is not a constituent and changes nothing about it. `NOQ-2`, `NOQ-3`/`R1` — Decided, inputs. `NOQ-1`, `NOQ-4` — shaping inputs, carried as `PA-1` |
+| **Decisions** | `DDM-1` — the **named managed service and vendor**; **discharged by this `Accepted` ADR (2026-09-03), and only as to the named provider** — DigitalOcean Managed PostgreSQL. `DDM-2`–`DDM-10` and `ADR-010`'s outstanding obligations are untouched by that discharge. `DD-3` — already discharged by `ADR-003`; untouched. `DG-2` — **Resolved** 2026-08-27 (issue #93); this ADR is not a constituent and changes nothing about it. `NOQ-2`, `NOQ-3`/`R1` — Decided, inputs. `NOQ-1`, `NOQ-4` — shaping inputs, carried as `PA-1` |
 | **Related ADRs** | `ADR-003` (Accepted — the engine and managed posture whose deferred provider this decides; not reopened); `ADR-005` (Accepted — the application host, which selected no database; not reopened); `ADR-010` (Accepted — the capability filter; not reopened and **not discharged**); `ADR-001`, `ADR-002`, `ADR-006` (Accepted; not reopened); `ADR-004`, `ADR-007`, `ADR-008`, `ADR-009`, `ADR-011`, `ADR-012` (open, and not decided here) |
-| **Governance** | **Issue #101** — the commissioned `DDM-1` decision, which classified the artifact as a **new `ADR-013`** on `docs/adr/README.md`'s *When an ADR is required* test (costly to reverse, cross-cutting, contested) and on the uniform `ADR-002` / `ADR-003` / `ADR-005` precedent of a `Proposed` publication followed by a separate owner `Accepted` ruling. **Owner ruling** — *approve Option A, DigitalOcean Managed PostgreSQL* |
-| **Documents amended** | **At this `Proposed` stage:** `docs/adr/README.md` (register row) and `docs/traceability-matrix.md` (ADR register row) only — following the `ADR-002` and `ADR-005` `Proposed`-stage precedent. `docs/07-system-architecture.md`, `docs/08-data-model.md`, `docs/12-implementation-plan.md` and `docs/13-decision-log.md` are **untouched**: no statement in them becomes false merely because this ADR is `Proposed`. **At acceptance:** the `Accepted` lifecycle status, and the synchronization of `docs/08`'s `DDM-1` row and `docs/13` |
-| **Issue / pull request** | **Proposed:** issue #101 — `architecture: decide the MVP managed PostgreSQL provider in ADR-013`. **Accepted:** a separate governed step, not yet opened |
+| **Governance** | **Issue #101** — the commissioned `DDM-1` decision, which classified the artifact as a **new `ADR-013`** on `docs/adr/README.md`'s *When an ADR is required* test (costly to reverse, cross-cutting, contested) and on the uniform `ADR-002` / `ADR-003` / `ADR-005` precedent of a `Proposed` publication followed by a separate owner `Accepted` ruling. **Owner ruling** — *approve Option A, DigitalOcean Managed PostgreSQL*. **Issue #103** — the separate governed acceptance step, with the owner's file-set ruling of 2026-09-03 excluding `docs/07-system-architecture.md` and `docs/12-implementation-plan.md` on the ground that their `DD-3` / `ADR-003` wording is historical context for the earlier deferral and does not authoritatively record the `DDM-1` answer |
+| **Documents amended** | **At the earlier `Proposed` stage (PR #102):** `docs/adr/README.md` (register row) and `docs/traceability-matrix.md` (ADR register row) only — following the `ADR-002` and `ADR-005` `Proposed`-stage precedent. `docs/07-system-architecture.md`, `docs/08-data-model.md`, `docs/12-implementation-plan.md` and `docs/13-decision-log.md` are **untouched**: no statement in them becomes false merely because this ADR is `Proposed`. **At acceptance (issue #103):** this file, `docs/adr/README.md`, `docs/traceability-matrix.md`, `docs/08-data-model.md` (the `DDM-1` row) and `docs/13-decision-log.md` — the `Accepted` lifecycle status and the **named-provider discharge of `DDM-1`**. **`docs/07-system-architecture.md` and `docs/12-implementation-plan.md` are untouched by owner ruling of 2026-09-03**, departing from the `ADR-002` / `ADR-003` / `ADR-005` acceptance precedent because this ADR discharges no `DD-*`: their `DD-3` and `ADR-003` rows record the **history of the earlier deferral**, not the authoritative `DDM-1` state, which `docs/08` holds. **No gate is marked `Resolved`** — `DG-2` was already `Resolved` (issue #93) and this ADR is not a constituent of it |
+| **Issue / pull request** | **Proposed:** issue #101 — `architecture: decide the MVP managed PostgreSQL provider in ADR-013`; pull request #102 — `docs: propose DigitalOcean Managed PostgreSQL provider`, merged 2026-09-01. **Accepted:** issue #103 — `architecture: accept ADR-013 DigitalOcean Managed PostgreSQL provider` |
 
 ### Sources consulted
 

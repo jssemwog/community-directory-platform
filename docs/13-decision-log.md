@@ -188,8 +188,24 @@ work still has to be commissioned. **`DG-3` and `DG-4` remain `Unresolved`**, so
 the *verifiability* of `P2` stay blocked by `DG-3`, and the release decision stays `DG-4`.
 **`ADR-004` remains blocked by `DG-3`** even though it sits in the `P0b` table; **`ADR-012`**
 remains unwritten with its depth half under `DG-4`; **CI** remains unselected `P0b` work; and
-**`DDM-1`'s named managed provider remains deferred**, still owing `ADR-010`'s capability
-constraints whenever it is chosen.
+~~**`DDM-1`'s named managed provider remains deferred**, still owing `ADR-010`'s capability
+constraints whenever it is chosen.~~ — **`DDM-1`'s named managed provider is no longer
+deferred: `ADR-013` is `Accepted` 2026-09-03 (issue #103) and in force, selecting DigitalOcean
+Managed PostgreSQL, so `DDM-1`'s named-provider portion is discharged.** That discharge is
+**narrow**. It changes nothing about `DG-2`, which was already `Resolved` (2026-08-27, issue #93)
+and of which `ADR-013` is **not a constituent** — *an ADR records a decision; it does not open
+a gate*. **`ADR-010` is not discharged by naming a provider:** its **provider-capability
+validation** remains **outstanding** and must be re-verified against current official
+documentation **before** provisioning; its **independent off-provider recoverable copy**, no more
+than 24 hours behind committed live data (`NFR-BACK-06`, as amended by ruling **R1**), remains
+**outstanding**, with **no mechanism, location, service or provider selected**; and its
+**pre-launch and quarterly restore rehearsals** (`NFR-BACK-02`, `NFR-BACK-05`) remain
+**outstanding**. The provider-loss recovery obligations stay **the project's**, not the
+provider's. **Nothing is provisioned** — no DigitalOcean account, billing commitment or
+cluster exists, and no region, tier, sizing or PostgreSQL version is selected. **`DDM-2`–`DDM-10`
+remain unresolved**, and every provisioning, connectivity, secrets, ORM, driver, pooler,
+migration, schema, index, authentication and backup-mechanism decision **remains deferred and
+separately governed**.
 
 | ID | Question | Class | Status | Needed by | Blocks or shapes | Source | Outcome |
 |---|---|---|---|---|---|---|---|
