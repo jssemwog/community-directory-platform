@@ -189,7 +189,10 @@ the *verifiability* of `P2` stay blocked by `DG-3`, and the release decision sta
 **`ADR-004` remains blocked by `DG-3`** even though it sits in the `P0b` table; ~~**`ADR-012`**
 remains unwritten with its depth half under `DG-4`~~ — **`ADR-012`'s tooling half was drafted `Proposed`
 on 2026-09-03 (issue #105), selecting Vitest as the primary implementation-level test runner.**
-It is **not** `Accepted` and **not** in force — acceptance is a separate governed step — and its
+~~It is **not** `Accepted` and **not** in force — acceptance is a separate governed step~~ — **it is
+`Accepted` 2026-09-04 (issue #107) and in force, so later implementation may rely on Vitest as the
+primary implementation-level test runner; acceptance installs nothing and authorizes no
+configuration, no test, no CI change and no `P1` Slice A implementation** — and its
 **depth** half remains untouched under `DG-4`; **CI** remains unselected `P0b` work; and
 ~~**`DDM-1`'s named managed provider remains deferred**, still owing `ADR-010`'s capability
 constraints whenever it is chosen.~~ — **`DDM-1`'s named managed provider is no longer
