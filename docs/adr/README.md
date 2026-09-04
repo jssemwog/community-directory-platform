@@ -8,9 +8,9 @@ later**.
 them.** This directory is that place.
 
 **It holds seven decisions in force.** `ADR-001`, `ADR-002`, `ADR-003`, `ADR-005`, `ADR-006`,
-`ADR-010` and — since 2026-09-03 — `ADR-013` are all **Accepted**; every
-remaining ADR is either **Blocked** on a question the product owner has not been asked, or
-**Not yet writable**. See *The register*.
+`ADR-010` and — since 2026-09-03 — `ADR-013` are all **Accepted**; **`ADR-012` is
+`Proposed`** and therefore **not** in force; every remaining ADR is **Blocked** on a question
+the product owner has not been asked. See *The register*.
 
 ---
 
@@ -133,7 +133,7 @@ forgotten.
 | **`ADR-009`** | Audit-logging approach | **`DG-3`** | **`OQ-14`** — and `NOQ-8`, **taken as one decision** (`DD-7`). **Irreversible if answered late** (`IR-7`) | **Blocked** |
 | **[`ADR-010`](ADR-010-backup-recovery-availability-posture.md)** | Backup, recovery, and availability posture | **`DG-2`** | **Nothing.** ~~**`NOQ-2`, `NOQ-3`**~~ both **Decided** — 2026-07-30, `NOQ-3` amended by ruling **R1** 2026-08-18 — `DD-8`, `DD-9`. **Feeds `ADR-003`** | **Accepted** — 2026-08-19 (issue #69). *In force; work may rely on it.* It discharges `DD-8` and `DD-9`; the **mechanism** and the store remain open (`ADR-003`, `DD-3`, `DD-5`). |
 | **`ADR-011`** | Accessibility standard, level, and supported matrix | **`DG-3`** | **`NOQ-5`, `NOQ-6`** — `DD-10`, `DD-11` | **Blocked** |
-| **`ADR-012`** | Testing strategy — with the administrative boundary as its highest-value target | **`DG-2`** (tooling) · **`DG-4`** (depth) | `docs/07` names **no blocking question of its own** — but the **test tooling follows `ADR-002`**, which is now **`Accepted`** and in force, and testing **depth** is `DG-4`. **It cannot be written in full until `ADR-002` lands** | **Not yet writable** |
+| **[`ADR-012`](ADR-012-test-tooling.md)** | Testing strategy — with the administrative boundary as its highest-value target. **The `Proposed` document decides the test-tooling portion only** | ~~**`DG-2`** (tooling)~~ · **`DG-4`** (depth). **Historical planning classification only** — **`DG-2` is `Resolved`** (2026-08-27, issue #93) and **`ADR-012` is not one of its constituents**, so the tooling portion carries **no live gate**. **`DG-4`** remains the unresolved gate over testing **depth** | **Nothing.** `docs/07` names **no blocking question of its own**; the **test tooling follows `ADR-002`**, which is **`Accepted`** and in force, so ~~it cannot be written in full until `ADR-002` lands~~ — **`ADR-002` landed 2026-08-25 (issue #85) and the test-tooling portion became independently writable**. Testing **depth** remains **`DG-4`** and is **not** drafted | **Proposed** — 2026-09-03 (issue #105). *Under review; **not** in force, and nothing may depend on it.* The proposed decision is **Vitest as the primary implementation-level test runner, beginning with `P1` Slice A**. **Only the test-tooling portion is decided**, and it is decided **prospectively, to enable implementation**; testing **depth**, coverage policy and every release-readiness threshold remain **`DG-4`**. **`DG-2` was already `Resolved` 2026-08-27 (issue #93) before this ADR existed** — this ADR is **not** a `DG-2` constituent, does **not** reopen `DG-2`, and does **not** complete it. No package version, installation, script, configuration, coverage provider, DOM environment, component, browser, accessibility or database-test tooling is selected; **`P1` Slice A is not authorized**; and no persistence technology, `DDM-*` or provisioning decision is made |
 | **[`ADR-013`](ADR-013-managed-postgresql-provider.md)** | **Named managed PostgreSQL provider** — the service and vendor `ADR-003` deferred (`DDM-1`) | **`DG-2`** — **Resolved** 2026-08-27 (issue #93) | **Nothing.** `ADR-003` (Accepted) fixed the engine and the managed posture and **deferred the named provider**, requiring *"a separate, explicit product-owner ruling"*; `ADR-010` (Accepted) supplies the capability filter. **Not named by `docs/07`** — a decision the chain did not anticipate, taking `ADR-013` under *Numbering and filenames* | **Accepted** — 2026-09-03 (issue #103). *In force; work may rely on it.* Published as `Proposed` 2026-09-01 (issue #101, PR #102). The decision is **DigitalOcean Managed PostgreSQL**, the product owner's selection from the governed candidate comparison. **It discharges `DDM-1` only as to the named managed service and vendor** — `DDM-2`–`DDM-10` are untouched. **Acceptance opens no gate**: `DG-2` was already `Resolved` (2026-08-27, issue #93) and this ADR is not a constituent of it. **`ADR-010` is not discharged**: its **independent off-provider copy**, its **restore rehearsals** and its **provider-capability validation** all remain **outstanding**, and naming a provider satisfies none of them. **Render remains the application host only**; and no region, tier, sizing, PostgreSQL version, provisioning, ORM, driver, pooler, migration, schema, index, authentication, secret, backup-mechanism or connectivity decision is made — **implementation remains unauthorized** |
 
 > **Note the ordering, and why it is not an accident.** `ADR-001` is writable immediately.
@@ -143,8 +143,12 @@ forgotten.
 > `Accepted`** — in force since 2026-08-23; the named provider remains **deferred**, and
 > ~~`DG-2` remains **Unresolved**~~ **`DG-2` is `Resolved`** (2026-08-27, issue #93).
 
-**Six of twelve still cannot be written.** That is not a backlog to work around; it is the
-measure of what `DG-1`, `DG-2`, and `DG-3` are holding. See `docs/13-decision-log.md`.
+**Five of twelve still cannot be written** — ~~six~~, until `ADR-012` was drafted as
+`Proposed` on 2026-09-03. That is not a backlog to work around; it is the
+measure of what ~~`DG-1`, `DG-2`, and~~ **`DG-3`** is holding — `DG-1` and `DG-2` are both
+**`Resolved`**. Four of the five (`ADR-004`, `ADR-008`, `ADR-009`, `ADR-011`) wait on **`DG-3`**;
+`ADR-007` sits under the `Resolved` `DG-1` and waits instead on **`OQ-4`**, an **Unresolved shaping
+input**. See `docs/13-decision-log.md`.
 
 **`DG-2`'s closure scope — owner ruling, 2026-08-26 (issue #87).** **`ADR-005` was the final
 remaining substantive `DG-2` constituent, and it is now `Accepted`** — 2026-08-27 (issue #91).

@@ -186,8 +186,11 @@ decision;** it records a gate whose constituents were already complete.
 **`P1` becomes gate-clear** — `DG-1` cleared on 2026-08-04. It is **not** a start order: eligible
 work still has to be commissioned. **`DG-3` and `DG-4` remain `Unresolved`**, so `P3`, `P4` and
 the *verifiability* of `P2` stay blocked by `DG-3`, and the release decision stays `DG-4`.
-**`ADR-004` remains blocked by `DG-3`** even though it sits in the `P0b` table; **`ADR-012`**
-remains unwritten with its depth half under `DG-4`; **CI** remains unselected `P0b` work; and
+**`ADR-004` remains blocked by `DG-3`** even though it sits in the `P0b` table; ~~**`ADR-012`**
+remains unwritten with its depth half under `DG-4`~~ — **`ADR-012`'s tooling half was drafted `Proposed`
+on 2026-09-03 (issue #105), selecting Vitest as the primary implementation-level test runner.**
+It is **not** `Accepted` and **not** in force — acceptance is a separate governed step — and its
+**depth** half remains untouched under `DG-4`; **CI** remains unselected `P0b` work; and
 ~~**`DDM-1`'s named managed provider remains deferred**, still owing `ADR-010`'s capability
 constraints whenever it is chosen.~~ — **`DDM-1`'s named managed provider is no longer
 deferred: `ADR-013` is `Accepted` 2026-09-03 (issue #103) and in force, selecting DigitalOcean
