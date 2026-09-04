@@ -739,8 +739,14 @@ costly.**
 | **Medium** | **Keyboard operability of core flows** | Objectively checkable. |
 | **Supporting** | **Automated accessibility checks** | Necessary, **not sufficient** — and must **not** assert a conformance level (`NOQ-5`). |
 
-**No automation tool, runner, or framework is selected.** What must be *checked* is the
-strategy; *how* is a later decision.
+~~**No automation tool, runner, or framework is selected.**~~ — **`ADR-012` is `Accepted`
+2026-09-04 (issue #107) and in force: Vitest is the primary implementation-level test runner,
+beginning with `P1` Slice A.** That decision is in force; it is **not** an installation, and no
+version, script, configuration or test exists. **No other test layer or tool is selected** — no
+coverage provider and no coverage threshold, no DOM environment, and no component,
+browser/end-to-end, accessibility or database-test tooling — and testing **depth** remains
+`DG-4`, **`Unresolved`**. What must be *checked* is the
+strategy; *how* remains a later decision except where `ADR-012` decides it.
 
 ---
 
