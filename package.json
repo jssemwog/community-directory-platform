@@ -4,7 +4,7 @@
   "private": true,
   "description": "Community Directory Platform — MVP application scaffold (P0b, issue #95).",
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "dev": "next dev",
