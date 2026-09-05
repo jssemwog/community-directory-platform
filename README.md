@@ -11,7 +11,7 @@ chain wins.**
 
 ## Prerequisites
 
-- **Node.js** `>=20.9.0` (developed against 22.12.0)
+- **Node.js** `>=22.12.0` (minimum supported; developed and tested against 22.12.0)
 - **npm** (bundled with Node; the package manager for this repository, per the
   owner ruling recorded on issue #95)
 
