@@ -23,6 +23,7 @@ npm run dev      # start the development server
 npm run build    # production build
 npm start        # run the production build
 npm run typecheck # TypeScript, no emit
+npm test         # run the test suite once (Vitest, non-watch)
 ```
 
 The development server serves two structural surfaces:
@@ -56,8 +57,20 @@ what it holds and what may not be decided inside it.
 
 No database connectivity, provider, driver, ORM, migration, or schema · no
 authentication or identity provider · no CI pipeline · no deployment or
-hosting configuration · no test framework · no linting tooling · no product
+hosting configuration · no linting tooling · no product
 feature of any kind.
 
 Each absence is a recorded decision, not an oversight. See issue #95 and
 `docs/12-implementation-plan.md` (`P0b`).
+
+## Tests
+
+**Vitest is installed and enabled** as the implementation of Accepted `ADR-012`,
+and `npm test` runs it once, without watch mode. No Vitest configuration file
+exists; the runner's defaults are used.
+
+The only committed test is a **tooling verification test**
+(`tests/vitest-runner.test.ts`), which proves the runner executes. **No `P1`
+Slice A or domain tests exist yet** — that is issue #109 — and **CI does not run
+tests**; wiring the test command into CI, and making a test check required,
+remain separate later governed work.

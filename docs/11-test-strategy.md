@@ -741,8 +741,13 @@ costly.**
 
 ~~**No automation tool, runner, or framework is selected.**~~ — **`ADR-012` is `Accepted`
 2026-09-04 (issue #107) and in force: Vitest is the primary implementation-level test runner,
-beginning with `P1` Slice A.** That decision is in force; it is **not** an installation, and no
-version, script, configuration or test exists. **No other test layer or tool is selected** — no
+beginning with `P1` Slice A.** That decision is in force and **has now been installed and
+enabled** (issue #110): Vitest is a development dependency, `npm test` runs it once without
+watch mode, and one **tooling verification test** proves the runner executes. **No Vitest
+configuration file exists** — the runner's defaults are used — and **no `P1` Slice A or domain
+test exists yet** (issue #109). **CI does not run tests**; wiring the test command into CI, and
+making a test check required, remain separate later governed work. **No other test layer or
+tool is selected** — no
 coverage provider and no coverage threshold, no DOM environment, and no component,
 browser/end-to-end, accessibility or database-test tooling — and testing **depth** remains
 `DG-4`, **`Unresolved`**. What must be *checked* is the
