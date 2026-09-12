@@ -14,11 +14,17 @@ resolved by code placed here:
   them.
 - **`DD-1`, `DDM-2`–`DDM-10`** — no schema, key, index, identity strategy,
   category representation, revision storage, or migration tooling is decided.
-- **No ORM, data-access library, driver, or pooler is selected.**
+- **No PostgreSQL driver or client, and no connection pooler, is selected.**
 
 A placeholder repository or a stub client would encode assumptions about all
 of the above. Issue #95 therefore adds none, and the application is
 **datastore-independent at runtime** at scaffold time.
+
+Kysely is selected as the `C9` PostgreSQL data-access approach under `Accepted`
+`ADR-014` (2026-09-11, issue #117). **The PostgreSQL driver/client and the
+pooler remain deferred and unselected**, and this decision does not by itself
+establish a persistence implementation: nothing is installed, and no code is
+authorized here.
 
 Two obligations bind whatever eventually lands here:
 

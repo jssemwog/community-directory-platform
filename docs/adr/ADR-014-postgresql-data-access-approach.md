@@ -2,22 +2,27 @@
 
 | Field | Value |
 |---|---|
-| **Status** | **`Proposed`** |
-| **Date** | 2026-09-09 |
+| **Status** | **`Accepted`** |
+| **Date** | 2026-09-11 |
 | **Decision owner** | **Joe S.** — product owner / architecture owner (`docs/13`, *Gate summary*) |
 | **Decision gate** | *none* — `DG-2` is **`Resolved`** (2026-08-27, issue #93) and this ADR is **not** one of its constituents; `DG-1` is **`Resolved`** (2026-08-04) |
 | **Related open questions** | **Depends on:** nothing unresolved. `ADR-002`, `ADR-003`, `ADR-005`, `ADR-006`, `ADR-010`, `ADR-012` and `ADR-013` are all **Accepted** and supply every constraint this decision must satisfy. **Must NOT answer:** **`DDM-10`** (migration and schema-evolution tooling), **`DDM-2`–`DDM-9`** (physical data design), `OQ-4`, `OQ-5`, `OQ-14`/`NOQ-8`, `NOQ-9`, `DG-3`, `DG-4` |
 | **Supersedes** | *none* |
 | **Superseded by** | *none* |
 
-> **`Proposed`, and therefore NOT in force.** Per `docs/adr/README.md`, a `Proposed` ADR is
-> *"Drafted and under review. The decision is **not yet in force**; nothing may depend on it."*
-> No work may rely on this document. Acceptance is a **separate governed step** with its own
-> issue and pull request, following the `ADR-005` (issue #89 / PR #90, then issue #91 / PR #92),
-> `ADR-013` (issue #101 / PR #102, then issue #103 / PR #104) and `ADR-012` (issue #105 / PR
-> #106, then issue #107 / PR #108) precedent. **This document is not installation and not
-> authorization**: it installs no dependency, writes no persistence code, creates no schema, and
-> authorizes no implementation.
+> **`Accepted`, and therefore in force.** Per `docs/adr/README.md`, an `Accepted` ADR is
+> *"Decided and **in force**. Work may rely on it."* The product owner accepted this decision on
+> **2026-09-11** — **Kysely is the selected `C9` PostgreSQL data-access approach** — following the
+> `Proposed`-stage publication of **2026-09-09** recorded on **issue #115** and merged by **PR
+> #116**, and the separate governed acceptance step recorded on **issue #117**; the `ADR-005`
+> (issue #89 / PR #90, then issue #91 / PR #92), `ADR-013` (issue #101 / PR #102, then issue #103
+> / PR #104) and `ADR-012` (issue #105 / PR #106, then issue #107 / PR #108) precedent. **Later
+> `C9` implementation may rely on the selected approach.** But **acceptance is not installation
+> and not implementation authorization**: it installs no dependency — **Kysely is the `Accepted`
+> approach decision, not an installed package** — writes no persistence code, creates no schema,
+> and authorizes no implementation. **Every matter this ADR defers remains deferred**: the
+> PostgreSQL driver/client and the connection pooler stay unselected, `DDM-2`–`DDM-9` stay
+> unresolved, and `DDM-10` stays unresolved and separately governed.
 
 ---
 
@@ -25,8 +30,9 @@
 
 **`C9` is empty, and that emptiness is load-bearing.** `src/data/README.md` records it in those
 words, and records why: a placeholder repository or a stub client *"would encode assumptions"*
-about every unresolved physical data decision. Consequently **no ORM, data-access library,
-driver, or pooler is selected** — the deferral being owner **ruling `R-A`**, originated in
+about every unresolved physical data decision. Consequently, **as at 2026-09-09**, **no ORM,
+data-access library, driver, or pooler was selected** — the deferral being owner **ruling `R-A`**,
+originated in
 `ADR-002` (*"This ADR selects **no** ORM, data-access library, query builder, PostgreSQL client,
 or migration tool"*) and re-asserted verbatim in `ADR-005`, `ADR-012` and `ADR-013`.
 
@@ -322,7 +328,7 @@ hand-written runner, no schema can be created at all.
 
 ### The boundary this ADR holds
 
-**This proposal does not resolve `DDM-10`.**
+**This decision does not resolve `DDM-10`.**
 
 **Migration and schema-evolution tooling remains separately governed after this data-access
 decision.**
@@ -335,14 +341,14 @@ any single candidate. Under **every** option — including the two that narrow i
 separately governed `DDM-10` work unit **remains required**, so that the consequence is recorded
 deliberately rather than absorbed. That work unit is **not authorized and is not created here**.
 
-## Proposed recommendation
+## Decision
 
-**We propose to adopt a typed SQL query-builder approach for `C9`'s PostgreSQL access —
-specifically Kysely. The PostgreSQL driver/client is deliberately NOT selected** and remains an
+**A typed SQL query-builder approach is adopted for `C9`'s PostgreSQL access — specifically
+Kysely. The PostgreSQL driver/client is deliberately NOT selected** and remains an
 implementation-time deferred choice under Issue #115's reversibility rule.
 
 **What is not being claimed.** Selecting a schema-declaration-oriented technology such as Prisma
-or Drizzle **would not decide `DDM-2`–`DDM-9` today**, and this proposal does not argue that it
+or Drizzle **would not decide `DDM-2`–`DDM-9` today**, and this decision does not argue that it
 would. Those decisions belong to the later physical-persistence work unit under their own
 governance, whichever access approach is chosen, and they remain unresolved either way. The
 distinction between **technology coupling** and **decision resolution** is preserved throughout:
@@ -350,7 +356,8 @@ what follows is a coupling argument, not a claim that any candidate resolves a `
 `DDM-10` openness treated as decisive on its own — **two** candidates leave it open, and the
 owner's approval of the governance split is not itself a reason to prefer one of them.
 
-The case for Kysely rests on four grounds that hold independently of one another:
+The case for Kysely, on which the owner ruled, rests on four grounds that hold independently of
+one another:
 
 1. **It dominates direct `pg` on the same `DDM-10` footing.** Both leave `DDM-10` genuinely open,
    so `DDM-10` does not discriminate between them — but Kysely adds typed query construction and
@@ -377,21 +384,25 @@ The case for Kysely rests on four grounds that hold independently of one another
    restore validation and debugging easier.
 
 **Its costs are real and are not minimised.** The **hand-written `DB` interface must be kept in
-step with the schema**, and **drift between them is this recommendation's principal risk** — the
+step with the schema**, and **drift between them is this decision's principal risk** — the
 one place where its type safety could become a false assurance. `C9` will carry more hand-written
 mapping than either ORM would require. The library is **pre-1.0** by version number. And it
 forgoes the schema-generated developer convenience that Prisma and Drizzle genuinely provide,
 which for a single maintainer is a real loss, not a rounding error.
 
-**Drizzle is a genuinely close alternative**, and an owner who weighs schema-derived type safety
-and day-to-day ergonomics above authoring-locus separation should select it; the evidence supports
-that reading. **Prisma, correctly classified as narrowing rather than foreclosing `DDM-10`**, is
-the most productive option compared here and remains a legitimate choice at a higher coupling and
+**Drizzle was a genuinely close alternative**, and an owner weighing schema-derived type safety
+and day-to-day ergonomics above authoring-locus separation could have selected it; the evidence
+supports that reading, and it is preserved here so the argument survives the ruling (`IR-6`).
+**Prisma, correctly classified as narrowing rather than foreclosing `DDM-10`**, is
+the most productive option compared here and was a legitimate choice at a higher coupling and
 footprint cost. **Direct `pg` is rejected for implementation burden and absent result typing —
-not** because of anything to do with `DDM-10`, on which it scores identically to the
-recommendation.
+not** because of anything to do with `DDM-10`, on which it scores identically to the selected
+approach.
 
-**This is a recommendation for owner consideration, not a decision in force.**
+**The product owner ruled on 2026-09-11: Kysely will be the PostgreSQL data-access approach for
+`C9`.** That ruling is recorded here as **authoritative for later `C9` implementation**, and this
+ADR is `Accepted` and in force. **It selects the access approach and nothing else** — see *Selects
+nothing else*.
 
 ## Rejected alternatives
 
@@ -446,8 +457,8 @@ reversal degrades toward the cost of rewriting the application.
 
 | Risk | Consequence | Response |
 |---|---|---|
-| The hand-written schema-describing interface drifts from the actual schema | Type safety becomes a false assurance — the failure mode this recommendation most plausibly suffers | Treat the interface as reviewed artifact, verified against the schema at the integration level; this ADR selects no mechanism |
-| This ADR is read as authorizing persistence implementation | `src/data/` is populated, a dependency installed, or a schema created on the strength of a `Proposed` document | The header callout: `Proposed` is not in force, is not installation, and authorizes nothing |
+| The hand-written schema-describing interface drifts from the actual schema | Type safety becomes a false assurance — the failure mode this decision most plausibly suffers | Treat the interface as reviewed artifact, verified against the schema at the integration level; this ADR selects no mechanism |
+| **Acceptance is read as implementation authorization** | `src/data/` is populated, Kysely or a driver is installed, or a schema is created on the strength of this ADR alone | The header callout: acceptance puts the **approach decision** in force and **is not installation** — no Kysely installation, no driver/client selection, no pooler selection, no dependency installation, no persistence implementation, and no schema, index, migration or provisioning authorization. Each remains a separate later work unit with its own owner authorization |
 | This ADR is read as deciding `DDM-10` | The approved governance split collapses and migration tooling is adopted silently | The `DDM-10` section classifies every candidate and states twice that `DDM-10` is unresolved; `docs/08` is left unamended |
 | Physical design is smuggled in with the first persistence pull request | `DDM-2`–`DDM-9` get answered by an engineer, which is `IR-1` | The recommended approach does not require a schema declaration, so the physical decisions must be taken explicitly to be taken at all |
 | The recorded version facts are treated as pins | An RC or a stale version is installed on this document's authority | Versions are recorded as dated evidence and explicitly non-normative; the version line is an implementation-time decision, re-verified then |
@@ -528,22 +539,23 @@ Sources consulted:
 - DigitalOcean official documentation — Managed PostgreSQL limits, including supported
   PostgreSQL versions, connection limits, connection pooling and point-in-time-recovery window.
 
-## Owner-decision status and next lifecycle step
+## Owner-decision status and lifecycle
 
-**Status: `Proposed`. Not `Accepted`. Not in force. Nothing may depend on it.**
+**Status: `Accepted`. In force since 2026-09-11. Later `C9` implementation may rely on it.**
 
-**No owner acceptance has occurred, and this document claims none.** The recommendation above is
-put to the product owner for consideration; the owner may select any option compared here,
-including one this proposal rejects, and the rejection rationale is recorded so that the argument
-survives either way (`IR-6`).
+**Owner acceptance has occurred.** The product owner ruled on **2026-09-11** that **Kysely will be
+the PostgreSQL data-access approach for `C9`**, through the separate governed acceptance work unit
+recorded on **issue #117**, following this document's `Proposed`-stage publication of
+**2026-09-09** (**issue #115**, **PR #116**) and the mandatory detailed owner review of it. The
+owner could have selected any option compared here, including one this document rejects; the
+rejection rationale is preserved so that the argument survives the ruling (`IR-6`).
 
-**Next lifecycle step:** the mandatory detailed owner review of this proposal, followed — only if
-the owner rules — by a **separate governed acceptance step** with its own issue and pull request,
-per the `ADR-005`, `ADR-013` and `ADR-012` precedent. Acceptance would put the **access-approach
-decision** in force and nothing more: it would authorize no dependency installation, no `C9`
-implementation, no schema, no migration and no provisioning, each of which remains a separate
-later work unit requiring its own owner authorization. **The separately governed `DDM-10` work
-unit is required regardless of which option is accepted, and is not created by this document.**
+**What acceptance put in force, and what it did not.** Acceptance puts the **access-approach
+decision** in force and **nothing more**. It **installs Kysely nowhere** and authorizes **no**
+dependency installation, **no** `C9` implementation, **no** driver/client or pooler selection,
+**no** schema, index or constraint, **no** migration and **no** provisioning — each remains a
+separate later work unit requiring its own owner authorization. **The separately governed `DDM-10`
+work unit is required regardless, and is not created by this document.**
 
 ## Traceability
 
@@ -553,5 +565,5 @@ unit is required regardless of which option is accepted, and is not created by t
 | **Journeys** | `V1`–`V7`, `L1`–`L4`, `A3`–`A7` — served transitively through `C9`; none implemented here |
 | **Components** | **`C9`** — Listing Repository, the single data-access path (`docs/07`; `ADR-002` `O-1`). `C4`–`C8` are unaffected and remain `P2`–`P4` work |
 | **Invariants** | `DI-1`–`DI-11`, `BI-7`, `BI-8` — this decision breaches none and **proves none**; they are proven at the level they are enforced (`IP-5`), which for atomicity is the integration level in a later slice |
-| **Documents amended** | `docs/adr/README.md` (register row and the in-force summary) and `docs/traceability-matrix.md` (register row) — the `Proposed`-stage surface established by `ADR-013` (PR #102). `docs/07`, `docs/08`, `docs/11`, `docs/12` and `docs/13` are **deliberately untouched**: no statement in them becomes false because this ADR is `Proposed`, and each records data access and migration tooling as deferred, which remains true |
-| **Issue / pull request** | Issue **#115**. No pull request exists; nothing is staged, committed or pushed |
+| **Documents amended** | **At the earlier `Proposed` stage (issue #115, PR #116):** this file, `docs/adr/README.md` (register row and the in-force summary) and `docs/traceability-matrix.md` (register row) — the `Proposed`-stage surface established by `ADR-013` (PR #102). **At acceptance (issue #117), by owner ruling on the acceptance file surface:** this file, `docs/adr/README.md` (the `ADR-014` register row and the derived decisions-in-force count, recalculated from eight to nine), `docs/traceability-matrix.md` (register row) and **`src/data/README.md`** — whose *"No ORM, data-access library, driver, or pooler is selected"* is a present-tense **repository** claim that acceptance makes partially false, corrected minimally and documentation-only, with the driver/client and pooler deferrals preserved. **`docs/07`, `docs/08`, `docs/11`, `docs/12` and `docs/13` remain deliberately untouched** at both stages, by the same owner ruling: no statement in them becomes false, and each records migration tooling and physical data design as deferred, which remains true. **`docs/08`'s `DDM-10` row is left unamended.** **No gate is marked `Resolved`** — `DG-2` was already `Resolved` (2026-08-27, issue #93) and this ADR is not a constituent of it; `DG-4` is unchanged |
+| **Issue / pull request** | **Proposed:** issue **#115** — `architecture: decide the PostgreSQL data-access approach for C9`; pull request **#116** — `docs: propose ADR-014 Kysely for C9 PostgreSQL data access`, merged 2026-09-09. **Accepted:** issue **#117** — `architecture: accept ADR-014 Kysely for C9 PostgreSQL data access` |
