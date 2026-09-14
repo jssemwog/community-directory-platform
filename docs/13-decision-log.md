@@ -208,10 +208,12 @@ than 24 hours behind committed live data (`NFR-BACK-06`, as amended by ruling **
 **pre-launch and quarterly restore rehearsals** (`NFR-BACK-02`, `NFR-BACK-05`) remain
 **outstanding**. The provider-loss recovery obligations stay **the project's**, not the
 provider's. **Nothing is provisioned** — no DigitalOcean account, billing commitment or
-cluster exists, and no region, tier, sizing or PostgreSQL version is selected. **`DDM-2`–`DDM-10`
-remain unresolved**, and every provisioning, connectivity, secrets, ORM, driver, pooler,
-migration, schema, index, authentication and backup-mechanism decision **remains deferred and
-separately governed**.
+cluster exists, and no region, tier, sizing or PostgreSQL version is selected. ~~**`DDM-2`–`DDM-10`
+remain unresolved**~~ — **`DDM-2`–`DDM-9` remain unresolved; `DDM-10` is resolved by `Accepted`
+`ADR-015` (2026-09-14, issue #121), selecting Kysely's built-in `Migrator`** — and every
+provisioning, connectivity, secrets, ORM, driver, pooler, ~~migration,~~ migration-content,
+migration-execution, rollback, schema, index, authentication and backup-mechanism decision
+**remains deferred and separately governed**.
 
 | ID | Question | Class | Status | Needed by | Blocks or shapes | Source | Outcome |
 |---|---|---|---|---|---|---|---|

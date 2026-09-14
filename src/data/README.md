@@ -12,8 +12,8 @@ resolved by code placed here:
 - **`DDM-1`** — the named managed service and vendor remain **deferred** by
   owner ruling, and `ADR-010`'s provider-capability validation travels with
   them.
-- **`DD-1`, `DDM-2`–`DDM-10`** — no schema, key, index, identity strategy,
-  category representation, revision storage, or migration tooling is decided.
+- **`DD-1`, `DDM-2`–`DDM-9`** — no schema, key, index, identity strategy,
+  category representation, or revision storage is decided.
 - **No PostgreSQL driver or client, and no connection pooler, is selected.**
 
 A placeholder repository or a stub client would encode assumptions about all
@@ -25,6 +25,12 @@ Kysely is selected as the `C9` PostgreSQL data-access approach under `Accepted`
 pooler remain deferred and unselected**, and this decision does not by itself
 establish a persistence implementation: nothing is installed, and no code is
 authorized here.
+
+Kysely's built-in `Migrator` is selected as the migration and schema-evolution
+tooling (`DDM-10`) under `Accepted` `ADR-015` (2026-09-14, issue #121).
+**Nothing is installed**, the PostgreSQL driver/client and the Kysely dialect
+remain unselected, no migration exists, and no migration or persistence code
+is authorized here.
 
 Two obligations bind whatever eventually lands here:
 

@@ -2,30 +2,28 @@
 
 | Field | Value |
 |---|---|
-| **Status** | **`Proposed`** |
-| **Date** | 2026-09-13 |
-| **Decision owner** | **Joe S.** — product owner / architecture owner (`docs/13`, *Gate summary*). **No owner ruling has occurred.** |
+| **Status** | **`Accepted`** |
+| **Date** | 2026-09-14 |
+| **Decision owner** | **Joe S.** — product owner / architecture owner (`docs/13`, *Gate summary*). **Ruled 2026-09-14.** |
 | **Decision gate** | *none* — `DG-2` is **`Resolved`** (2026-08-27, issue #93) and this ADR is **not** one of its constituents; `DG-1` is **`Resolved`** (2026-08-04) |
 | **Related open questions** | **Depends on:** nothing unresolved. `ADR-002`, `ADR-003`, `ADR-005`, `ADR-006`, `ADR-010`, `ADR-012`, `ADR-013` and `ADR-014` are all **Accepted** and supply every constraint this decision must satisfy. **Must NOT answer:** **`DDM-2`–`DDM-9`** (physical data design), the **PostgreSQL driver/client**, the **Kysely dialect**, the **connection pooler**, migration **execution environment and timing**, **rollback policy**, `OQ-4`, `OQ-5`, `OQ-14`/`NOQ-8`, `NOQ-9`, `DG-3`, `DG-4` |
 | **Supersedes** | *none* |
 | **Superseded by** | *none* |
 
-> **`Proposed`. NOT `Accepted`, and therefore NOT in force.** Per `docs/adr/README.md`, a
-> `Proposed` ADR is *"Drafted and under review. The decision is **not yet in force**; nothing may
-> depend on it."*
+> **`Accepted`, and therefore in force.** Per `docs/adr/README.md`, an `Accepted` ADR is
+> *"Decided and **in force**. Work may rely on it."* The product owner ruled on **2026-09-14** that
+> **Kysely Migrator is selected as the migration and schema-evolution tooling approach for
+> `DDM-10`**, following this document's `Proposed`-stage publication of **2026-09-13** (issue
+> **#119**, merged by PR **#120** on 2026-09-14) and the separate governed acceptance step recorded
+> on issue **#121**. **`DDM-10` is resolved by this `Accepted` ADR.**
 >
-> **The product owner has not selected migration or schema-evolution tooling.** This document
-> contains an **evidence-based recommendation for owner consideration**, and a recommendation is
-> **not** an accepted decision. No implementation may depend on it. The owner may select any
-> candidate compared here, including one this document does not recommend, or may direct further
-> evidence-gathering.
->
-> **Nothing is installed and nothing is authorized.** This draft installs no package, writes no
-> migration, creates no schema, selects no PostgreSQL driver/client, no Kysely dialect and no
-> pooler, resolves no `DDM-2`–`DDM-9`, and authorizes no implementation, provisioning or CI change.
->
-> Acceptance, if it comes, is a **separate governed work unit** with its own issue and its own
-> owner ruling.
+> **Acceptance is not installation and not implementation authorization.** Kysely is not
+> installed, and Kysely `Migrator` is not installed; no migration exists, no schema exists, and no
+> persistence code exists. Acceptance selects **no** PostgreSQL runtime driver/client, **no** Kysely
+> dialect, **no** application pool and **no** external pooler; resolves **no** `DDM-2`–`DDM-9`; and
+> authorizes **no** dependency installation, migration, provisioning, CI database infrastructure or
+> other implementation — each remains a separate later work unit requiring its own owner
+> authorization.
 
 ---
 
@@ -366,13 +364,29 @@ hand. A migration history that is legible and replayable helps a human verify th
 it does not enforce it. **No mechanism for detecting drift is selected here** — that would be a
 separate decision.
 
-## Recommendation — for owner consideration only
+## Decision
 
-> **RECOMMENDATION, NOT A DECISION.** The product owner has not ruled. Nothing below is in force,
-> and no implementation may rely on it.
+**Kysely Migrator is selected as the migration and schema-evolution tooling approach for
+`DDM-10`.** The product owner ruled on **2026-09-14**. That ruling is recorded here as
+**authoritative**, and `DDM-10` is resolved by this `Accepted` ADR through the selection of Kysely's
+built-in `Migrator`. **It selects the mechanism and nothing else** — see *This ADR selects nothing
+else*.
 
-**The evidence supports recommending Category A — Kysely's built-in `Migrator` — as the migration
-and schema-evolution mechanism**, on two grounds that hold independently of one another:
+**The owner's reasons, as ruled:**
+
+1. Kysely is already the accepted `C9` PostgreSQL data-access approach under `ADR-014`.
+2. Kysely `Migrator` requires no additional migration-specific package beyond Kysely itself.
+3. It provides migration ordering, migration-history tracking and locking without requiring a
+   hand-built migration runner.
+4. It avoids introducing earlier migration-side `pg` coupling before the separately deferred runtime
+   PostgreSQL driver/client decision.
+5. The owner accepts the trade-off that migration-history tooling becomes coupled to Kysely.
+   `node-pg-migrate` offers stronger independence and portability, but for the MVP operational
+   simplicity, fewer moving parts and avoiding earlier migration-side driver coupling are weighted
+   more highly.
+
+**The analytical case recorded at the `Proposed` stage**, on which the owner ruled, rests on two
+grounds that hold independently of one another:
 
 1. **It keeps the deferred driver decision free of earlier migration-side pressure.** `ADR-014`
    deliberately left the driver/client and dialect unselected as *"an implementation-time deferred
@@ -400,25 +414,25 @@ satisfy it equally, so it does not discriminate among the finalists.
 which `node-pg-migrate` would avoid entirely. If the access approach is ever replaced, migrations
 authored through the schema builder are written in a departed library's idiom. **`node-pg-migrate`
 is genuinely better on portability**, and an owner who weighs independence of the migration history
-above avoiding earlier migration-side `pg` coupling could reasonably select it — that argument is sound and is
+above avoiding earlier migration-side `pg` coupling could reasonably have selected it — that argument is sound and is
 preserved here so it survives the ruling (`IR-6`). Two secondary costs: the CLI is non-core, so
 either `kysely-ctl` is adopted as a narrower later choice or the `Migrator` is invoked
 programmatically; and `kysely-ctl`'s current peer range excludes the `0.30` line.
 
-**Robustness.** The recommendation rests on **verified** facts — package metadata, official
+**Robustness.** The decision rests on **verified** facts — package metadata, official
 migration documentation, and `ADR-014`'s accepted text. Its weakest supporting element is the
 precise transaction-mode behaviour flagged for revalidation, which affects *how* transactions are
-configured, **not** whether the recommendation holds. **It is a recommendation the owner can
-reasonably reject**, and the strongest counter-argument — migration-history portability — is stated
-above rather than buried.
+configured, **not** whether the decision holds. **The owner could reasonably have ruled otherwise**,
+and the strongest counter-argument — migration-history portability — is stated above rather than
+buried.
 
-### What the recommendation would and would not settle
+### What the decision settles and does not settle
 
-**If accepted**, it would settle: the migration and schema-evolution **mechanism**; the ordering
-model inseparable from it (alpha-numeric by migration name, order-enforced by default); and the
-availability of that tool's locking and transaction facilities.
+**It settles**: the migration and schema-evolution **mechanism**; the ordering model inseparable
+from it (alpha-numeric by migration name, order-enforced by default); and the availability of that
+tool's locking and transaction facilities.
 
-**It would leave open** — and these must not be read as settled by any acceptance of this ADR:
+**It leaves open** — and these must not be read as settled by this acceptance:
 
 - the **authoring format**, since the `Migrator` permits raw SQL, the schema builder and ordinary
   queries. **This ADR does not choose among them**, and imposes no rule that migrations must take
@@ -434,11 +448,11 @@ availability of that tool's locking and transaction facilities.
 
 Classified precisely. **Nothing here is called impossible that is merely a poor fit.**
 
-| Alternative | Classification and why it is not recommended |
+| Alternative | Classification and why it is not selected |
 |---|---|
-| **`node-pg-migrate`** (category B) | **Valid, actively maintained, and a legitimate choice — not recommended on driver coupling.** Published 2026-09-05, ESM, TypeScript/JS/SQL authoring, order checking on by default, advisory locking with configurable contention, single-transaction default, and a documented refusal to replay across a schema mismatch. It is **better than the recommendation on portability**, which is a real advantage, not a consolation. It is not recommended because its **required non-optional `pg` peer dependency** constrains one migration-side client choice earlier and creates governance and implementation-convenience pressure toward `pg` — without selecting the runtime driver, which stays deferred, and without foreclosing a two-client configuration — and because it adds a tool and a dependency tree where the recommendation adds no migration-specific package beyond Kysely itself. **An owner weighing migration-history independence above avoiding earlier migration-side `pg` coupling and pressure should select it.** |
+| **`node-pg-migrate`** (category B) | **Valid, actively maintained, and a legitimate choice — not selected, on driver coupling.** Published 2026-09-05, ESM, TypeScript/JS/SQL authoring, order checking on by default, advisory locking with configurable contention, single-transaction default, and a documented refusal to replay across a schema mismatch. It is **better than the selected approach on portability**, which is a real advantage, not a consolation. It is not selected because its **required non-optional `pg` peer dependency** constrains one migration-side client choice earlier and creates governance and implementation-convenience pressure toward `pg` — without selecting the runtime driver, which stays deferred, and without foreclosing a two-client configuration — and because it adds a tool and a dependency tree where the selected approach adds no migration-specific package beyond Kysely itself. **An owner weighing migration-history independence above avoiding earlier migration-side `pg` coupling and pressure could have selected it.** |
 | **`postgres-migrations`** (category B) | **Valid but stale.** Last published 2021-07-20 with registry metadata unchanged since 2022-05-13 — roughly five years — and CommonJS against this repository's ESM posture. Not recommended on **currency**, not on design. |
-| **Raw SQL with a hand-written runner** (category D) | **Valid, and the most portable option of all — not recommended on build-and-maintain cost.** It would require hand-writing ordering enforcement, the applied-history table, advisory locking and failure semantics, each a silent-failure surface, for a single maintainer. `ADR-014` already counted a hand-built migration runner as a cost against direct `pg`. **Note carefully:** rejecting a hand-written *runner* does not reject *raw SQL as an authoring format* — that remains available under the recommendation and is expressly not decided here. |
+| **Raw SQL with a hand-written runner** (category D) | **Valid, and the most portable option of all — not recommended on build-and-maintain cost.** It would require hand-writing ordering enforcement, the applied-history table, advisory locking and failure semantics, each a silent-failure surface, for a single maintainer. `ADR-014` already counted a hand-built migration runner as a cost against direct `pg`. **Note carefully:** rejecting a hand-written *runner* does not reject *raw SQL as an authoring format* — that remains available under the selected mechanism and is expressly not decided here. |
 | **Flyway** (category C) | **Valid but a poor fit at higher cost.** Mature and PostgreSQL-capable; introduces a **JVM-oriented toolchain** into an all-Node, single-maintainer repository, and its Teams/Enterprise capabilities are per-user paid supersets of the open-source Community edition. Rejected on **runtime and operational footprint**, not capability. |
 | **Liquibase** (category C) | **Valid but a poor fit, with a licensing consideration.** Same JVM footprint argument. Additionally, **from version 5.0 Liquibase Community is licensed under FSL-1.1-ALv2** — source-available with delayed Apache-2.0 conversion — a materially different posture from the MIT and Apache-2.0 licences elsewhere in this stack, and worth the owner's deliberate attention rather than a silent adoption. |
 | **Atlas** (category C) | **Valid but a poor fit, and partly unverified.** A standalone Go binary is a second runtime to install and pin; a free Starter tier exists with paid Pro and Enterprise tiers above it, and **the community edition's exact licence could not be confirmed** and is flagged for verification. Rejected on **footprint and unresolved licensing evidence**. |
@@ -448,7 +462,7 @@ Classified precisely. **Nothing here is called impossible that is merely a poor 
 
 ## Consequences
 
-Stated for the recommendation **if the owner were to accept it**. Acceptance has not occurred.
+Stated for the **accepted decision** (2026-09-14).
 
 **Positive:**
 
@@ -465,7 +479,7 @@ Stated for the recommendation **if the owner were to accept it**. Acceptance has
 
 **Negative:**
 
-- **The migration history becomes coupled to Kysely.** This is the recommendation's principal cost,
+- **The migration history becomes coupled to Kysely.** This is the decision's principal cost,
   and `node-pg-migrate` would not incur it.
 - The CLI is non-core; either an additional optional package or programmatic invocation is needed,
   and the optional package's current peer range excludes the `0.30` line.
@@ -488,7 +502,7 @@ that spectrum is determined later, deliberately.
 | Application connection pool; external pooler | **Unresolved and unselected** |
 | `DDM-2`–`DDM-9` | **All unresolved** |
 | Migration contents; any table, column, key, constraint, index | **Unresolved; none appears in this document** |
-| Migration authoring format | **Open** — the recommended facility permits several; none is chosen |
+| Migration authoring format | **Open** — the selected facility permits several; none is chosen |
 | Migration execution environment and timing | **Unresolved** — startup, deployment, CI, workstation and dedicated-job postures are all unselected |
 | Rollback / down-migration **policy** | **Unresolved** — capability is not policy |
 | PostgreSQL version; DigitalOcean region, tier, sizing; provisioning | **Unresolved; no provisioning authorized** |
@@ -510,21 +524,21 @@ that spectrum is determined later, deliberately.
 
 | Risk | Consequence | Response |
 |---|---|---|
-| **Acceptance is read as implementation authorization** | A package is installed, a driver chosen, or a schema created on this document's strength | The header callout. Acceptance would put a **mechanism decision** in force and **nothing more**; installation, driver/dialect/pooler selection, schema, migrations, provisioning and CI each remain separate later work units |
+| **Acceptance is read as implementation authorization** | A package is installed, a driver chosen, or a schema created on this document's strength | The header callout. Acceptance puts a **mechanism decision** in force and **nothing more**; installation, driver/dialect/pooler selection, schema, migrations, provisioning and CI each remain separate later work units |
 | **The describing interface drifts from the actual schema** | Type safety becomes a false assurance — `ADR-014`'s named principal risk | Inherited, not solved. **No drift-detection mechanism is selected here**; that is a later, separate decision |
 | **A tool's requirements settle the deferred driver question** | `ADR-014`'s deliberate deferral is decided by momentum — `IR-1` | Driver coupling is analysed above as an explicit criterion. **No driver or dialect is selected by this ADR** |
 | **A duplicate schema source of truth is introduced** | Two artifacts describe one schema and diverge | Made a REQUIRED criterion; category E is not recommended precisely on this ground |
 | **Migrations are applied out of order** | Silent, severe schema corruption | Both finalists enforce ordering by default; a hand-written runner is not recommended partly for this reason. **No naming convention is imposed beyond what the selected candidate implies** |
 | **Concurrent migration execution** | Duplicate or interleaved application | Both finalists provide database-level or advisory locking. **Where migrations run remains unselected**, so this is recorded as a capability |
 | **Tool abandonment** | Maintenance falls to this project | Currency was verified on 2026-09-13 and is flagged for revalidation. `postgres-migrations` is excluded on exactly this evidence |
-| **Coupling of migration history to the access library** | Replacing Kysely later leaves migrations in a departed idiom | Stated as the recommendation's principal cost, not minimised; raw SQL authoring remains available, and the format is deliberately **not** decided here |
+| **Coupling of migration history to the access library** | Replacing Kysely later leaves migrations in a departed idiom | Stated as the decision's principal cost, not minimised; raw SQL authoring remains available, and the format is deliberately **not** decided here |
 | **Mutable facts treated as pins** | A beta or alpha line installed on this document's authority | Every version figure is dated, non-normative evidence; *Facts requiring revalidation* names what must be re-checked |
 
 ## Open questions this decision must NOT answer
 
 | Open question | How this decision avoids answering it |
 |---|---|
-| **PostgreSQL driver / client** | Driver coupling is analysed as an **evaluation criterion**; no client is selected, and the recommendation is argued partly *because* it avoids earlier migration-side `pg` coupling and pressure, while the future driver decision remains to be made |
+| **PostgreSQL driver / client** | Driver coupling is analysed as an **evaluation criterion**; no client is selected, and the decision is made partly *because* it avoids earlier migration-side `pg` coupling and pressure, while the future driver decision remains to be made |
 | **Kysely dialect / adapter** | Named as the deferred mechanism by which a connection is later obtained; none chosen |
 | **Connection pool; external pooler** | Not discussed as a selection; no pool, size, configuration or pooler appears |
 | **`DDM-2`** — identity strategy | No identifier carrier, UUID, sequence or natural key appears |
@@ -546,7 +560,7 @@ that spectrum is determined later, deliberately.
 
 ## This ADR selects nothing else
 
-**Even if later accepted**, this ADR would select **no** PostgreSQL driver or client — **neither
+**Accepted**, this ADR selects **no** PostgreSQL driver or client — **neither
 `pg` / node-postgres, nor Postgres.js, nor any other**; **no** Kysely dialect or adapter; **no**
 application connection pool, pool size, pool configuration, connection string, connection method or
 TLS configuration; **no** external pooler, PgBouncer configuration or hosted pooling. It selects
@@ -569,8 +583,8 @@ mechanism; **no** search implementation; and **no** package version — **nothin
 `package.json` or `package-lock.json` change is made, and **no file under `src/` is created or
 modified**.
 
-`DDM-2`–`DDM-9` remain **unresolved**. **`DDM-10` remains unresolved while this ADR is
-`Proposed`.** `DG-2` remains **`Resolved`** (2026-08-27, issue #93) and is not reopened. `DG-4`
+`DDM-2`–`DDM-9` remain **unresolved**. **`DDM-10` is resolved by this `Accepted` ADR through the
+selection of Kysely `Migrator`** — and by nothing more. `DG-2` remains **`Resolved`** (2026-08-27, issue #93) and is not reopened. `DG-4`
 remains **`Unresolved`**. **No accepted ADR is amended, reopened or superseded** — `ADR-014` in
 particular is relied upon, not modified. No physical schema, index, migration or infrastructure
 resource exists, and **no persistence implementation exists**.
@@ -603,36 +617,43 @@ Sources consulted:
 
 ## Owner-decision status and lifecycle
 
-**Status: `Proposed`. NOT in force. Nothing may depend on this document.**
+**Status: `Accepted`. In force since 2026-09-14.**
+
+**Owner acceptance has occurred.** The product owner ruled on **2026-09-14** that **Kysely Migrator
+is selected as the migration and schema-evolution tooling approach for `DDM-10`**, through the
+separate governed acceptance work unit recorded on **issue #121**, following this document's
+`Proposed`-stage publication and the mandatory detailed owner review of it. The owner could have
+selected any candidate compared here; the rejection rationale is preserved in full so that the
+argument survives the ruling (`IR-6`).
 
 | | |
 |---|---|
-| **Proposal recommendation** | Category A — Kysely's built-in `Migrator`, on the two grounds stated in *Recommendation* |
-| **Owner decision** | **PENDING.** No ruling has occurred, and no acceptance date exists |
-| **ADR status** | **`Proposed`** — it becomes authoritative only through the governed acceptance lifecycle |
-| **Issue** | **#119** — `architecture: decide migration and schema-evolution tooling for PostgreSQL (DDM-10)` |
-| **Pull request** | **None yet** |
-| **Acceptance issue** | **None — not created** |
+| **Proposal** | Published as `Proposed` **2026-09-13** — issue **#119** (`architecture: decide migration and schema-evolution tooling for PostgreSQL (DDM-10)`); pull request **#120** (`docs: propose ADR-015 Kysely Migrator for PostgreSQL migrations`), merged 2026-09-14 |
+| **Owner decision** | **Kysely Migrator**, ruled **2026-09-14** |
+| **ADR status** | **`Accepted`** — in force; authoritative for `DDM-10` |
+| **Acceptance issue** | **#121** — `architecture: accept ADR-015 Kysely Migrator for PostgreSQL migrations` |
+| **Acceptance pull request** | **#122** — `docs: accept ADR-015 Kysely Migrator for PostgreSQL migrations` |
 
-**The two-stage lifecycle applies**, per the `ADR-005` (issue #89 / PR #90, then issue #91 / PR
+**The two-stage lifecycle applied**, per the `ADR-005` (issue #89 / PR #90, then issue #91 / PR
 #92), `ADR-013` (#101 / #102, then #103 / #104), `ADR-012` (#105 / #106, then #107 / #108) and
-`ADR-014` (#115 / #116, then #117 / #118) precedent. This document covers the **`Proposed` stage
-only**. A **mandatory detailed owner review** precedes any acceptance, and acceptance is a separate
-governed work unit requiring its own issue and its own explicit owner ruling.
+`ADR-014` (#115 / #116, then #117 / #118) precedent.
 
-**The owner may select any candidate compared here, including one this document does not
-recommend.** The rejection rationale is preserved in full so that the argument survives whatever
-ruling is made (`IR-6`).
+**What acceptance put in force, and what it did not.** Acceptance puts the **migration and
+schema-evolution mechanism decision** in force and **nothing more**. It **installs nothing** — not
+Kysely and not Kysely `Migrator` — and authorizes **no** dependency installation, **no** migration,
+**no** schema, **no** persistence implementation, **no** driver/client, dialect, pool or pooler
+selection, **no** provisioning and **no** CI database infrastructure; each remains a separate later
+work unit requiring its own owner authorization.
 
 ## Traceability
 
 | | |
 |---|---|
-| **Deferred decision** | **`DDM-10`** (`docs/08-data-model.md`) — **not resolved by this `Proposed` ADR.** It would be resolved only on acceptance |
+| **Deferred decision** | **`DDM-10`** (`docs/08-data-model.md`) — **resolved by this `Accepted` ADR** (2026-09-14, issue #121) through the selection of Kysely `Migrator`. `DDM-2`–`DDM-9` remain unresolved |
 | **Requirements** | `NFR-DATA-01`, `NFR-DATA-02`, `NFR-DATA-03`, `NFR-DATA-06`; `NFR-MAINT-03`; `NFR-REL-04` — as constraints the later implementation must satisfy, **none proven here** |
 | **Journeys** | `V1`–`V7`, `L1`–`L4`, `A3`–`A7` — served transitively through `C9`; none implemented here |
 | **Components** | **`C9`** — Listing Repository (`docs/07`; `ADR-002` `O-1`). `C4`–`C8` are unaffected |
 | **Invariants** | `DI-1`–`DI-11`, `BI-7`, `BI-8` — this decision breaches none and **proves none** |
 | **Fed by** | `ADR-002` (ruling `R-A`), `ADR-003`, `ADR-005`, `ADR-006`, `ADR-010`, `ADR-012`, `ADR-013`, **`ADR-014`** — all `Accepted`, none amended |
-| **Documents amended** | **At this `Proposed` stage:** this file (new), `docs/adr/README.md` (register row) and `docs/traceability-matrix.md` (register row) — the `Proposed`-stage surface established by `ADR-013` (PR #102) and followed by `ADR-014` (PR #116). **`docs/07`, `docs/08`, `docs/11`, `docs/12`, `docs/13`, `src/data/README.md` and `CONTRIBUTING.md` are deliberately untouched**: no statement in any of them becomes false while this ADR is only `Proposed`, and **`docs/08`'s `DDM-10` row is left unamended**. **The register's decisions-in-force count remains nine** — a `Proposed` ADR is not in force. **No gate is marked `Resolved`** |
-| **Issue / pull request** | **Proposed:** issue **#119**. **No pull request yet; no acceptance issue; no acceptance date; no owner acceptance.** |
+| **Documents amended** | **At the earlier `Proposed` stage (issue #119, PR #120):** this file (new), `docs/adr/README.md` (register row) and `docs/traceability-matrix.md` (register row) — the `Proposed`-stage surface established by `ADR-013` (PR #102) and followed by `ADR-014` (PR #116). **At acceptance (issue #121), by owner ruling on the acceptance file surface:** this file, `docs/adr/README.md` (the `ADR-015` register row and the derived decisions-in-force count, recalculated from nine to ten), `docs/traceability-matrix.md` (the `ADR-015` row), `docs/08-data-model.md` (the `DDM-10` row only), `docs/13-decision-log.md` (only wording acceptance makes false) and `src/data/README.md` (a minimal, documentation-only correction). **`docs/07`, `docs/11`, `docs/12`, `CONTRIBUTING.md` and every earlier `Accepted` ADR are deliberately untouched**, and historical `ADR-013` / `ADR-014` register and traceability rows are preserved as ADR-scoped records. **No gate is marked `Resolved`** |
+| **Issue / pull request** | **Proposed:** issue **#119**; pull request **#120**, merged 2026-09-14. **Accepted:** issue **#121** — `architecture: accept ADR-015 Kysely Migrator for PostgreSQL migrations`; acceptance pull request **#122** |
