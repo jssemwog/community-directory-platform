@@ -632,7 +632,7 @@ argument survives the ruling (`IR-6`).
 | **Owner decision** | **Kysely Migrator**, ruled **2026-09-14** |
 | **ADR status** | **`Accepted`** — in force; authoritative for `DDM-10` |
 | **Acceptance issue** | **#121** — `architecture: accept ADR-015 Kysely Migrator for PostgreSQL migrations` |
-| **Acceptance pull request** | Not yet created |
+| **Acceptance pull request** | **#122** — `docs: accept ADR-015 Kysely Migrator for PostgreSQL migrations` |
 
 **The two-stage lifecycle applied**, per the `ADR-005` (issue #89 / PR #90, then issue #91 / PR
 #92), `ADR-013` (#101 / #102, then #103 / #104), `ADR-012` (#105 / #106, then #107 / #108) and
@@ -656,4 +656,4 @@ work unit requiring its own owner authorization.
 | **Invariants** | `DI-1`–`DI-11`, `BI-7`, `BI-8` — this decision breaches none and **proves none** |
 | **Fed by** | `ADR-002` (ruling `R-A`), `ADR-003`, `ADR-005`, `ADR-006`, `ADR-010`, `ADR-012`, `ADR-013`, **`ADR-014`** — all `Accepted`, none amended |
 | **Documents amended** | **At the earlier `Proposed` stage (issue #119, PR #120):** this file (new), `docs/adr/README.md` (register row) and `docs/traceability-matrix.md` (register row) — the `Proposed`-stage surface established by `ADR-013` (PR #102) and followed by `ADR-014` (PR #116). **At acceptance (issue #121), by owner ruling on the acceptance file surface:** this file, `docs/adr/README.md` (the `ADR-015` register row and the derived decisions-in-force count, recalculated from nine to ten), `docs/traceability-matrix.md` (the `ADR-015` row), `docs/08-data-model.md` (the `DDM-10` row only), `docs/13-decision-log.md` (only wording acceptance makes false) and `src/data/README.md` (a minimal, documentation-only correction). **`docs/07`, `docs/11`, `docs/12`, `CONTRIBUTING.md` and every earlier `Accepted` ADR are deliberately untouched**, and historical `ADR-013` / `ADR-014` register and traceability rows are preserved as ADR-scoped records. **No gate is marked `Resolved`** |
-| **Issue / pull request** | **Proposed:** issue **#119**; pull request **#120**, merged 2026-09-14. **Accepted:** issue **#121** — `architecture: accept ADR-015 Kysely Migrator for PostgreSQL migrations`; acceptance pull request not yet created |
+| **Issue / pull request** | **Proposed:** issue **#119**; pull request **#120**, merged 2026-09-14. **Accepted:** issue **#121** — `architecture: accept ADR-015 Kysely Migrator for PostgreSQL migrations`; acceptance pull request **#122** |
