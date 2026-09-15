@@ -210,8 +210,10 @@ than 24 hours behind committed live data (`NFR-BACK-06`, as amended by ruling **
 provider's. **Nothing is provisioned** — no DigitalOcean account, billing commitment or
 cluster exists, and no region, tier, sizing or PostgreSQL version is selected. ~~**`DDM-2`–`DDM-10`
 remain unresolved**~~ — **`DDM-2`–`DDM-9` remain unresolved; `DDM-10` is resolved by `Accepted`
-`ADR-015` (2026-09-14, issue #121), selecting Kysely's built-in `Migrator`** — and every
-provisioning, connectivity, secrets, ORM, driver, pooler, ~~migration,~~ migration-content,
+`ADR-015` (2026-09-14, issue #121), selecting Kysely's built-in `Migrator`**; **the runtime
+PostgreSQL driver/client and Kysely dialect are selected by `Accepted` `ADR-016` (2026-09-15,
+issue #125): `pg` (node-postgres) through Kysely core `PostgresDialect`** — and every
+provisioning, connectivity, secrets, ORM, ~~driver,~~ pooler, ~~migration,~~ migration-content,
 migration-execution, rollback, schema, index, authentication and backup-mechanism decision
 **remains deferred and separately governed**.
 

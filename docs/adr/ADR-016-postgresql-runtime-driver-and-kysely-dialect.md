@@ -2,33 +2,30 @@
 
 | Field | Value |
 |---|---|
-| **Status** | **`Proposed`** |
-| **Date** | 2026-09-14 |
-| **Decision owner** | **Joe S.** — product owner / architecture owner (`docs/13`, *Gate summary*). **Product Owner ruling recorded 2026-09-15: Option A approved** — see *Owner-decision status and lifecycle* |
+| **Status** | **`Accepted`** |
+| **Date** | 2026-09-15 |
+| **Decision owner** | **Joe S.** — product owner / architecture owner (`docs/13`, *Gate summary*). **Ruled 2026-09-15.** |
 | **Decision gate** | *none* — `DG-2` is **`Resolved`** (2026-08-27, issue #93) and this ADR is **not** one of its constituents |
 | **Related open questions** | **Depends on:** nothing unresolved. `ADR-003`, `ADR-005`, `ADR-013`, `ADR-014` and `ADR-015` are all **Accepted** and supply every constraint this decision must satisfy. **Must NOT answer:** **`DDM-2`–`DDM-9`**, application **pool configuration**, the **external pooler**, **TLS policy**, **secrets**, **provisioning**, migration **execution environment and timing**, **rollback policy**, `DG-3`, `DG-4` |
 | **Supersedes** | *none* |
 | **Superseded by** | *none* |
 
-> **`Proposed`. NOT `Accepted`, and therefore NOT in force.** Per `docs/adr/README.md`, a
-> `Proposed` ADR is *"Drafted and under review. The decision is **not yet in force**; nothing may
-> depend on it."*
+> **`Accepted`, and therefore in force.** Per `docs/adr/README.md`, an `Accepted` ADR is
+> *"Decided and **in force**. Work may rely on it."* The Product Owner ruled on **2026-09-15**:
+> *"I approve Option A: pg (node-postgres) through Kysely's core PostgresDialect for ADR-016."*
+> That ruling followed this document's `Proposed`-stage publication (issue **#123**, merged by PR
+> **#124** on 2026-09-15) and is placed in force by the separate governed acceptance step recorded
+> on issue **#125**. **`pg` (node-postgres) through Kysely core `PostgresDialect` is the selected
+> runtime PostgreSQL driver/client and Kysely dialect.**
 >
-> **Product Owner decision: Option A approved on 2026-09-15 — `pg` (node-postgres) through Kysely
-> core `PostgresDialect`.** The owner's ruling, as given: *"I approve Option A: pg (node-postgres)
-> through Kysely's core PostgresDialect for ADR-016."* No further owner rationale was stated; the
-> analysis below is the Proposal's own and is preserved as decision history.
+> **No numbered `DDM` is resolved by this ADR.** `DDM-2`–`DDM-9` remain unresolved; `DDM-10`
+> remains resolved by `ADR-015`.
 >
-> **Decided by the Product Owner is not the same as `Accepted` / in force.** The technology choice is
-> recorded here, but this ADR remains `Proposed`: the choice is **not yet in force and nothing may
-> depend on it** until the Proposal and Acceptance lifecycles are completed.
->
-> **No numbered `DDM` is resolved by this ADR — not while it is `Proposed`, and not on any eventual
-> acceptance.** Nothing is installed, no connection code is written, and no implementation,
-> provisioning or CI change is authorized.
->
-> Acceptance, if it comes, is a **separate governed work unit** with its own issue and pull request
-> that records this ruling and places the ADR in force.
+> **Acceptance is not installation and not implementation authorization.** `pg` is not installed
+> and `PostgresDialect` is not configured; no connection code exists. Acceptance selects **no**
+> package version, pool configuration, external pooler, TLS policy, secrets or provisioning, and
+> authorizes **no** dependency installation, persistence implementation, migration, provisioning or
+> CI change — each remains a separate later work unit requiring its own owner authorization.
 
 ---
 
@@ -251,13 +248,20 @@ or of higher quality, so this row is not used as a discriminator.
 **Secondary factors favour Postgres.js on footprint and module posture.** They are weighed
 explicitly; in this Proposal they narrowly do not outweigh the single strong-preference advantage.
 
-## Recommendation — for Product Owner consideration only
+## Decision
 
-> **RECOMMENDATION, preserved as written before the ruling.** The Product Owner subsequently
-> approved Option A on 2026-09-15 (see *Owner-decision status and lifecycle*). The reasoning below
-> is the Proposal's analysis, not the owner's stated rationale. Nothing below is in force.
+**`pg` (node-postgres) through Kysely core `PostgresDialect` is selected as the runtime PostgreSQL
+driver/client and Kysely dialect that `C9` and Kysely `Migrator` use to connect to PostgreSQL.**
+The Product Owner ruled on **2026-09-15**: *"I approve Option A: pg (node-postgres) through
+Kysely's core PostgresDialect for ADR-016."* That ruling is recorded here as **authoritative**.
+**No owner rationale beyond the approval was stated, and none is attributed.** It selects the
+driver/client and dialect and nothing else — see *This ADR selects nothing else*.
 
-**The evidence narrowly favors A — `pg` (node-postgres) through Kysely core `PostgresDialect`**,
+### The recommendation recorded at the `Proposed` stage
+
+Preserved as decision history. It is the Proposal's analysis, not the owner's stated rationale.
+
+**The evidence narrowly favored A — `pg` (node-postgres) through Kysely core `PostgresDialect`**,
 on one genuine discriminator:
 
 1. **Kysely-core dialect integration.** The `pg` path uses Kysely's core `PostgresDialect`, so
@@ -272,8 +276,8 @@ commissioning analysis's earlier lean was tested here rather than adopted.
 **Robustness: low to moderate.** Every REQUIRED criterion is met by both finalists, and most
 technical criteria do not discriminate. The narrow lean rests on a single strong-preference
 advantage, while Postgres.js holds genuine secondary advantages (dependency footprint, ESM-native
-module posture). This is a narrow recommendation, not a default selection; a reasonable Product
-Owner could select Postgres.js.
+module posture). This was a narrow recommendation, not a default selection; a reasonable Product
+Owner could have selected Postgres.js.
 
 ### The strongest alternative — Postgres.js with `kysely-postgres-js`
 
@@ -285,21 +289,21 @@ Postgres.js is **valid and a legitimate choice**, and its case is real:
 - it is equally reversible, with the same not-cost-free replacement considerations.
 
 An owner who weights a zero-dependency, ESM-native driver above Kysely-core integration **could
-reasonably select it**. That argument is preserved here so it survives
+reasonably have selected it**. That argument is preserved here so it survives
 the ruling (`IR-6`).
 
-### What the recommendation would and would not settle
+### What the decision settles and does not settle
 
-**If accepted**, it would settle the runtime driver/client and its Kysely dialect, and with them the
-in-process pool **mechanism** that ships with the driver.
+**It settles** the runtime driver/client and its Kysely dialect, and with them the in-process pool
+**mechanism** that ships with the driver.
 
-**It would leave open** everything in *This ADR selects nothing else*.
+**It leaves open** everything in *This ADR selects nothing else*.
 
 ## Alternatives considered
 
-| Alternative | Classification and why it is not recommended |
+| Alternative | Classification and why it is not selected |
 |---|---|
-| **Postgres.js + `kysely-postgres-js`** | **Valid, organisation-maintained, and a legitimate choice — narrowly not recommended, on a single preference-level ground.** Separate dialect package with its own release line and peer range; pooler compatibility, like `pg`'s, to be revalidated when a pooler is selected. Stronger on footprint and ESM posture. See *The strongest alternative* |
+| **Postgres.js + `kysely-postgres-js`** | **Valid, organisation-maintained, and a legitimate choice — not selected; at the `Proposed` stage it was narrowly not recommended, on a single preference-level ground.** Separate dialect package with its own release line and peer range; pooler compatibility, like `pg`'s, to be revalidated when a pooler is selected. Stronger on footprint and ESM posture. See *The strongest alternative* |
 | **Serverless / HTTP / edge clients** | **Poor fit, not impossible.** Wrong shape for `ADR-005`'s long-running process, often provider-specific, and they add an unneeded hop |
 | **Provider-specific drivers** | **Unnecessary.** DigitalOcean Managed PostgreSQL is ordinary PostgreSQL |
 | **`pg-native`** | **Unnecessary complexity.** A native build with no requirement driving it |
@@ -309,8 +313,8 @@ in-process pool **mechanism** that ships with the driver.
 
 ## Consequences
 
-Stated for Option A, **which the Product Owner approved on 2026-09-15**. Acceptance has not
-occurred, so none of these consequences is yet in force.
+Stated for the selected Option A, approved by the Product Owner on **2026-09-15** and in force
+through this `Accepted` ADR.
 
 **Positive:** a governed driver and dialect exist, so later work can install and wire them without
 a further technology decision; no additional dialect package.
@@ -336,7 +340,7 @@ adaptation; and migration connectivity would need revalidation.
 
 ## This ADR selects nothing else
 
-**Even if later accepted**, this ADR would select **no** exact version of `pg`, `postgres`,
+**Acceptance is not installation.** This `Accepted` ADR selects **no** exact version of `pg`, `postgres`,
 `kysely-postgres-js` or `kysely`; **no** PostgreSQL server version; **no** pool size, idle timeout,
 connection timeout, retry policy or graceful-shutdown wiring; **no** TLS verification policy,
 certificate source or connection-string format; **no** credentials or secrets provider; **no**
@@ -351,33 +355,33 @@ integration test.
 **No numbered `DDM` owns or is resolved by this ADR.** `DDM-2`–`DDM-9` remain **unresolved**.
 `DDM-10` was already resolved by `ADR-015` and is unaffected. `DG-4` remains **`Unresolved`**, and
 `P2` is not begun. **No accepted ADR is amended, reopened or superseded.** Nothing is installed,
-no `package.json` or `package-lock.json` change is made, and no file under `src/` is created or
-modified.
+no `package.json` or `package-lock.json` change is made, and no runtime or source-code
+implementation under `src/` is created or modified; the only `src/` change in this acceptance is
+documentation synchronization in `src/data/README.md`.
 
 ## Owner-decision status and lifecycle
 
-**Status: `Proposed`. NOT in force. Nothing may depend on this document.**
+**Status: `Accepted`. In force. Work may rely on it.**
 
 | | |
 |---|---|
 | **Proposal recommendation** | The evidence narrowly favored A — `pg` (node-postgres) through Kysely core `PostgresDialect`; made for Product Owner consideration, with Postgres.js preserved as a viable alternative |
-| **Product Owner decision** | **Option A approved 2026-09-15** — `pg` (node-postgres) through Kysely core `PostgresDialect`. Recorded, **not yet in force** |
-| **ADR status** | **`Proposed`** |
-| **Proposal issue** | **#123** — `architecture: decide the runtime PostgreSQL driver/client and Kysely dialect for C9` |
+| **Product Owner decision** | **Option A approved 2026-09-15** — `pg` (node-postgres) through Kysely core `PostgresDialect` |
+| **ADR status** | **`Accepted`** — 2026-09-15; **in force** |
+| **Proposal issue** | **#123** — `architecture: decide the runtime PostgreSQL driver/client and Kysely dialect for C9` (closed) |
 | **Proposal branch** | `docs/123-propose-adr-016-postgresql-driver` |
-| **Proposal pull request** | Not yet created |
-| **Acceptance issue** | Not yet created |
-| **Acceptance pull request** | Not yet created |
+| **Proposal pull request** | **#124** — `docs: propose ADR-016 pg for C9 PostgreSQL connectivity`, merged 2026-09-15 |
+| **Acceptance issue** | **#125** — `architecture: accept ADR-016 PostgreSQL runtime driver and Kysely dialect` |
+| **Acceptance pull request** | **#126** — `docs: accept ADR-016 pg for C9 PostgreSQL connectivity` |
 
 **The two-stage lifecycle applies**, per the `ADR-014` (#115 / #116, then #117 / #118) and `ADR-015`
 (#119 / #120, then #121 / #122) precedent:
 
-1. **Proposal stage (this document):** analyses the candidates and may recommend; it makes
+1. **Proposal stage** (issue #123, PR #124): analysed the candidates and recommended; it made
    nothing authoritative.
-2. **Product Owner decision:** only after the mandatory detailed review of this Proposal —
+2. **Product Owner decision:** after the mandatory detailed review of the Proposal —
    **given 2026-09-15: Option A approved**.
-3. **Acceptance stage:** a separate later issue, branch and pull request that records the ruling and
-   places `ADR-016` in force.
+3. **Acceptance stage** (issue #125): records the ruling and places `ADR-016` in force.
 
 ## Traceability
 
@@ -386,5 +390,5 @@ modified.
 | **Decision** | Runtime PostgreSQL driver/client and Kysely dialect — a non-DDM technology-selection decision under ruling `R-A`, deferred by `ADR-014` |
 | **Components** | **`C9`** — Listing Repository (`docs/07`; `ADR-002` `O-1`) |
 | **Fed by** | `ADR-002` (ruling `R-A`), `ADR-003`, `ADR-005`, `ADR-013`, `ADR-014`, `ADR-015` — all `Accepted`, none amended |
-| **Documents amended** | **At this `Proposed` stage:** this file (new), `docs/adr/README.md` (register row and the in-force summary) and `docs/traceability-matrix.md` (register row). `docs/07`, `docs/08`, `docs/12`, `docs/13` and `src/data/README.md` are deliberately untouched: no statement in them becomes false while this ADR is only `Proposed`. **The register's decisions-in-force count remains ten** |
-| **Issue / pull request** | **Proposed:** issue **#123**. No pull request yet; no acceptance issue. **Product Owner ruling 2026-09-15: Option A approved** (`pg` through Kysely core `PostgresDialect`); not yet in force |
+| **Documents amended** | **At the `Proposed` stage:** this file (new), `docs/adr/README.md` (register row and the in-force summary) and `docs/traceability-matrix.md` (register row). **At acceptance:** this file; `docs/adr/README.md` (register row and the derived decisions-in-force count, **ten → eleven**); `docs/traceability-matrix.md` (register row); and only the present-tense driver/client and dialect statements that acceptance makes false in `docs/08` (`DDM-10` row), `docs/13` and `src/data/README.md`. `docs/07`, `docs/12` and earlier `Accepted` ADRs are untouched |
+| **Issue / pull request** | **Proposed:** issue **#123**, PR **#124** (merged 2026-09-15). **Product Owner ruling 2026-09-15: Option A approved.** **Accepted:** issue **#125**; pull request **#126** |

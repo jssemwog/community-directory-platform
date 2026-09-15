@@ -14,7 +14,7 @@ resolved by code placed here:
   them.
 - **`DD-1`, `DDM-2`–`DDM-9`** — no schema, key, index, identity strategy,
   category representation, or revision storage is decided.
-- **No PostgreSQL driver or client, and no connection pooler, is selected.**
+- **No connection pooler, and no pool configuration, is selected.**
 
 A placeholder repository or a stub client would encode assumptions about all
 of the above. Issue #95 therefore adds none, and the application is
@@ -31,6 +31,13 @@ tooling (`DDM-10`) under `Accepted` `ADR-015` (2026-09-14, issue #121).
 **Nothing is installed**, the PostgreSQL driver/client and the Kysely dialect
 remain unselected, no migration exists, and no migration or persistence code
 is authorized here.
+
+`pg` (node-postgres) through Kysely core `PostgresDialect` is selected as the
+runtime PostgreSQL driver/client and Kysely dialect under `Accepted` `ADR-016`
+(2026-09-15, issue #125). The two paragraphs above record what `ADR-014` and
+`ADR-015` decided at the time; the driver/client and dialect are no longer
+unselected. **Nothing is installed**, no pool configuration or external pooler
+is selected, and no connection or persistence code is authorized here.
 
 Two obligations bind whatever eventually lands here:
 
