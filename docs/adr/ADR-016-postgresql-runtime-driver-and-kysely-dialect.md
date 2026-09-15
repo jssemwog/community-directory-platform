@@ -372,7 +372,7 @@ documentation synchronization in `src/data/README.md`.
 | **Proposal branch** | `docs/123-propose-adr-016-postgresql-driver` |
 | **Proposal pull request** | **#124** — `docs: propose ADR-016 pg for C9 PostgreSQL connectivity`, merged 2026-09-15 |
 | **Acceptance issue** | **#125** — `architecture: accept ADR-016 PostgreSQL runtime driver and Kysely dialect` |
-| **Acceptance pull request** | Not yet created |
+| **Acceptance pull request** | **#126** — `docs: accept ADR-016 pg for C9 PostgreSQL connectivity` |
 
 **The two-stage lifecycle applies**, per the `ADR-014` (#115 / #116, then #117 / #118) and `ADR-015`
 (#119 / #120, then #121 / #122) precedent:
@@ -391,4 +391,4 @@ documentation synchronization in `src/data/README.md`.
 | **Components** | **`C9`** — Listing Repository (`docs/07`; `ADR-002` `O-1`) |
 | **Fed by** | `ADR-002` (ruling `R-A`), `ADR-003`, `ADR-005`, `ADR-013`, `ADR-014`, `ADR-015` — all `Accepted`, none amended |
 | **Documents amended** | **At the `Proposed` stage:** this file (new), `docs/adr/README.md` (register row and the in-force summary) and `docs/traceability-matrix.md` (register row). **At acceptance:** this file; `docs/adr/README.md` (register row and the derived decisions-in-force count, **ten → eleven**); `docs/traceability-matrix.md` (register row); and only the present-tense driver/client and dialect statements that acceptance makes false in `docs/08` (`DDM-10` row), `docs/13` and `src/data/README.md`. `docs/07`, `docs/12` and earlier `Accepted` ADRs are untouched |
-| **Issue / pull request** | **Proposed:** issue **#123**, PR **#124** (merged 2026-09-15). **Product Owner ruling 2026-09-15: Option A approved.** **Accepted:** issue **#125**; acceptance pull request not yet created |
+| **Issue / pull request** | **Proposed:** issue **#123**, PR **#124** (merged 2026-09-15). **Product Owner ruling 2026-09-15: Option A approved.** **Accepted:** issue **#125**; pull request **#126** |
