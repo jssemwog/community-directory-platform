@@ -409,15 +409,31 @@ revision**. Throughout its review:
   change is under review.
 - The **pending revision is not publicly visible** — not by browsing, search, direct
   reference, or any other public read path (`DI-10`).
-- On **approval**, the revision's information becomes the **effective public version**.
+- On **approval**, the revision's information becomes the **effective public version**,
+  and the approved proposal is removed in the same atomic unit (see *Approved-revision
+  removal* below).
 - On **rejection**, the **approved listing is unchanged** and stays public exactly as
   it was. Rejection never removes, alters, or unpublishes the approved listing.
-- **At most one pending revision exists per listing at a time** (`DI-11`). Historical
-  revisions may still be retained — the constraint is on the *pending* state, not on
-  history.
+- **At most one pending revision exists per listing at a time** (`DI-11`). The constraint
+  is on the *pending* state, not on history: it defines the scope of `DI-11` and imposes
+  **no duty to retain approved proposals**, which are removed when applied. Rejected
+  revisions are retained under `FR-AUD-06` until purged.
 
 **The listing's identity is stable across the whole cycle** (`DI-8`): approving a
 revision updates what the listing publicly says, never which listing it is.
+
+**Approved-revision removal** (ungated Product Owner policy clarification — ADR-017 Q-3,
+issue #133). **Applying an approved revision's content to the listing and removing that
+approved proposal are one atomic unit** (`NFR-DATA-03`, `DI-3`). The approved content
+remains on the listing, as its effective public version. **A failure rolls the whole unit
+back, preserving the pre-operation state:** on the ordinary two-step path the listing is
+unchanged and the pending revision remains pending. **No retention purpose or period is
+introduced for approved proposals**, and proposal history is **not** effective-content
+history — a revision records proposed replacement content, not the content it replaced.
+Rejected revisions keep `OQ-13`'s 90-day retention and purge. **Whether separate audit
+records of approvals exist, and general audit policy, remain `OQ-14`/`NOQ-8`** (retention
+`NOQ-7`), and seams `S-7`/`S-8` stay open. **How removal is carried out physically is not
+selected here** — it remains within `DDM-8`, which is unresolved.
 
 **The administrator atomic path is part of this lifecycle, not an alternative to it**
 (`FR-ADM-10b`). An authorized administrator may create and approve a revision within
@@ -428,13 +444,17 @@ visible before those checks succeed, and if any required check fails **the curre
 approved listing remains unchanged** — `DI-3` covers this: the operation completes
 fully or not at all, and is never partially public. **This is a safeguarded exception
 to the two-step sequence, not a bypass of the revision lifecycle and not a direct
-unvalidated overwrite.**
+unvalidated overwrite.** Under *Approved-revision removal*, the revision this operation
+creates is applied and removed within the same atomic operation; a failure restores the
+operation's **actual** pre-operation state — no revision was pending before it began, so
+none is left behind, and the approved listing is unchanged.
 
 **What this decision does not select.** Whether the effective public version is carried
 by updating a row, writing a version record, moving a pointer, copying content, keeping
-immutable history, or any other persistence mechanism is **`DDM-8`, which remains
-open**. "Becomes the effective public version" is policy language about *which
-information the public sees*, and nothing more.
+immutable history, or any other persistence mechanism — including how an approved
+proposal is physically removed — is **`DDM-8`, which remains open**. "Becomes the
+effective public version" is policy language about *which information the public sees*,
+and nothing more.
 
 **No transition on the listing-status diagram remains conditional.**
 
@@ -780,6 +800,7 @@ soft delete, hard delete, or otherwise — remains `DDM-9`, which is unresolved.
 | Question | Owner |
 |---|---|
 | ~~How long are rejected submissions retained, and for what stated purpose?~~ **Answered by `OQ-13`: 90 days from rejection, to allow review, explanation, or reconsideration of a moderation decision and to provide moderation context for a bounded time. Same rule for rejected revisions.** | ~~`OQ-13`~~ — **Decided** |
+| ~~Are approved revision proposals retained after their content is applied?~~ **Answered by an ungated Product Owner policy clarification (ADR-017 Q-3, issue #133): no — each is removed in the same atomic unit that applies its content. No retention purpose or period is introduced; audit records remain `OQ-14`/`NOQ-8`.** | Product Owner policy clarification — **ungated**; see `docs/13` |
 | What retention applies to non-public submitter data on *approved* records — e.g. a contact method collected for verification but never published? | `OQ-7` + `NFR-PRIV-05` |
 | How long are audit entries kept, if they exist at all? | `OQ-14`, `NOQ-7` |
 | How long are safeguard artifacts kept, if a safeguard exists? | `OQ-9`, `NFR-PRIV-04` |
@@ -916,7 +937,7 @@ The invariants. Each must hold at every moment, not merely after a successful op
 | `DI-8` | A record's identity is stable for its entire life and survives every content edit and status change. | **P2** |
 | `DI-9` | A category value on a listing always references a member of the predefined set. | `FR-DATA-02`, `FR-DATA-10` |
 | `DI-10` | **Public read paths expose only the currently approved listing version.** A pending revision is **not** returned, rendered, indexed, searched, or otherwise exposed through any public read path. | `FR-ADM-10`, `FR-VIS-02`, `NFR-PRIV-01/03` |
-| `DI-11` | An approved listing has **no more than one pending revision at a time.** Another revision request does not enter the pending state until the existing pending revision has been approved, rejected, or otherwise resolved through an already-authorized lifecycle outcome. **This constrains the pending state, not revision history** — a listing may retain many revisions over time. | `FR-ADM-10` |
+| `DI-11` | An approved listing has **no more than one pending revision at a time.** Another revision request does not enter the pending state until the existing pending revision has been approved, rejected, or otherwise resolved through an already-authorized lifecycle outcome. **This constrains the pending state, not revision history** — it neither limits nor requires history: approved proposals are removed when applied (ungated Product Owner policy clarification, ADR-017 Q-3, issue #133), and rejected revisions are retained under `FR-AUD-06` until purged. | `FR-ADM-10` |
 
 **`DI-10` extends `DI-5`'s guarantee to a thing that has no listing status.** `DI-5` is
 stated over records *by status*; a pending revision is not a listing record and carries

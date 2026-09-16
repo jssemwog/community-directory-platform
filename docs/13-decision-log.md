@@ -312,6 +312,18 @@ phase; none is waiting on anyone.
 
 ---
 
+## Ungated Product Owner policy clarifications
+
+Product Owner rulings that clarify an already-decided policy without opening, reopening or
+closing a gate. Each is **not** an open question and carries **no** `OQ` identifier; it
+changes no gate status. The answer lives in the owning documents; this log only points at it.
+
+| Clarification | Raised by | Status | Outcome | Recorded in |
+|---|---|---|---|---|
+| **Approved-revision removal on application** | `ADR-017` (`Proposed`) Q-3; issue #133 | **Decided** — Product Owner ruling | Applying an approved revision's content to the listing and removing that approved proposal are **one atomic unit**; the approved content remains on the listing; a failure rolls the unit back, preserving the pre-operation state (for the `FR-ADM-10b` atomic path, a state in which no revision was pending). **No retention purpose or period** is introduced for approved proposals. Rejected revisions keep `OQ-13`'s 90-day retention and purge. **`OQ-10` is not reopened:** its "revision history is not restricted" wording, and `DI-11`'s, define the scope of the one-pending-revision constraint and impose no duty to retain approved proposals. **Not decided:** separate audit records or general audit policy (`OQ-14`/`NOQ-8`, `NOQ-7`), seams `S-7`/`S-8`, and physical removal mechanics (`DDM-8`, still unresolved). **`DG-1` remains `Resolved` and is not reopened; `DG-3` is unchanged.** `ADR-017` is not accepted by this record | `docs/05` `FR-ADM-10`, `FR-ADM-10b`; `docs/06` `NFR-PRIV-05`; `docs/08` *The revision lifecycle*, *Data retention considerations*, `DI-11` |
+
+---
+
 ## Maintenance
 
 **This log is worthless the moment it goes stale**, and stale is the default state of a
