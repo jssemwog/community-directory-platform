@@ -548,8 +548,8 @@ collection scope. *How* that separation is enforced is not decided here.
 |---|---|---|
 | Name, category, description, locality | Public only when approved | **Public** (`FR-DATA-11`, `FR-VIS-04`) |
 | Country, administrative area (where provided) | Public only when approved | **Public** (`FR-DATA-11`; inventory settled by `OQ-6`) |
-| Postal code | Public only when approved | **Public only where provided** and designated for public display; withholdable by a home-based or privacy-sensitive business; **never used to infer or expose a precise residential address** (`FR-DATA-06b`, `FR-DATA-11`) |
-| Phone, email, website | Public only when approved | **Public only where the business designated that method public**, it was intentionally supplied as a *business* contact, and it passed moderation; otherwise **administrator-visible** (`FR-DATA-11c`, `NFR-PRIV-02`) |
+| Postal code | Public only when approved | **Public only where provided** and designated for public display by the business (**default private**); withholdable by a home-based or privacy-sensitive business; **never used to infer or expose a precise residential address** (`FR-DATA-06b`, `FR-DATA-11`) |
+| Phone, email, website | Public only when approved | **Public only where the business designated that method public** (**default private**), it was intentionally supplied as a *business* contact, and it passed moderation; otherwise **administrator-visible** (`FR-DATA-11c`, `NFR-PRIV-02`) |
 | Submitter identity and submitter contact details; separate business-owner identity | — | **Never public** (`FR-DATA-11b`, `NFR-PRIV-03`) — where such data exists at all |
 | Status, submitted at, last updated at | — | **Never public** (`FR-DATA-11`, `NFR-PRIV-01`) |
 | Reviewed by, reviewed at, moderation note, rejection reason, approval/unpublishing history | — | **Never public** (`NFR-PRIV-03`) |
@@ -565,6 +565,18 @@ designation is undecided is **not public**. `OQ-7` supplies those designations; 
 fail-closed default remains in force for any attribute added later. A field wrongly
 withheld is a bug someone reports; a field wrongly published is a privacy incident that
 cannot be undone.
+
+**Designation authority and defaults** (ungated Product Owner policy clarification —
+ADR-017 Q-4, issue #135). **The business chooses public or private for each contact value
+it supplies, and for a supplied postal code, at submission; the default is private.** An
+administrator may **restrict** a value's visibility but **cannot make a business-withheld
+value public** — approval alone never grants public visibility. **A new or replacement**
+contact value or postal code **defaults to private** and does **not inherit** the replaced
+value's designation. A designation change to an approved listing is a change like any other:
+it follows *The revision lifecycle* unchanged (`FR-ADM-10`, `FR-ADM-10b`, `DI-3`, `DI-10`,
+`DI-11`). **Postal code receives the same protection but remains location data, not contact
+data** (`FR-DATA-08`). No other attribute's exposure changes, and **how designations are
+represented is not selected here** — it remains `DDM-6`, which is unresolved.
 
 **The distinction `OQ-7` draws explicitly.** *Collected* is not *published*. The form may
 need to hold a contact method used to verify the submitter rather than to display, and
@@ -588,9 +600,9 @@ by `OQ-7` (2026-07-31), against the field inventory settled by `OQ-6`.
 | **Location** | Locality | **Public** | Required field. `FR-DATA-04` (`OQ-6`) |
 | **Location** | Country | **Public** | Required field. `FR-DATA-06` (`OQ-6`) |
 | **Location** | Administrative area | **Public** | Where provided; optional field. `FR-DATA-05` (`OQ-6`) |
-| **Location** | Postal code | **Public only where provided and designated for public display** | Optional; withholdable by home-based or privacy-sensitive businesses; subject to the listing's approved visibility designation and moderation; never used to infer or expose a residential address. `FR-DATA-06b` |
+| **Location** | Postal code | **Public only where provided and designated for public display** | Optional; designated by the business at submission, **default private**; withholdable by home-based or privacy-sensitive businesses; subject to the listing's approved visibility designation and moderation; never used to infer or expose a residential address. `FR-DATA-06b` |
 | **Location** | Precise business or residential street address | **Not collected during the MVP** | Never held, therefore never published. `FR-DATA-06c` (`OQ-6`) |
-| **Contact** | Business phone | **Public only where designated public by the business** | Optional; must be intentionally supplied as a business contact and pass moderation; otherwise administrator-visible. `FR-DATA-07`, `FR-DATA-11c` |
+| **Contact** | Business phone | **Public only where designated public by the business** | Optional; designated by the business at submission, **default private**; must be intentionally supplied as a business contact and pass moderation; otherwise administrator-visible. `FR-DATA-07`, `FR-DATA-11c` |
 | **Contact** | Business email | **Public only where designated public by the business** | As above. `FR-DATA-07`, `FR-DATA-11c` |
 | **Contact** | Business website | **Public only where designated public by the business** | As above. `FR-DATA-07`, `FR-DATA-11c` |
 | **Submitter / owner** | Submitter identity; submitter contact details; separate business-owner identity | **Administrator-visible; never public** | Only where another approved requirement authorises collection at all — `OQ-7` authorises none. `FR-DATA-11b`, `NFR-PRIV-03/04` |
@@ -996,7 +1008,7 @@ contribution to them.
 | Seam | Where the model is deliberately incomplete | Blocked on |
 |---|---|---|
 | ~~`S-1`~~ **Resolved** | The submission obligation set — required fields, contact minimum, formats. **Filled by `OQ-8` and `OQ-8b`:** required at initial submission = name, category, description, locality, country; optional at initial submission = administrative area, postal code, phone, email, website; **at least one usable contact method before approval**; permissive, international-friendly, technology-neutral format checks. See `VR-S1`, `VR-S2`, `VR-S3` above. **Only the obligations and the validation posture are fixed — no field was added or removed, and the mechanism that expresses them remains `DD-1`.** | ~~`OQ-8`~~, ~~`OQ-8b`~~ — **Decided** |
-| ~~`S-2`~~ **Resolved** | Field-level public/private designation. **Default: not public** — and the default stands for any attribute added later. **Filled by `OQ-7`:** see *Field classification* above. **Only the designation is fixed — the enforcement mechanism remains `DDM-6`.** | ~~`OQ-7`~~ — **Decided** |
+| ~~`S-2`~~ **Resolved** | Field-level public/private designation. **Default: not public** — and the default stands for any attribute added later. **Filled by `OQ-7`:** see *Field classification* above. **Only the designation is fixed — the enforcement mechanism remains `DDM-6`.** Designation authority and defaults: ungated Product Owner policy clarification (ADR-017 Q-4, issue #135) — see *Designation authority and defaults* above. | ~~`OQ-7`~~ — **Decided** |
 | `S-3` | Category cardinality and curation; whether the set is configuration or data. | `OQ-5` |
 | `S-4` | Searchable attribute set and matching mode. | `OQ-4` |
 | ~~`S-5`~~ **Fully resolved** | Edit-after-approval and removal. **Resolved for `OQ-10`:** `E7` exists and is committed; the revision lifecycle is defined above; **no fourth listing status was introduced**. **Resolved for `OQ-11` (2026-08-04):** an approved listing **may** be unpublished and republished; this is a **publication-state** change modelled separately from listing status, so again **no fourth listing status was introduced** and `FR-AUD-01` is unchanged. The complete surface is recorded — the status-model question and the pending-revision interaction (`R-11`/`R-12`) included. **The seam is closed.** Representation remains `DDM-9`; retention remains `OQ-13`. | ~~`OQ-10`~~ — **Decided**; ~~`OQ-11`~~ — **Decided** |
