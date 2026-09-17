@@ -322,8 +322,8 @@ review turnaround time) define "success" for the first release.
    excluded from the MVP**, and **ordinary public-user removal requests are
    outside MVP scope**. **`FR-AUD-01` is unchanged** — publication state is a
    **separate product concept** from listing status, and **no fourth listing
-   status is introduced**. How this is represented remains deferred (`ADR-006`,
-   `DDM-9`). **Whether an unpublished approved listing is ever subject to a retention
+   status is introduced**. How this is represented is `DDM-9`, selected by `ADR-017`
+   (Accepted 2026-09-17), conforming to `ADR-006`. **Whether an unpublished approved listing is ever subject to a retention
    period or purge rule remains an open product question** — `OQ-13` explicitly excluded it
    and assigned it to no existing open question.
 6. ~~**Retention of rejected submissions**~~ — **Decided 2026-08-04 (Joe S. — `OQ-13`).**
@@ -340,8 +340,8 @@ review turnaround time) define "success" for the first release.
    approved listing. **Excluded from this policy:** unpublished approved listings (they
    remain under `OQ-11`'s administrative retention), the resubmission workflow, and
    category-specific retention. Historical audit events remain `OQ-14`/`NOQ-8`; duplicate
-   handling remains `OQ-12`; how retention and purge are represented remains `ADR-006`,
-   `DDM-8`, and `DDM-9`.
+   handling remains `OQ-12`; how retention and purge are represented is `DDM-8` and
+   `DDM-9`, selected by `ADR-017` (Accepted 2026-09-17), conforming to `ADR-006`.
 7. **Administrator access** — The MVP requires that only administrators can
    moderate, but *how* administrators are authenticated is an architecture
    decision deferred to later work; the requirement here is functional only.
