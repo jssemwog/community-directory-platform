@@ -446,8 +446,9 @@ fully or not at all, and is never partially public. **This is a safeguarded exce
 to the two-step sequence, not a bypass of the revision lifecycle and not a direct
 unvalidated overwrite.** Under *Approved-revision removal*, the revision this operation
 creates is applied and removed within the same atomic operation; a failure restores the
-operation's **actual** pre-operation state — no revision was pending before it began, so
-none is left behind, and the approved listing is unchanged.
+operation's **actual** pre-operation state, leaving the approved listing and any
+pre-existing pending revision unchanged; no proposal newly created by the failed operation
+remains.
 
 **What this decision does not select.** Whether the effective public version is carried
 by updating a row, writing a version record, moving a pointer, copying content, keeping
