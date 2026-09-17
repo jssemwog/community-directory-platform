@@ -372,7 +372,7 @@ the architecture, the data model, and the API all worked to establish.
 | **Actor** | Lister (unauthenticated) |
 | **Journeys** | L1 open, L2 submit, L3 correct errors |
 | **Purpose** | Let anyone propose a listing, and make clear it will be reviewed before it appears. |
-| **Actions** | Enter listing content; submit. |
+| **Actions** | Enter listing content; choose public or private for each supplied contact value and postal code; submit. |
 | **States** | Empty · In progress · **Submitting** · **Validation errors** · **Save failure** · (→ S4 on success) |
 | **Leads to** | Submission confirmation (S4) |
 
@@ -397,7 +397,13 @@ answered, and the form must now show it:
   specialised control, or `type=`-style constraint is selected here** — that remains an
   implementation choice answerable to the permissive posture.
 
-**The field set itself is unchanged — no input is added, removed, renamed, or merged.**
+**Designation choices** (ungated Product Owner policy clarification, ADR-017 Q-4, issue
+#135). For each supplied phone, email, website and postal code, the form lets the business
+choose whether that value may be displayed publicly; **the default is private**. The choice
+adds no required field and no submission obligation, and postal code stays with location,
+not contact (`FR-DATA-11c`, `FR-DATA-06b`). No control or layout is selected here.
+
+**The content field set itself is unchanged — no content input is added, removed, renamed, or merged.**
 The design still specifies the form's *structure and behavior*; what it now also specifies
 is *which obligations it communicates, and at which stage*.
 
@@ -572,7 +578,7 @@ exist is a screen designed twice.
 | **Actor** | Administrator |
 | **Journeys** | A3 edit submitted content, A6 update existing listing, A7 correct problem content |
 | **Purpose** | Correct or update a record's content. |
-| **Actions** | Change content fields; save. |
+| **Actions** | Change content fields; restrict a value's public designation; save. |
 | **States** | Editing · Saving · **Validation errors** · **Save failure** · Saved |
 | **Leads to** | Record detail (S6) |
 
@@ -597,6 +603,13 @@ version** and the **pending revision**, a clear pending-review indication, and a
 path for the revision (`docs/09` `OP-10`). Because a listing has **at most one pending
 revision at a time** (`DI-11`), the screen must also present a clear state for "this
 listing already has a pending revision" rather than silently creating a second one.
+
+**Designations on this screen** (ungated Product Owner policy clarification, ADR-017 Q-4,
+issue #135). The screen may **restrict** a contact value's or postal code's public
+designation, but offers **no way to make a business-withheld value public**. A value the
+administrator adds or replaces is **private by default** and does not inherit the replaced
+value's designation. On an approved listing a restriction is part of the pending revision,
+like any other change (`docs/09` `OP-6`, `FR-DATA-11c`).
 
 **The named exception — `FR-ADM-10b`, and it is narrow.** An authorized administrator may
 create and approve a revision within **one atomic authorized operation**, presented as a
@@ -892,7 +905,7 @@ they adapt is layout design (`DU-2`).
 |---|---|---|
 | `UP-1` | **No public screen renders a non-approved record**, in any state, for any reason. | `FR-VIS-02`, `DI-5`, **U4** |
 | `UP-2` | **No public screen renders an administrative field** — status, submitted-at, last-updated, review attribution, moderation note. | `FR-DATA-11`, `NFR-PRIV-01` |
-| `UP-3` | **No public screen renders non-public submitter data.** Contact details appear only to the extent `OQ-7` designates public. **Default: not shown.** | `NFR-PRIV-02`, `S-2` |
+| `UP-3` | **No public screen renders non-public submitter data.** Contact details, and a postal code, appear only to the extent `OQ-7` designates public — where the business designated the value public at submission and it passed moderation. **Default: not shown** (ADR-017 Q-4, issue #135). | `NFR-PRIV-02`, `FR-DATA-11c`, `FR-DATA-06b`, `S-2` |
 | `UP-4` | **No public output discloses the existence of a non-approved record** — not in a message, not in a count, not in a hint, not in an error. | `NFR-SEC-02`, `docs/09` `AP-6` |
 | `UP-5` | The search box **may not advertise a scope wider than the published field set.** | `docs/09` **P5** |
 | `UP-6` | The **moderation note is administrative-only**, and the UI says so *where it is entered*. | `NFR-PRIV-03` |

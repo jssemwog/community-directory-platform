@@ -273,7 +273,7 @@ helpful.
 |---|---|
 | **Who** | Lister (unauthenticated) |
 | **Journeys** | L1 (open form), L2 (submit), L3 (correct validation errors), L4 (receive confirmation) |
-| **Provides** | The submittable field set — listing content only. |
+| **Provides** | The submittable field set — listing content only — and the business's public/private designation for each supplied contact value and postal code (**default private**). |
 | **Returns** | Confirmation of the **resulting state**: the submission is recorded and is **pending**, and is **not yet public** (`FR-CONF-01`). |
 | **Validation** | Full validation before anything is recorded (`FR-VAL-01`, `VR-4`). Field-level errors identifying what to fix (`FR-VAL-02`). Entered input preserved so only the faulty fields need correcting (`FR-VAL-03`). |
 | **Authorization** | None — by design (`docs/03`: no accounts; `docs/01`: low friction). |
@@ -303,6 +303,11 @@ must honour and still declines to draw them as a schema:
 - **A supplied-but-invalid optional value is a validation failure, not an omission.** The
   operation must not accept the request by discarding the offending value; the failure is
   reported at field level (`AV-*`) and the value is preserved for correction.
+- **`OP-3` accepts the business's designation choices** (ungated Product Owner policy
+  clarification, ADR-017 Q-4, issue #135): for each supplied phone, email, website and
+  postal code, whether it may be displayed publicly. **The default is private.** A
+  designation adds no required field and no obligation, and postal code remains location
+  data, not contact data (`FR-DATA-11c`, `FR-DATA-06b`).
 
 **What would still close a seam by drawing it:** writing a concrete request schema with
 per-field patterns, or expressing the contact minimum as a request-shape union. The API
@@ -381,7 +386,7 @@ together with `S-8` (`OQ-14`), since choosing the lossy shape discards history t
 |---|---|
 | **Who** | Administrator (authenticated) |
 | **Journeys** | A3 (edit submitted information), A6 (update an existing listing), A7 (correct problem content) |
-| **Provides** | The record identity and the content fields to change. |
+| **Provides** | The record identity and the content fields to change, and any designation restriction. |
 | **Returns** | Confirmation of the **resulting state** (`FR-CONF-04`). |
 | **Validation** | **The same field and format rules as a public submission** — no privileged bypass (`FR-VAL-04`, `VR-6`). An administrator may not save a record a lister could not have submitted. |
 | **Authorization** | **Required.** |
@@ -404,6 +409,15 @@ rejecting it leaves the approved listing unchanged. A listing has **at most one 
 revision at a time** (`DI-11`) — `OP-6` against a listing that already has one is
 rejected, not queued, and does not disturb the pending revision or the approved
 listing.
+
+**Designations under `OP-6`** (ungated Product Owner policy clarification, ADR-017 Q-4,
+issue #135). An administrator may change a designation **only to restrict** visibility;
+`OP-6` never makes a business-withheld value public. A contact value or postal code the
+administrator adds or replaces **defaults to private** and does not inherit the replaced
+value's designation. On an approved listing a designation change is part of the pending
+revision like any other change, and follows the same approval path (`OP-10`,
+`FR-ADM-10b`) — the revision lifecycle, `DI-11` and rollback are unchanged
+(`FR-DATA-11c`).
 
 **The named exception — `FR-ADM-10b`, and it is narrow.** An authorized administrator
 may create and approve a revision within **one atomic authorized operation**. This is a
@@ -780,7 +794,7 @@ exist and be attributable — it does **not** select a product, protocol, or ses
 |---|---|---|
 | `AP-1` | Public operations return **only** the approved public field set of **approved** records. | `FR-VIS-02`, `FR-DATA-11`, `NFR-PRIV-01`, `DI-5` |
 | `AP-2` | Administrative fields — status, timestamps, review attribution, moderation notes — never appear in a public response. | `NFR-PRIV-01/03` |
-| `AP-3` | Contact details are published only to the extent `OQ-7` designates public. **Default: not public.** | `NFR-PRIV-02`, `S-2` |
+| `AP-3` | Contact details, and a postal code, are published only to the extent `OQ-7` designates public — where the business designated the value public at submission and it passed moderation. **Default: not public.** Administrators may restrict, never make a business-withheld value public; new or replacement values default to not public (ADR-017 Q-4, issue #135). | `NFR-PRIV-02`, `FR-DATA-11c`, `FR-DATA-06b`, `S-2` |
 | `AP-4` | The submission operation collects only what a listing needs. | `NFR-PRIV-04` |
 | `AP-5` | **Search scope never exceeds publication scope.** | **P5** |
 | `AP-6` | No public response — including errors, counts, and empty states — discloses the existence of a non-approved record. | `NFR-SEC-02`, `DI-5` |
