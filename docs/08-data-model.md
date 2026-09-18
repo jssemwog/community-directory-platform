@@ -155,7 +155,7 @@ second.
 | **E4** | **Review action** | **Seam S-7** | What an administrator did to a record, when, and any moderation note. May be attributes on E1 or a separate entity. | `FR-ADM-*`, `FR-CONF-02/03/04` |
 | **E5** | **Audit entry** | **Conditional — S-8** | An append-only record of an administrator action, for accountability. Exists only if `OQ-14`/`NOQ-8` commits audit logging to the MVP. | `FR-AUD-05`, `NFR-OBS-05` |
 | **E6** | **Submission safeguard data** | **Conditional — S-9** | Whatever an anti-abuse measure must retain. Exists only if `OQ-9` commits a safeguard, and its content depends entirely on which one. | `FR-SUB-09`, `NFR-SEC-06` |
-| **E7** | **Listing revision** | **Required — `S-5` resolved for `OQ-10`** | A proposed change to an already-approved listing, held apart from the currently effective public version while it awaits review. **Never publicly visible** (`DI-10`). On approval its information becomes the effective public version; on rejection the approved listing is unchanged. **Committed by `OQ-10` (Decided 2026-08-02).** | `FR-ADM-10`, `FR-ADM-10b` |
+| **E7** | **Listing revision** | **Required — `S-5` resolved for `OQ-10`** | A proposed change to an already-approved listing, held apart from the currently effective public version while it awaits review. **Never publicly visible** (`DI-10`). On approval its information becomes the effective public version; on rejection the approved listing is unchanged, and the revision carries a **write-once rejection timestamp** used only for retention eligibility (`FR-AUD-06`; issue #137). **Committed by `OQ-10` (Decided 2026-08-02).** | `FR-ADM-10`, `FR-ADM-10b` |
 
 **E3 deserves a sentence of its own.** Administrator identity is required for the MVP
 to function, but it is deliberately *not* modeled here beyond its existence and its
@@ -234,7 +234,8 @@ resource proposed for, or present in, the directory.
 listing have a stable identity independent of its content — because a listing's name
 can be corrected by an administrator (`FR-ADM-*`) and a record must survive that
 without becoming a different record. Whether that identity is a UUID, a sequence, or
-something else is a physical decision and is deferred (`DDM-2`).
+something else is a physical decision, deferred here (`DDM-2`) and selected by `ADR-017`
+(Accepted 2026-09-17).
 
 **Why `submitted at` is write-once and `last updated at` is not.** `NFR-DATA-05` fixes
 this precisely: the submission date is recorded once at submission and does not
@@ -373,8 +374,8 @@ stateDiagram-v2
 
 This second diagram describes a **product concept**, not a stored field, a status value,
 an enum, a flag, a timestamp, a table, or any other representation. `ADR-006` (Accepted)
-decides the **logical** concept; the **representation remains `DDM-9`, which is
-unresolved**. *Pending* and *rejected* records are not publicly available for
+decides the **logical** concept; the **representation is `DDM-9`, selected by `ADR-017`
+(Accepted 2026-09-17)**. *Pending* and *rejected* records are not publicly available for
 reasons already settled elsewhere, and publication state does not apply to them.
 
 **In words, because the diagram alone is not the specification.** A record enters the
@@ -433,7 +434,7 @@ history — a revision records proposed replacement content, not the content it 
 Rejected revisions keep `OQ-13`'s 90-day retention and purge. **Whether separate audit
 records of approvals exist, and general audit policy, remain `OQ-14`/`NOQ-8`** (retention
 `NOQ-7`), and seams `S-7`/`S-8` stay open. **How removal is carried out physically is not
-selected here** — it remains within `DDM-8`, which is unresolved.
+selected here** — it is within `DDM-8`, selected by `ADR-017` (Accepted 2026-09-17).
 
 **The administrator atomic path is part of this lifecycle, not an alternative to it**
 (`FR-ADM-10b`). An authorized administrator may create and approve a revision within
@@ -448,12 +449,15 @@ unvalidated overwrite.** Under *Approved-revision removal*, the revision this op
 creates is applied and removed within the same atomic operation; a failure restores the
 operation's **actual** pre-operation state, leaving the approved listing and any
 pre-existing pending revision unchanged; no proposal newly created by the failed operation
-remains.
+remains. **The operation is refused while the listing has a pending revision** (ungated
+Product Owner policy clarification — issue #137): the refusal leaves the approved listing and
+the pending revision unchanged, the existing revision must first be approved or rejected, and
+concurrent attempts preserve this rule (`DI-11`).
 
 **What this decision does not select.** Whether the effective public version is carried
 by updating a row, writing a version record, moving a pointer, copying content, keeping
 immutable history, or any other persistence mechanism — including how an approved
-proposal is physically removed — is **`DDM-8`, which remains open**. "Becomes the
+proposal is physically removed — is **`DDM-8`, selected by `ADR-017` (Accepted 2026-09-17)**. "Becomes the
 effective public version" is policy language about *which information the public sees*,
 and nothing more.
 
@@ -576,7 +580,7 @@ value's designation. A designation change to an approved listing is a change lik
 it follows *The revision lifecycle* unchanged (`FR-ADM-10`, `FR-ADM-10b`, `DI-3`, `DI-10`,
 `DI-11`). **Postal code receives the same protection but remains location data, not contact
 data** (`FR-DATA-08`). No other attribute's exposure changes, and **how designations are
-represented is not selected here** — it remains `DDM-6`, which is unresolved.
+represented is not selected here** — it is `DDM-6`, selected by `ADR-017` (Accepted 2026-09-17).
 
 **The distinction `OQ-7` draws explicitly.** *Collected* is not *published*. The form may
 need to hold a contact method used to verify the submitter rather than to display, and
@@ -608,6 +612,7 @@ by `OQ-7` (2026-07-31), against the field inventory settled by `OQ-6`.
 | **Submitter / owner** | Submitter identity; submitter contact details; separate business-owner identity | **Administrator-visible; never public** | Only where another approved requirement authorises collection at all — `OQ-7` authorises none. `FR-DATA-11b`, `NFR-PRIV-03/04` |
 | **Moderation / workflow** | Record status | **Administrator-visible** | `FR-DATA-09`, `NFR-PRIV-01` |
 | **Moderation / workflow** | Submitted-at, last-updated-at | **Administrator-visible** | `FR-AUD-02/03`, `NFR-PRIV-01` |
+| **Moderation / workflow** | Rejection timestamp — of a rejected listing, and of a rejected revision (`E7`) | **Administrator-visible; never public** | Written **once**, at rejection, **separate from last-updated-at**, and used **only** for retention eligibility (`FR-AUD-06`, `NFR-PRIV-05`; ungated Product Owner policy clarification, issue #137). **Not** review data (`S-7`) and **not** an audit record (`OQ-14`/`NOQ-8`) |
 | **Moderation / workflow** | Reviewer identity, reviewed-at, moderation note, rejection reason | **Administrator-visible** | Where they exist — shape is `S-7`. `NFR-PRIV-03` |
 | **Moderation / workflow** | **Current publication state** (publicly available or unpublished) and the **current unpublish reason** | **Administrator-visible; never public** | **Required by `OQ-11`** (Decided) — current administrative state, not a historical record. `NFR-PRIV-03` |
 | **Moderation / workflow** | Approval history, unpublishing history, other internal workflow information | **Administrator-visible** | Where they exist — **whether durable historical event records exist is `OQ-14`/`NOQ-8`**, not `OQ-11`; retention is `OQ-13`. `NFR-PRIV-03` |
@@ -626,7 +631,7 @@ and they leave this classification, and the `OQ-7` public/withheld boundary, exa
 as they were. It adds no business-profile field, no contact form, no messaging
 service, and no social-media field. And it selects **no mechanism**: whether the
 public/withheld boundary and the per-contact visibility designation are expressed as
-flags, a separate structure, or otherwise remains `DDM-6`.
+flags, a separate structure, or otherwise is `DDM-6`, selected by `ADR-017` (Accepted 2026-09-17).
 
 ---
 
@@ -789,6 +794,13 @@ decision and to provide moderation context for a bounded time — then purged.**
 uniform rule covers **rejected initial submissions and rejected approved-listing
 revisions**. Both requirements are now **Must**, and neither had to be amended.
 
+**The retention anchor** (ungated Product Owner policy clarification — ADR-017 Q-1/Q-2,
+issue #137). The 90 days are measured from a **write-once rejection timestamp** recorded on
+the rejected listing or the rejected revision, **separate from last-updated**, whose **only**
+purpose is retention eligibility. It is administrator-visible and never public; it is **not**
+review data (`S-7`) and **not** an audit record (`OQ-14`/`NOQ-8`). How it is represented is
+`DDM-9`, selected by `ADR-017` (Accepted 2026-09-17).
+
 The resolution space is narrower than it first appears:
 
 - **"Retain forever"** satisfies `FR-AUD-06` and **violates** `NFR-PRIV-05`. A rejected
@@ -805,7 +817,7 @@ requirement rather than a nice-to-have**. `OQ-13` committed **purge execution to
 as a system obligation** (`FR-AUD-06`) precisely because a retention period with no
 mechanism to enforce it is retention forever with extra paperwork. It is not an
 administrator-invoked action and needs no per-record decision. **How it is carried out —
-soft delete, hard delete, or otherwise — remains `DDM-9`, which is unresolved.** `ADR-006`
+soft delete, hard delete, or otherwise — is `DDM-9`, selected by `ADR-017` (Accepted 2026-09-17).** `ADR-006`
 (Accepted) settles the **logical** obligation and selects **no** representation for it.
 
 **Retention questions the model records and does not answer:**
@@ -945,7 +957,7 @@ The invariants. Each must hold at every moment, not merely after a successful op
 | `DI-3` | Every create, edit, or moderation action completes **fully or not at all**. No record is ever left partially written — and in particular, never **partially public**. | `NFR-DATA-03` |
 | `DI-4` | Administrative attributes are settable only by the system or an authorized administrator, and are never modifiable by a public actor. | `NFR-DATA-04` |
 | `DI-5` | **No record whose status is not *approved* is reachable through any public path** — not by browsing, not by search, not by direct reference to its identity, and not by a restored backup. | `FR-VIS-02`, `NFR-PRIV-03`, `NFR-BACK-04` |
-| `DI-6` | `submitted at` is written once and never changes. `last updated at` changes on **every** content **or status** change. | `NFR-DATA-05` |
+| `DI-6` | `submitted at` is written once and never changes. `last updated at` changes on **every** content **or status** change. A **rejection timestamp**, where one exists, is written once and never changes (issue #137). | `NFR-DATA-05`, `FR-AUD-06` |
 | `DI-7` | Stored data reflects the last successful action, with no silent loss or alteration. | `NFR-DATA-06` |
 | `DI-8` | A record's identity is stable for its entire life and survives every content edit and status change. | **P2** |
 | `DI-9` | A category value on a listing always references a member of the predefined set. | `FR-DATA-02`, `FR-DATA-10` |
@@ -990,14 +1002,14 @@ contribution to them.
 | `OQ-4` | Which fields are searched, and is matching exact, partial or fuzzy? | Determines which attributes must be efficiently searchable. Search scope must never exceed publication scope. | `S-4` |
 | `OQ-5` | Single vs. multiple category; who curates the set; can administrators manage it? | Many-to-one vs. many-to-many is **structural**, not a field addition. If administrators curate the set, the category set becomes *mutable data*, not configuration. | `S-3` |
 | ~~`OQ-6`~~ **Decided** | Location granularity and the location-field set. | **Answered:** locality and country **required**; administrative area and postal code **optional**; precise/residential street address **not collected**; multi-country capable from launch. The `E1` attributes and the required/optional classification above are updated accordingly. Normalisation remains open (`DDM-5`). | `S-6` — **resolved** |
-| ~~`OQ-7`~~ **Decided** | Which listing/contact fields are public vs. withheld? | **Answered:** public = business name, category, description, locality, country, administrative area where provided, postal code where provided and designated public, and each contact method the business designated public. Everything else is administrator-visible or audit-only. *Collected* and *published* are separated explicitly; no field was added to the collection inventory. Mechanism remains `DDM-6`. | `S-2` — **resolved** |
+| ~~`OQ-7`~~ **Decided** | Which listing/contact fields are public vs. withheld? | **Answered:** public = business name, category, description, locality, country, administrative area where provided, postal code where provided and designated public, and each contact method the business designated public. Everything else is administrator-visible or audit-only. *Collected* and *published* are separated explicitly; no field was added to the collection inventory. Mechanism: `DDM-6`, selected by `ADR-017` (Accepted 2026-09-17). | `S-2` — **resolved** |
 | ~~`OQ-8`~~ **Decided** | Which fields are required at submission, and with what format checks? | **Answered:** required at initial submission = name, category, description, locality, country; optional at initial submission = administrative area, postal code, phone, email, website. Format checks are **permissive, international-friendly, technology-neutral**. A supplied-but-invalid optional value fails visibly, is preserved for correction, and is never treated as absent. An administrator may complete or correct information before approval **without bypassing validation**. Fills `VR-S1` and `VR-S3`. **"Required at submission" and "required before approval" are now separate and separately stated.** No field added or removed. | `S-1` — **resolved** |
 | ~~`OQ-8b`~~ **Decided** | Is at least one contact method enforced per listing? | **Answered: yes — before approval, not at initial submission.** At least one **usable** phone, email, or website is required before a listing may be approved; a submission may enter moderation with none. Location and address information never count. **No offline-business exemption.** Fills `VR-S2` — a cross-field constraint that cannot be expressed as a per-field obligation, and is deliberately still **not** expressed as a schema constraint (`DD-1`). | `S-1` — **resolved** |
 | `OQ-9` | Any anti-spam safeguard on the unauthenticated form? | Decides whether `E6` exists and what it holds. Most safeguards retain data about a non-consenting person. | `S-9` |
-| ~~`OQ-10`~~ **Decided** | Does a change to an approved listing publish immediately, or need secondary review? | **Answered:** secondary review. The approved listing stays public at its last approved version; the change is held as a **pending revision** that is never public (`DI-10`); approval makes it the effective public version; rejection leaves the approved listing unchanged. At most one pending revision per listing (`DI-11`). Entity **`E7` is committed**; **no listing status was added**. Storage mechanism remains `DDM-8`. | `S-5` — **resolved for `OQ-10`** |
-| ~~`OQ-11`~~ **Decided** | Can administrators unpublish or remove an approved listing? | **Answered:** an authorized administrator may **unpublish** and **republish**; unpublishing is reversible, needs a current reason and explicit confirmation, and excludes the listing from every public read path. **The three-value status set of `FR-AUD-01` survives unchanged** — publication state is modelled as a **separate product concept**, not a fourth status, on the `OQ-10` precedent. A pending revision stays pending; approving one while unpublished does not republish. **Permanent deletion is excluded from the MVP.** Representation remains `ADR-006` / `DDM-9`. | `S-5` — **resolved** |
+| ~~`OQ-10`~~ **Decided** | Does a change to an approved listing publish immediately, or need secondary review? | **Answered:** secondary review. The approved listing stays public at its last approved version; the change is held as a **pending revision** that is never public (`DI-10`); approval makes it the effective public version; rejection leaves the approved listing unchanged. At most one pending revision per listing (`DI-11`). Entity **`E7` is committed**; **no listing status was added**. Storage mechanism: `DDM-8`, selected by `ADR-017` (Accepted 2026-09-17). | `S-5` — **resolved for `OQ-10`** |
+| ~~`OQ-11`~~ **Decided** | Can administrators unpublish or remove an approved listing? | **Answered:** an authorized administrator may **unpublish** and **republish**; unpublishing is reversible, needs a current reason and explicit confirmation, and excludes the listing from every public read path. **The three-value status set of `FR-AUD-01` survives unchanged** — publication state is modelled as a **separate product concept**, not a fourth status, on the `OQ-10` precedent. A pending revision stays pending; approving one while unpublished does not republish. **Permanent deletion is excluded from the MVP.** Representation: `DDM-9`, selected by `ADR-017` (Accepted 2026-09-17), conforming to `ADR-006`. | `S-5` — **resolved** |
 | `OQ-12` | How are duplicate/near-duplicate submissions resolved? | Fills `VR-S6`; may require attributes or a relationship to express "duplicate of". | `S-10` |
-| ~~`OQ-13`~~ **Decided** | Are rejected submissions retained or discarded? | **Answered:** retained, then purged. **Rejected initial submissions and rejected approved-listing revisions**, one uniform rule: **90 days from rejection**, administrator-visible only, **terminal**, then **purge-eligible** and purged. The `FR-AUD-06` / `NFR-PRIV-05` contradiction is resolved with **neither requirement amended** — both are now **Must**. **A purge capability is mandatory and committed** as a **system obligation**; its representation stays `DDM-9` / `ADR-006`. **Unpublished approved listings excluded**; audit events remain `OQ-14`/`NOQ-8`. | `S-11` — **resolved** |
+| ~~`OQ-13`~~ **Decided** | Are rejected submissions retained or discarded? | **Answered:** retained, then purged. **Rejected initial submissions and rejected approved-listing revisions**, one uniform rule: **90 days from rejection**, administrator-visible only, **terminal**, then **purge-eligible** and purged. The `FR-AUD-06` / `NFR-PRIV-05` contradiction is resolved with **neither requirement amended** — both are now **Must**. **A purge capability is mandatory and committed** as a **system obligation**; its representation is `DDM-9`, selected by `ADR-017` (Accepted 2026-09-17), conforming to `ADR-006`. **Unpublished approved listings excluded**; audit events remain `OQ-14`/`NOQ-8`. | `S-11` — **resolved** |
 | `OQ-14` | Are administrator actions recorded in an audit log? | Decides whether `E5` exists. **Cannot be answered retrospectively** — uncaptured history is gone. | `S-8` |
 | `NOQ-3` | Backup frequency, recovery point, recovery time? | Constrains the store's required durability properties. | — |
 | `NOQ-4` | Expected corpus size and load? | Determines whether the query needs above are trivial or demanding. | — |
@@ -1008,16 +1020,16 @@ contribution to them.
 | Seam | Where the model is deliberately incomplete | Blocked on |
 |---|---|---|
 | ~~`S-1`~~ **Resolved** | The submission obligation set — required fields, contact minimum, formats. **Filled by `OQ-8` and `OQ-8b`:** required at initial submission = name, category, description, locality, country; optional at initial submission = administrative area, postal code, phone, email, website; **at least one usable contact method before approval**; permissive, international-friendly, technology-neutral format checks. See `VR-S1`, `VR-S2`, `VR-S3` above. **Only the obligations and the validation posture are fixed — no field was added or removed, and the mechanism that expresses them remains `DD-1`.** | ~~`OQ-8`~~, ~~`OQ-8b`~~ — **Decided** |
-| ~~`S-2`~~ **Resolved** | Field-level public/private designation. **Default: not public** — and the default stands for any attribute added later. **Filled by `OQ-7`:** see *Field classification* above. **Only the designation is fixed — the enforcement mechanism remains `DDM-6`.** Designation authority and defaults: ungated Product Owner policy clarification (ADR-017 Q-4, issue #135) — see *Designation authority and defaults* above. | ~~`OQ-7`~~ — **Decided** |
+| ~~`S-2`~~ **Resolved** | Field-level public/private designation. **Default: not public** — and the default stands for any attribute added later. **Filled by `OQ-7`:** see *Field classification* above. **Only the designation is fixed — the enforcement mechanism is `DDM-6`, selected by `ADR-017` (Accepted 2026-09-17).** Designation authority and defaults: ungated Product Owner policy clarification (ADR-017 Q-4, issue #135) — see *Designation authority and defaults* above. | ~~`OQ-7`~~ — **Decided** |
 | `S-3` | Category cardinality and curation; whether the set is configuration or data. | `OQ-5` |
 | `S-4` | Searchable attribute set and matching mode. | `OQ-4` |
-| ~~`S-5`~~ **Fully resolved** | Edit-after-approval and removal. **Resolved for `OQ-10`:** `E7` exists and is committed; the revision lifecycle is defined above; **no fourth listing status was introduced**. **Resolved for `OQ-11` (2026-08-04):** an approved listing **may** be unpublished and republished; this is a **publication-state** change modelled separately from listing status, so again **no fourth listing status was introduced** and `FR-AUD-01` is unchanged. The complete surface is recorded — the status-model question and the pending-revision interaction (`R-11`/`R-12`) included. **The seam is closed.** Representation remains `DDM-9`; retention remains `OQ-13`. | ~~`OQ-10`~~ — **Decided**; ~~`OQ-11`~~ — **Decided** |
+| ~~`S-5`~~ **Fully resolved** | Edit-after-approval and removal. **Resolved for `OQ-10`:** `E7` exists and is committed; the revision lifecycle is defined above; **no fourth listing status was introduced**. **Resolved for `OQ-11` (2026-08-04):** an approved listing **may** be unpublished and republished; this is a **publication-state** change modelled separately from listing status, so again **no fourth listing status was introduced** and `FR-AUD-01` is unchanged. The complete surface is recorded — the status-model question and the pending-revision interaction (`R-11`/`R-12`) included. **The seam is closed.** Representation is `DDM-9`, selected by `ADR-017` (Accepted 2026-09-17); retention policy is `OQ-13`. | ~~`OQ-10`~~ — **Decided**; ~~`OQ-11`~~ — **Decided** |
 | ~~`S-6`~~ **Resolved** | Location attributes — which exist, which are required. **Filled by `OQ-6`:** locality (required), country (required), administrative area (optional), postal code (optional); no street address. **Only the obligation is fixed — representation and normalisation remain `DDM-5`.** | ~~`OQ-6`~~ — **Decided** |
-| `S-7` | Review data shape — attributes on `E1`, or a separate `E4`. **Resolve with `S-8`.** | `OQ-14` (dependency) |
+| `S-7` | Review data shape — attributes on `E1`, or a separate `E4`. **Resolve with `S-8`.** The write-once **rejection timestamps** used only for retention eligibility (issue #137) are **not** review data and do not fill this seam. | `OQ-14` (dependency) |
 | `S-8` | Audit entries — whether `E5` exists. | `OQ-14`, `NOQ-8` |
 | `S-9` | Anti-spam data — whether `E6` exists and what it holds. | `OQ-9` |
 | `S-10` | Duplicate representation. | `OQ-12` |
-| ~~`S-11`~~ **Resolved** | Rejected-record retention and purge. **Filled by `OQ-13` (2026-08-04):** rejected initial submissions and rejected approved-listing revisions are retained **90 days from rejection**, administrator-visible only, terminal, then purge-eligible and purged; purge is a committed **system obligation**. **Only the policy is fixed.** `ADR-006` (Accepted) settles the *logical* lifecycle; **the representation of retention and purge remains `DDM-9`, which is unresolved.** | ~~`OQ-13`~~ — **Decided** |
+| ~~`S-11`~~ **Resolved** | Rejected-record retention and purge. **Filled by `OQ-13` (2026-08-04):** rejected initial submissions and rejected approved-listing revisions are retained **90 days from rejection**, administrator-visible only, terminal, then purge-eligible and purged; purge is a committed **system obligation**. **Only the policy is fixed.** `ADR-006` (Accepted) settles the *logical* lifecycle; **the representation of retention and purge is `DDM-9`, selected by `ADR-017` (Accepted 2026-09-17).** | ~~`OQ-13`~~ — **Decided** |
 
 ---
 
@@ -1030,14 +1042,14 @@ above: an open question is a *product* decision someone must make; a deferred de
 | ID | Deferred decision | Why it is not here | Blocked on |
 |---|---|---|---|
 | `DDM-1` | **The store product.** ~~No database engine, service or vendor is selected.~~ ~~**The engine is selected — PostgreSQL, under a managed operating posture. No managed service or vendor is selected.**~~ **The engine is selected — PostgreSQL, under a managed operating posture (`ADR-003`) — and the named managed service and vendor is selected: DigitalOcean Managed PostgreSQL (`ADR-013`).** | `docs/07` `DD-3`. A store cannot be responsibly chosen against an unknown recovery point objective — and ~~`NOQ-3`~~ is now **Decided**, so that precondition is satisfied. ~~**What still holds it is the unresolved `DG-2` technology-stack decision**~~ — **`ADR-003` is `Accepted` 2026-08-23 (issue #81) and in force, and it discharges `DD-3`.** ~~**`DDM-1` is not thereby fully discharged:** the owner's provider-deferral ruling leaves the **named managed service and vendor** outstanding, and `ADR-010`'s provider-capability validation remains outstanding with them.~~ **The named managed service and vendor half that ruling deferred is now decided: `ADR-013` is `Accepted` 2026-09-03 (issue #103) and in force, selecting DigitalOcean Managed PostgreSQL, so `DDM-1`'s named-provider portion is discharged.** A satisfied precondition is not authorization. | **The named managed service / vendor — discharged** by `Accepted` `ADR-013`, 2026-09-03 (issue #103): **DigitalOcean Managed PostgreSQL**. ~~deferred by owner ruling 2026-08-23~~; ~~`DG-2`~~, ~~`NOQ-3`~~ **Decided**. **Still outstanding, and not discharged by naming the provider:** `ADR-010`'s **provider-capability validation** (to be re-verified against current official documentation **before** provisioning), its **independent off-provider recoverable copy** and its **restore rehearsals**; and **no provisioning has occurred** — no account, no cluster, and no region, tier, sizing or PostgreSQL version selected. **`DDM-2`–`DDM-10` are untouched**: no schema, column, key, constraint, index, search implementation, ORM, driver, pooler or migration decision is made here |
-| `DDM-2` | **Identity strategy** — UUID, sequence, natural key. | Physical (modeling principle **P6**, *Logical is not physical* — not a project phase). The logical requirement is only that identity be stable and content-independent (`DI-8`). | — |
+| `DDM-2` | **Identity strategy** — UUID, sequence, natural key. **Selected: opaque random UUID v4 for listing and revision identity, also the public listing identity (`ADR-017` PS-1, `Accepted` 2026-09-17, issue #137).** | Physical (modeling principle **P6**, *Logical is not physical* — not a project phase). The logical requirement is only that identity be stable and content-independent (`DI-8`). | **Discharged** by `Accepted` `ADR-017`, 2026-09-17 (issue #137). **Still outstanding:** the identity generation locus (application or database default). **No implementation is authorized** |
 | `DDM-3` | **Category representation** — enumeration, reference table, or configuration. | Depends on whether administrators curate the set at runtime. | `OQ-5` |
 | `DDM-4` | **Indexing and text-search strategy.** | Physical. Depends on corpus size and search scope. | `OQ-4`, `NOQ-4` |
 | `DDM-5` | **Normalization of location** — locality, administrative area, country, and postal code as free text, a reference table, or a standardised list. | **Still open.** `OQ-6` fixed *which* location attributes exist and their obligations; it selected **no** country list, format library, validation expression, storage type, or external service. | — (open; physical) |
-| `DDM-6` | **Physical separation of non-public attributes, and the representation of per-contact public-display designations** — same record, separate related structure, flags, or otherwise. | **Still open.** An implementation of the `S-2` boundary; `OQ-7` fixed the *boundary* and the designation *obligation*, not the *mechanism*. | — (open; physical) |
+| `DDM-6` | **Physical separation of non-public attributes, and the representation of per-contact public-display designations** — same record, separate related structure, flags, or otherwise. | ~~**Still open.**~~ *(Assessment before `ADR-017`.)* An implementation of the `S-2` boundary; `OQ-7` fixed the *boundary* and the designation *obligation*, not the *mechanism*. **Selected: non-public attributes and mandatory per-value designations, default *not public*, on the same row, read through one public projection (`ADR-017` PS-2, `Accepted` 2026-09-17, issue #137).** | **Discharged** by `Accepted` `ADR-017`, 2026-09-17 (issue #137). **Still outstanding:** the public projection form (view or single `C9` query module), replacement-value semantics and restriction-only enforcement on the write paths. **No implementation is authorized** |
 | `DDM-7` | **Audit-entry storage** — same store, separate store, or append-only log. | Only meaningful once `E5` is known to exist. | `OQ-14` |
-| `DDM-8` | **Revision storage and the representation of the effective public version** — row update, version record, pointer, copy, immutable history, or otherwise. | **Still open, and now meaningful.** `OQ-10` committed `E7` and fixed *which information the public sees and when*; it selected **no** persistence mechanism. "Becomes the effective public version" is policy language, not a storage design. | — (open; physical) |
-| `DDM-9` | **Soft-delete vs. hard-delete** representation, **and the representation of publication state and of purge** — status value, flag, timestamp, separate structure, or otherwise. | **Still open, and now fully meaningful.** `OQ-11` is Decided: it authorises **reversible unpublishing**, excludes **permanent deletion** from the MVP, and fixes publication state as a **product concept** — selecting **no** representation. `OQ-13` is Decided: it commits **purge as a system obligation** for rejected records — and likewise selects **no** representation. **Whether a purge is a physical destruction or a logical marking is precisely what this question still owns**, and both decisions deliberately left it here. | ~~`OQ-13`~~, ~~`OQ-11`~~ — **both Decided, both select no representation** |
+| `DDM-8` | **Revision storage and the representation of the effective public version** — row update, version record, pointer, copy, immutable history, or otherwise. | ~~**Still open, and now meaningful.**~~ *(Assessment before `ADR-017`.)* `OQ-10` committed `E7` and fixed *which information the public sees and when*; it selected **no** persistence mechanism. "Becomes the effective public version" is policy language, not a storage design. **Selected: effective content on the listing row; separate complete-content revision rows with designations; approved rows removed in the applying transaction; only *pending* and *rejected* revision states persist; per-listing row lock serializing revision work, with pending uniqueness as backstop (`ADR-017` PS-3 to PS-6, PS-11, `Accepted` 2026-09-17, issue #137).** | **Discharged** by `Accepted` `ADR-017`, 2026-09-17 (issue #137). **Still outstanding:** stale-edit detection and resolution policy (and any version token), the isolation level for revision transactions, and replacement-value semantics. **No implementation is authorized** |
+| `DDM-9` | **Soft-delete vs. hard-delete** representation, **and the representation of publication state and of purge** — status value, flag, timestamp, separate structure, or otherwise. | ~~**Still open, and now fully meaningful.**~~ *(Assessment before `ADR-017`.)* `OQ-11` is Decided: it authorises **reversible unpublishing**, excludes **permanent deletion** from the MVP, and fixes publication state as a **product concept** — selecting **no** representation. `OQ-13` is Decided: it commits **purge as a system obligation** for rejected records — and likewise selects **no** representation. ~~**Whether a purge is a physical destruction or a logical marking is precisely what this question still owns**, and both decisions deliberately left it here.~~ **`ADR-017` selects physical purge** (PS-10), which both decisions had left to this question. | ~~`OQ-13`~~, ~~`OQ-11`~~ — **both Decided, both select no representation**. **Discharged** by `Accepted` `ADR-017`, 2026-09-17 (issue #137): listing status as a checked three-value datum; a publication-state datum present only while *approved*; write-once rejection timestamps present only when *rejected*; no deletion path for approved listings; derived purge-eligibility and physical purge (PS-7 to PS-10). **Still outstanding:** purge scheduling, execution and restoration procedure. **No implementation is authorized** |
 | `DDM-10` | **Migration and schema-evolution tooling.** **Selected: Kysely's built-in `Migrator` (`ADR-015`, `Accepted` 2026-09-14, issue #121).** | Out of scope for a logical model entirely. | **Discharged** by `Accepted` `ADR-015`, 2026-09-14 (issue #121): **Kysely's built-in `Migrator`**. **Still outstanding, and not discharged by selecting the tool:** migration contents; migration authoring-format policy beyond what the `Migrator` makes inseparable; `kysely-ctl` versus programmatic invocation; migration execution environment and timing; and rollback / down-migration policy. The application pool configuration and any external pooler remain unselected (the PostgreSQL driver/client and Kysely dialect, which `ADR-015` left unselected, are since selected by `Accepted` `ADR-016`, 2026-09-15: `pg` through Kysely core `PostgresDialect`); **nothing is installed and no migration exists**. **`DDM-2`–`DDM-9` are untouched** |
 
 **`DDM-8` and `DDM-9` are not `ADR-006`'s to decide, and the boundary is worth stating
@@ -1048,10 +1060,10 @@ public version, the projection, and retention and purge stated as rules and deri
 conditions. It selects **no physical representation for any of them**. **`DDM-8` therefore
 remains responsible for revision storage and for how the effective public version is carried,
 and `DDM-9` remains responsible for the representation of publication state, of retention and
-purge, and for soft-delete versus hard-delete — and both remain unresolved.** What `ADR-006`
-does supply is the set of **logical requirements those later representations must satisfy**;
-**`ADR-006` is Accepted, so `DDM-8` and `DDM-9` must conform to it** — while remaining
-**unresolved** in every other respect.
+purge, and for soft-delete versus hard-delete — and both remained unresolved until `ADR-017`
+was `Accepted` (2026-09-17, issue #137), which selects them.** What `ADR-006` does supply is the
+set of **logical requirements those representations must satisfy**; **`ADR-006` is Accepted, so
+`DDM-8` and `DDM-9` conform to it** — and `ADR-017` selects them in conformance.
 
 **`DDM-6` is worth a second look**, because it is the one most likely to be mistaken for a
 logical decision. Whether withheld contact fields sit on the same record as public ones, or
@@ -1158,7 +1170,8 @@ Adding `deleted_at` would once have decided `OQ-11`; `OQ-11` is now Decided, but
 risk simply moved — with `OQ-13` also Decided, adding a `deleted_at`, a publication flag, a
 retention timestamp, or a fourth status value now decides **`DDM-9`** and pre-empts
 **`ADR-006`**, and choosing *how* the committed purge is carried out decides `DDM-9` rather
-than `OQ-13`. None of these would feel like a decision at the time —
+than `OQ-13` — which is why `DDM-9` was decided by `ADR-017` (Accepted 2026-09-17) rather than
+by drawing. None of these would feel like a decision at the time —
 each would feel like drawing an obvious box. **Mitigation:** the eleven named seams, and the
 rule-slot device (**P7**) that keeps a pending rule visible as pending — and, when it is
 answered, records *how far* the answer reached.

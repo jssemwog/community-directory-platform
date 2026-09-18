@@ -618,6 +618,9 @@ revision lifecycle, not around it:
 
 - **Only an authorized administrator may use it.**
 - **Revision creation and approval may occur in one atomic operation.**
+- **It is refused while the listing has a pending revision** (issue #137). The screen must
+  present that refusal clearly, leave the approved listing and the pending revision
+  unchanged, and direct the administrator to approve or reject the existing revision first.
 - **Every applicable validation and authorization check remains mandatory** — the screen
   presents the same field-level error behavior, with no laxer path (`FR-VAL-04`, `UV-6`).
 - **No revised information becomes publicly visible before those checks succeed.**
@@ -632,7 +635,8 @@ revision was recorded, or its information became the effective public version. "
 not sufficient, for exactly the reason the general rule exists.
 
 **Layout, controls, and the visual treatment of the two-version view are not designed
-here**, and no persistence mechanism is implied (`DDM-8`, open).
+here**, and no persistence mechanism is implied here (`DDM-8` is selected by `ADR-017`,
+Accepted 2026-09-17).
 
 ---
 

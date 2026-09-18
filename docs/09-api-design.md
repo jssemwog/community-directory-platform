@@ -428,6 +428,10 @@ terms:
   (`FR-AUTH-01`, `FR-VIS-09`).
 - **Revision creation and approval may occur in one atomic operation** — one authorized
   action, deliberately taken.
+- **It is refused while the listing has a pending revision** (ungated Product Owner policy
+  clarification — issue #137). The refusal leaves the approved listing and the pending
+  revision unchanged; the existing revision must first be approved or rejected (`OP-10`);
+  concurrent attempts preserve this rule (`DI-11`).
 - **Every applicable validation and authorization check remains mandatory**, exactly as
   for a separately submitted revision (`FR-VAL-04`, `VR-6`, `AV-4`). There is no laxer
   path and no privileged bypass.
@@ -442,7 +446,7 @@ terms:
 
 **This document selects no persistence mechanism.** Whether the effective public version
 is carried by updating a record, writing a version record, moving a pointer, copying
-content, or retaining immutable history is **`DDM-8`, which remains open**. `OP-10` is
+content, or retaining immutable history is **`DDM-8`, selected by `ADR-017` (Accepted 2026-09-17)**. `OP-10` is
 specified below as a committed operation.
 
 ---
@@ -477,6 +481,10 @@ approval that half-succeeds — status written, content not, or the reverse — 
 And note the ordering constraint `docs/08` `DI-3` implies: there must be no instant at
 which a record is *approved* but incompletely written, because that instant is a
 partially public record.
+
+**Rejection records a write-once rejection timestamp** in the same atomic transition,
+separate from last-updated and used only for retention eligibility (`FR-AUD-06`; issue #137).
+It is never public and is not review data (`S-7`).
 
 **The moderation note is never public** (`docs/08`, `NFR-PRIV-03`). It appears in the
 administrative projection only. This matters because `A7` invites administrators to record
@@ -549,7 +557,8 @@ committed. It was never a permissions toggle, and the caution was correct — th
 simply resolved the status-model question a different way.
 
 **Technology-neutral.** No route, method, payload schema, status code, transport, cache
-behavior, or store mechanism is selected here; representation remains `ADR-006` / `DDM-9`.
+behavior, or store mechanism is selected here; representation is `DDM-9`, selected by `ADR-017`
+(Accepted 2026-09-17), conforming to `ADR-006`.
 
 ### OP-10 *(committed — `S-5` resolved for `OQ-10`)* — Approve a pending revision
 
@@ -571,13 +580,15 @@ that revision's information the **effective public version** of its listing. Req
 public — it is not a removal, an unpublishing, or a content change. Retention of a
 rejected revision is **`OQ-13`**, **Decided 2026-08-04**: a rejected revision is retained
 for **90 days from the rejection**, reachable only through the administrative projection,
-and then purged. **No operation in this document purges it.** `OQ-13` committed purge as a
+and then purged. The 90 days are measured from the revision's **write-once rejection
+timestamp**, recorded when it is rejected and used only for retention eligibility (issue #137). **No operation in this document purges it.** `OQ-13` committed purge as a
 **system obligation** (`FR-AUD-06`) rather than an actor-invoked action, so it is not an
 operation and **no operation identifier was created**. Purging a rejected revision changes
 **nothing** about the approved listing or its current approved version.
 
 **Not designed in detail here:** the request and response shapes, and the persistence
-mechanism by which the effective public version changes (**`DDM-8`, open**).
+mechanism by which the effective public version changes (**`DDM-8`, selected by `ADR-017`,
+Accepted 2026-09-17**).
 
 ### "Read allowed status values" — evaluated, and *not* included
 
