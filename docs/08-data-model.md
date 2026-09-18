@@ -510,6 +510,17 @@ may alter status — not a public form, not a bulk import, not a direct store wr
   the approved listing unchanged (`FR-ADM-10`) and likewise **leaves it unpublished** — a
   rejection is not a publication act either. A later explicit republish exposes the
   then-current approved version.
+- **A repeated unpublish or republish action is refused** (ungated Product Owner
+  clarification, issue #139): unpublishing a listing that is already unpublished, and
+  republishing one that is already publicly available, are both refused and change the
+  listing, its publication state and its **current reason** not at all. A second
+  unpublish therefore never replaces the recorded current reason. The refusal is **inert
+  with respect to the listing** — not a partial application, and the record is left as it
+  stands (`DI-3`). **That concerns listing state, not audit:** whether a refused action is
+  recorded anywhere remains `OQ-14`/`NOQ-8`, which this clarification neither answers nor
+  constrains. The capability itself is unchanged (`FR-ADM-12`), and the two publication
+  states remain a concept separate from the three listing statuses — **no fourth listing
+  status** arises from it.
 - **Ordinary public-user removal requests are outside MVP scope.** Unpublishing is
   administrator-initiated only.
 

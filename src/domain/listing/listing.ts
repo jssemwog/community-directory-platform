@@ -10,15 +10,18 @@
  * Deliberately absent, because Slice A does not own them:
  * - **Submitted-at / last-updated-at** (`FR-AUD-02/03`, `DI-6`) — `DI-6` belongs to a
  *   later slice, and no timestamp is added here by convention.
- * - **Publication state** (`OQ-11`) — a separate product concept whose representation is
- *   `DDM-9`, unresolved (`ADR-006` *Explicit deferrals*).
  * - **Review data** (`E4`) — seam `S-7`, open.
+ *
+ * **Publication state** (`OQ-11`) was absent in Slice A because its representation was
+ * `DDM-9`, unresolved. `DDM-9` is discharged by `Accepted` `ADR-017` (2026-09-17), so
+ * `P1` Slice B adds it below as the separate product concept it is (issue #139).
  *
  * This is a **logical** model (`docs/08` **P6**): meanings and obligations, never column
  * types, keys, indexes, nullability, or storage shape.
  */
 
 import type { ListingId } from "./listing-id";
+import type { PublicationState } from "./publication";
 import type { ListingStatus } from "./status";
 
 /**
@@ -70,14 +73,32 @@ export interface Listing {
   readonly id: ListingId;
   readonly status: ListingStatus;
   readonly content: ListingContent;
+  /**
+   * `P1` Slice B — publication state (`OQ-11`), a **separate product concept** from
+   * status and never a fourth status value.
+   *
+   * Optional on the type because it **applies only while *approved*** (`docs/08`
+   * *Status model → Publication state*): a *pending* or *rejected* listing has none,
+   * and one carrying a state is refused. Optional is not a default: an approved listing
+   * whose state is missing is refused rather than treated as publicly available
+   * (`resolvePublicationState`, `FR-MOD-01`).
+   */
+  readonly publication?: PublicationState;
 }
 
 /**
- * Replaces a listing's content, leaving its identity and status untouched.
+ * Replaces a listing's content, leaving its identity, status and publication state
+ * untouched.
  *
  * This is the content-edit operation `DI-8` is stated over: a record survives an edit
  * without becoming a different record. It is pure — the input listing is not mutated.
+ *
+ * **Publication state is preserved deliberately** (`P1` Slice B): a content change is
+ * not a publication act, so an unpublished listing stays unpublished when its content is
+ * replaced — including when that content came from an approved revision (`docs/08` *The
+ * unpublish and republish lifecycle*; `FR-MOD-01`). Only an explicit republish makes a
+ * listing public again.
  */
 export function withListingContent(listing: Listing, content: ListingContent): Listing {
-  return { id: listing.id, status: listing.status, content };
+  return { ...listing, content };
 }

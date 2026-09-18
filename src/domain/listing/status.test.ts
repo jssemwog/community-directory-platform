@@ -25,8 +25,18 @@ const content: ListingContent = {
   country: "IE",
 };
 
+/**
+ * An approved listing carries a valid publication state, because `P1` Slice B (issue
+ * #139) makes that part of what an approved listing *is* (`docs/08` *Status model ->
+ * Publication state*). The fixture supplies it so these tests keep attacking transition
+ * legality — their subject — rather than tripping over a listing that is invalid for an
+ * unrelated reason. Publication state's own rules are attacked in `publication.test.ts`.
+ */
 function listingAt(status: ListingStatus): Listing {
-  return { id: listingIdOf("listing-1"), status, content };
+  const base = { id: listingIdOf("listing-1"), status, content };
+  return status === "approved"
+    ? { ...base, publication: { value: "publicly_available" as const } }
+    : base;
 }
 
 /** The `NFR-DATA-02` enumeration, written out again here so the test asserts the rule

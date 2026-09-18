@@ -29,8 +29,10 @@ export function err<E>(error: E): Err<E> {
 }
 
 /**
- * The governed failures Slice A can report. Each corresponds to a rule stated in
- * the approved chain; no code exists here for a rule Slice A does not implement.
+ * The governed failures the domain can report. Each corresponds to a rule stated in
+ * the approved chain; no code exists here for a rule the domain does not implement.
+ *
+ * `P1` Slice B adds the publication-state failures (`OQ-11`, issue #139).
  */
 export type DomainError =
   /** `DI-2` — the ordered status pair is outside the `NFR-DATA-02` permitted set. */
@@ -48,4 +50,35 @@ export type DomainError =
   /** `FR-ADM-10` — only a proposal in the *pending* revision state can enter the pending state. */
   | { readonly code: "REVISION_NOT_PENDING"; readonly state: string }
   /** `DI-11` — an approved listing has no more than one pending revision at a time. */
-  | { readonly code: "PENDING_REVISION_ALREADY_EXISTS" };
+  | { readonly code: "PENDING_REVISION_ALREADY_EXISTS" }
+  /**
+   * `FR-VIS-08`, `BI-4` — the listing is not available through any public read path.
+   *
+   * **This is the single unavailable outcome**, and it carries **nothing**: no identity,
+   * status, publication value, unpublish reason, administrative timestamp or revision
+   * content. A listing that is absent, *pending*, *rejected*, or approved-but-unpublished
+   * is therefore indistinguishable to an unauthorised observer — which is the whole
+   * point, since `BI-4`'s failure mode is an observable difference (`NFR-PRIV-03`).
+   */
+  | { readonly code: "LISTING_NOT_PUBLICLY_AVAILABLE" }
+  /** `docs/08` *Publication state* — publication state does not apply outside *approved*. */
+  | { readonly code: "PUBLICATION_STATE_NOT_APPLICABLE"; readonly status: string }
+  /** `FR-MOD-01` — an approved listing's publication state is explicit, never implied. */
+  | { readonly code: "PUBLICATION_STATE_MISSING" }
+  /**
+   * The publication state offered is not a usable one: either it is not an object at all
+   * (`null`, an array, a primitive), or its value lies outside the two-value set. The
+   * offending input is carried for the administrator-facing caller; it never reaches a
+   * public surface, which reports only `LISTING_NOT_PUBLICLY_AVAILABLE`.
+   */
+  | { readonly code: "UNKNOWN_PUBLICATION_VALUE"; readonly offered: unknown }
+  /** `FR-ADM-12` — an unpublish reason exists only while the listing is *unpublished*. */
+  | { readonly code: "PUBLICATION_REASON_NOT_APPLICABLE" }
+  /** `FR-ADM-12` — unpublishing requires a recorded current reason. */
+  | { readonly code: "UNPUBLISH_REASON_MISSING" }
+  /** `docs/08` *Publication state* — the operation is off the drawn edges. */
+  | {
+      readonly code: "PUBLICATION_TRANSITION_FORBIDDEN";
+      readonly from: string;
+      readonly to: string;
+    };
