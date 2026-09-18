@@ -21,6 +21,7 @@
  */
 
 import type { Listing } from "./listing";
+import { publicationOnApproval, resolvePublicationState } from "./publication";
 import { err, ok, type DomainError, type Result } from "./result";
 
 /** `FR-AUD-01` — the complete status set. Nothing may be added to it. */
@@ -63,8 +64,25 @@ export function isPermittedStatusTransition(
  * The self-transitions the matrix permits are **content-only** edges: they preserve the
  * status, which is precisely what `FR-ADM-05` (editing a pending submission) and
  * `ADR-006` (*"approved → approved, content only"* on revision approval) describe. This
- * function changes status and nothing else; it carries no content change and performs no
- * side effect of any kind.
+ * function **carries no content change and performs no side effect of any kind**. It
+ * changes the status and, since `P1` Slice B, the publication state that the status
+ * governs — initializing it on approval and preserving it across the content-only
+ * approved edge, exactly as set out below. It changes nothing else.
+ *
+ * **Publication state follows the status, because `docs/08` draws it that way** (`P1`
+ * Slice B, issue #139), and the three cases are kept apart deliberately:
+ *
+ * - **Initial approval (`pending -> approved`)** explicitly initializes *publicly
+ *   available* — the diagram's `[*] -> publicly available : approval (FR-ADM-06)` edge.
+ *   An approval therefore never yields an approved listing with no publication state.
+ * - **The content-only `approved -> approved` edge preserves the existing state**, so
+ *   approving a revision on an unpublished listing leaves it unpublished (`FR-MOD-01`).
+ *   It preserves only a **valid** state: a missing or malformed one is **refused**, never
+ *   repaired by initializing it — repairing it would publish a listing no administrator
+ *   published, which is exactly the implicit publication `FR-MOD-01` forbids. This edge
+ *   is not an approval and does not carry approval's initialization.
+ * - **Leaving *approved*** carries no publication state, because the concept does not
+ *   apply outside *approved*.
  */
 export function transitionListingStatus(
   listing: Listing,
@@ -82,5 +100,29 @@ export function transitionListingStatus(
     });
   }
 
-  return ok({ id: listing.id, status: to, content: listing.content });
+  if (to !== "approved") {
+    return ok({ id: listing.id, status: to, content: listing.content });
+  }
+
+  if (listing.status !== "approved") {
+    return ok({
+      id: listing.id,
+      status: to,
+      content: listing.content,
+      publication: publicationOnApproval(),
+    });
+  }
+
+  const current = resolvePublicationState(listing);
+
+  if (!current.ok) {
+    return current;
+  }
+
+  return ok({
+    id: listing.id,
+    status: to,
+    content: listing.content,
+    publication: current.value,
+  });
 }

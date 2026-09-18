@@ -5,17 +5,27 @@
  * *approved* has a public projection), the `OQ-7` field set (`S-2`), the `S-2`
  * fail-closed default, and `DI-10` (a pending revision is never reachable through the
  * public projection).
+ *
+ * `P1` Slice B (issue #139) adds `BI-4`/`FR-VIS-08`: an unpublished listing is withheld
+ * too, and every unavailable case yields **one** outcome that discloses nothing. The
+ * Slice A assertions below are preserved in intent; where one asserted the old
+ * status-carrying refusal, it now asserts the disclosure-free outcome that replaced it,
+ * because the shape it described is the observable difference `BI-4` forbids.
  */
 import { describe, expect, it } from "vitest";
 
 import type { Listing, ListingContent } from "./listing";
 import { listingIdOf } from "./listing-id";
+import type { PublicationState } from "./publication";
 import {
   PUBLIC_PROJECTION_FIELDS,
   projectListingPublicly,
 } from "./public-projection";
 import type { ListingRevision } from "./revision";
 import { LISTING_STATUSES } from "./status";
+
+/** The single unavailable outcome (`FR-VIS-08`, `BI-4`). */
+const UNAVAILABLE = { code: "LISTING_NOT_PUBLICLY_AVAILABLE" } as const;
 
 /** Every governed attribute supplied, and every designation set to public. */
 const fullyPublicContent: ListingContent = {
@@ -34,7 +44,23 @@ const fullyPublicContent: ListingContent = {
 const listingId = listingIdOf("listing-1");
 
 function approvedListing(content: ListingContent): Listing {
-  return { id: listingId, status: "approved", content };
+  return {
+    id: listingId,
+    status: "approved",
+    content,
+    publication: { value: "publicly_available" },
+  };
+}
+
+const unpublishReason = "Reported as misleading; awaiting owner contact.";
+
+function unpublishedListing(content: ListingContent): Listing {
+  return {
+    id: listingId,
+    status: "approved",
+    content,
+    publication: { value: "unpublished", reason: unpublishReason },
+  };
 }
 
 describe("record-level exposure (FR-VIS-02, DI-5)", () => {
@@ -49,13 +75,164 @@ describe("record-level exposure (FR-VIS-02, DI-5)", () => {
 
       expect(result.ok).toBe(false);
       if (!result.ok) {
-        expect(result.error).toEqual({ code: "LISTING_NOT_APPROVED", status });
+        expect(result.error).toEqual(UNAVAILABLE);
       }
     },
   );
 
-  it("projects an approved record", () => {
+  it("projects an approved, publicly available record", () => {
     expect(projectListingPublicly(approvedListing(fullyPublicContent)).ok).toBe(true);
+  });
+});
+
+/** Criterion 5 (projection half) — an unpublished listing is withheld. */
+describe("criterion 5 — publication state gates the projection (FR-ADM-12)", () => {
+  it("withholds an approved but unpublished listing", () => {
+    const result = projectListingPublicly(unpublishedListing(fullyPublicContent));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toEqual(UNAVAILABLE);
+    }
+  });
+
+  it("withholds an approved listing whose publication state is missing", () => {
+    const result = projectListingPublicly({
+      id: listingId,
+      status: "approved",
+      content: fullyPublicContent,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toEqual(UNAVAILABLE);
+    }
+  });
+
+  it("withholds an approved listing whose publication state is malformed", () => {
+    const result = projectListingPublicly({
+      id: listingId,
+      status: "approved",
+      content: fullyPublicContent,
+      publication: { value: "sort-of-public" } as unknown as PublicationState,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toEqual(UNAVAILABLE);
+    }
+  });
+});
+
+/** Criterion 12 — absent, pending, rejected and unpublished are indistinguishable. */
+describe("criterion 12 — one unavailable outcome (FR-VIS-08, BI-4)", () => {
+  const outcomes = {
+    absent: projectListingPublicly(undefined),
+    pending: projectListingPublicly({
+      id: listingId,
+      status: "pending",
+      content: fullyPublicContent,
+    }),
+    rejected: projectListingPublicly({
+      id: listingId,
+      status: "rejected",
+      content: fullyPublicContent,
+    }),
+    unpublished: projectListingPublicly(unpublishedListing(fullyPublicContent)),
+  } as const;
+
+  it("refuses all four", () => {
+    for (const outcome of Object.values(outcomes)) {
+      expect(outcome.ok).toBe(false);
+    }
+  });
+
+  it("returns the identical outcome for all four", () => {
+    const serialized = Object.values(outcomes).map((outcome) =>
+      JSON.stringify(outcome),
+    );
+
+    expect(new Set(serialized).size).toBe(1);
+    for (const outcome of Object.values(outcomes)) {
+      expect(outcome).toEqual({ ok: false, error: UNAVAILABLE });
+    }
+  });
+
+  it("returns the same key set, so no case is distinguishable by shape", () => {
+    for (const outcome of Object.values(outcomes)) {
+      expect(outcome.ok).toBe(false);
+      if (outcome.ok) continue;
+      expect(Object.keys(outcome.error)).toEqual(["code"]);
+    }
+  });
+});
+
+/** Criterion 13 — unavailable outcomes disclose nothing. */
+describe("criterion 13 — the unavailable outcome discloses nothing", () => {
+  it("carries no identity, status, publication value, reason, timestamp or revision content", () => {
+    const pendingRevision: ListingRevision = {
+      listingId,
+      state: "pending",
+      proposedContent: { ...fullyPublicContent, description: "PROPOSED DESCRIPTION" },
+    };
+
+    const result = projectListingPublicly(unpublishedListing(fullyPublicContent), [
+      pendingRevision,
+    ]);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+
+    const serialized = JSON.stringify(result.error);
+    for (const disclosed of [
+      "listing-1",
+      "approved",
+      "pending",
+      "rejected",
+      "unpublished",
+      "publicly_available",
+      unpublishReason,
+      "PROPOSED DESCRIPTION",
+      "Harbour Bakery",
+      "submittedAt",
+      "lastUpdatedAt",
+    ]) {
+      expect(serialized).not.toContain(disclosed);
+    }
+
+    expect(result.error).toEqual(UNAVAILABLE);
+  });
+
+  it("preserves the Slice A public field contract on a successful projection", () => {
+    const result = projectListingPublicly(approvedListing(fullyPublicContent));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(Object.keys(result.value).sort()).toEqual(
+      [...PUBLIC_PROJECTION_FIELDS].sort(),
+    );
+  });
+
+  it("adds no identifier field, and excludes administrative metadata", () => {
+    const result = projectListingPublicly(approvedListing(fullyPublicContent));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    for (const withheld of [
+      "id",
+      "listingId",
+      "identifier",
+      "slug",
+      "status",
+      "publication",
+      "reason",
+      "submittedAt",
+      "lastUpdatedAt",
+    ]) {
+      expect(Object.keys(result.value)).not.toContain(withheld);
+    }
   });
 });
 

@@ -18,14 +18,33 @@
  *
  * **`S-2` fail-closed.** A value whose public designation is undecided is **not public**.
  *
+ * **`OQ-11` publication state (`P1` Slice B, issue #139).** An approved listing is
+ * publicly projectable **only while it is publicly available**: an unpublished one is
+ * withheld from every public read path (`FR-ADM-12`), and an approved listing whose
+ * publication state is missing or malformed is withheld too — fail-closed, because
+ * publication is never implicit (`FR-MOD-01`).
+ *
+ * **One unavailable outcome, for every unavailable reason (`FR-VIS-08`, `BI-4`).** A
+ * listing that is absent, *pending*, *rejected*, or approved-but-unpublished yields the
+ * **same** result, disclosing nothing about which case occurred, whether the listing
+ * exists administratively, or that it was unpublished, by whom, when, or why
+ * (`NFR-PRIV-03`). Slice A reported the record-level refusal with the offending status
+ * attached; that shape disclosed the very difference `BI-4` forbids, and Slice B
+ * replaces it. **The rule Slice A proved is unchanged** — a record that is not approved
+ * still has no public projection.
+ *
  * This is a domain-level projection only. It is not an API payload, a serializer, a
- * query, a search scope, or a UI concern; the enforcement mechanism for the boundary is
- * `DDM-6`, unresolved. Publication state (`OQ-11`) is a further, separate condition on
- * public availability whose representation is `DDM-9`, unresolved — Slice A neither
- * models nor applies it.
+ * query, a search scope, or a UI concern. The **physical** mechanism for the boundary is
+ * `DDM-6`, discharged by `Accepted` `ADR-017` (2026-09-17) as PS-2 — designations beside
+ * the values, one public read projection — and the projection's **form** (a database view
+ * or a `C9` query module) is deferred there to the public read path, not decided by this
+ * logical layer. It defines no HTTP status code, route, or cache behaviour, and it adds
+ * **no identifier field**: how public listing identity is transported is not decided here
+ * (`docs/09` `OP-2` is `P2` work).
  */
 
 import type { DesignatableValue, Listing, ListingContent } from "./listing";
+import { isPubliclyAvailable } from "./publication";
 import type { ListingRevision } from "./revision";
 import { err, ok, type DomainError, type Result } from "./result";
 
@@ -108,19 +127,31 @@ function projectContent(content: ListingContent): PublicListingProjection {
 }
 
 /**
- * Projects an approved listing's effective public version, or reports that the record has
- * no public projection at all.
+ * Projects a publicly available listing's effective public version, or reports that the
+ * listing is not available through any public read path.
+ *
+ * `listing` accepts `undefined` so that the **absent** case is expressible here and
+ * proven to be indistinguishable from the others: a caller that found no record reports
+ * unavailability through this same function rather than inventing its own outcome.
  *
  * The `revisions` argument exists so that `DI-10` is demonstrable rather than merely
  * asserted: a listing's pending revisions may be supplied, and no value derived from any
  * of them can appear in the result.
  */
 export function projectListingPublicly(
-  listing: Listing,
+  listing: Listing | undefined,
   _revisions: readonly ListingRevision[] = [],
 ): Result<PublicListingProjection, DomainError> {
+  if (listing === undefined) {
+    return err({ code: "LISTING_NOT_PUBLICLY_AVAILABLE" });
+  }
+
   if (listing.status !== "approved") {
-    return err({ code: "LISTING_NOT_APPROVED", status: listing.status });
+    return err({ code: "LISTING_NOT_PUBLICLY_AVAILABLE" });
+  }
+
+  if (!isPubliclyAvailable(listing)) {
+    return err({ code: "LISTING_NOT_PUBLICLY_AVAILABLE" });
   }
 
   return ok(projectContent(listing.content));
