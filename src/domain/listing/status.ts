@@ -20,9 +20,11 @@
  * repository's enumeration, transcribed.
  */
 
+import type { Instant } from "./instant";
 import type { Listing } from "./listing";
 import { publicationOnApproval, resolvePublicationState } from "./publication";
 import { err, ok, type DomainError, type Result } from "./result";
+import { advancedTimestamps, resolveListingTimestamps } from "./timestamps";
 
 /** `FR-AUD-01` — the complete status set. Nothing may be added to it. */
 export const LISTING_STATUSES = ["pending", "approved", "rejected"] as const;
@@ -83,10 +85,21 @@ export function isPermittedStatusTransition(
  *   is not an approval and does not carry approval's initialization.
  * - **Leaving *approved*** carries no publication state, because the concept does not
  *   apply outside *approved*.
+ *
+ * **Timestamps follow the status, because `NFR-DATA-05` says a status change is a
+ * change** (`P1` Slice C, issue #141). Every permitted transition — **including both
+ * self-transitions, and including `pending -> approved`, which changes no content at
+ * all** — requires a supplied instant **strictly later** than the current
+ * `lastUpdatedAt` and records it there. `pending -> rejected` additionally writes
+ * `rejectedAt` to that **same** instant: the retention anchor `ADR-017` Q-1/Q-2 requires
+ * is recorded in the transition that rejects the record, not in a separate act. A
+ * refused transition — forbidden pair, unknown status, malformed timestamps, or an
+ * instant that does not advance — writes nothing at all.
  */
 export function transitionListingStatus(
   listing: Listing,
   to: ListingStatus,
+  at: Instant,
 ): Result<Listing, DomainError> {
   if (!isListingStatus(to)) {
     return err({ code: "UNKNOWN_LISTING_STATUS", offered: to });
@@ -100,8 +113,25 @@ export function transitionListingStatus(
     });
   }
 
+  const currentTimestamps = resolveListingTimestamps(listing);
+
+  if (!currentTimestamps.ok) {
+    return currentTimestamps;
+  }
+
+  const timestamps = advancedTimestamps(currentTimestamps.value, at, to === "rejected");
+
+  if (!timestamps.ok) {
+    return timestamps;
+  }
+
   if (to !== "approved") {
-    return ok({ id: listing.id, status: to, content: listing.content });
+    return ok({
+      id: listing.id,
+      status: to,
+      content: listing.content,
+      timestamps: timestamps.value,
+    });
   }
 
   if (listing.status !== "approved") {
@@ -110,6 +140,7 @@ export function transitionListingStatus(
       status: to,
       content: listing.content,
       publication: publicationOnApproval(),
+      timestamps: timestamps.value,
     });
   }
 
@@ -124,5 +155,6 @@ export function transitionListingStatus(
     status: to,
     content: listing.content,
     publication: current.value,
+    timestamps: timestamps.value,
   });
 }

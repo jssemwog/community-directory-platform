@@ -33,6 +33,7 @@ export function err<E>(error: E): Err<E> {
  * the approved chain; no code exists here for a rule the domain does not implement.
  *
  * `P1` Slice B adds the publication-state failures (`OQ-11`, issue #139).
+ * `P1` Slice C adds the timestamp failures (`DI-6`, issue #141).
  */
 export type DomainError =
   /** `DI-2` — the ordered status pair is outside the `NFR-DATA-02` permitted set. */
@@ -81,4 +82,46 @@ export type DomainError =
       readonly code: "PUBLICATION_TRANSITION_FORBIDDEN";
       readonly from: string;
       readonly to: string;
-    };
+    }
+  /**
+   * `DI-6` — **one individual moment** is not a moment: not a number, `NaN`, infinite,
+   * fractional, outside exact integer range, or not an instant-shaped object. This code
+   * is about a single `submittedAt`, `lastUpdatedAt` or `rejectedAt` value — never about
+   * the bundle that holds them, which has its own code below.
+   *
+   * The offending input is carried for the administrator-facing caller; it never reaches
+   * a public surface, which reports only `LISTING_NOT_PUBLICLY_AVAILABLE`.
+   */
+  | { readonly code: "INVALID_INSTANT"; readonly offered: unknown }
+  /**
+   * `DI-6` — a listing carries **no** timestamp bundle at all, and none may be implied
+   * for it. Distinct from a bundle that is present but unusable (below): absent and
+   * malformed are different defects and are reported differently.
+   */
+  | { readonly code: "LISTING_TIMESTAMPS_MISSING" }
+  /**
+   * `DI-6` — the timestamp **bundle** is present but is not a usable timestamp-state
+   * object: `null`, an array, a primitive, or any other value that cannot carry the three
+   * moments. The individual moments are not reached, so no `INVALID_INSTANT` is produced
+   * for this case; the offending container is carried instead.
+   */
+  | { readonly code: "INVALID_LISTING_TIMESTAMPS"; readonly offered: unknown }
+  /**
+   * `NFR-DATA-05` — the proposed moment does not advance `lastUpdatedAt` (ruling 3). An
+   * equal instant fails here as surely as an earlier one.
+   */
+  | { readonly code: "INSTANT_NOT_STRICTLY_LATER" }
+  /** `DI-6` — the recorded moments are not in the order the rulings can produce. */
+  | {
+      readonly code: "TIMESTAMP_ORDER_VIOLATION";
+      readonly field: "submittedAt" | "rejectedAt";
+    }
+  /** `ADR-017` Q-1/Q-2 — a rejection timestamp exists only while the listing is *rejected*. */
+  | {
+      readonly code: "REJECTION_TIMESTAMP_NOT_APPLICABLE";
+      readonly status: string;
+    }
+  /** `ADR-017` Q-1/Q-2 — a *rejected* listing without its retention anchor is refused. */
+  | { readonly code: "REJECTION_TIMESTAMP_MISSING" }
+  /** `DI-6` — the rejection timestamp is write-once; a second one is never written. */
+  | { readonly code: "REJECTION_TIMESTAMP_ALREADY_SET" };

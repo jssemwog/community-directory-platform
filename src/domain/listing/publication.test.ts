@@ -11,6 +11,7 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { instantOf, type Instant } from "./instant";
 import type { Listing, ListingContent } from "./listing";
 import { withListingContent } from "./listing";
 import { listingIdOf } from "./listing-id";
@@ -44,13 +45,36 @@ const revisedContent: ListingContent = { ...content, description: "A small baker
 
 const listingId = listingIdOf("listing-1");
 
+/**
+ * `P1` Slice C (issue #141) makes administrative timestamps part of what a listing *is*,
+ * so the fixtures supply them and the instants these tests pass are always strictly later
+ * than `t0`. Timestamp rules are attacked in `timestamps.test.ts`; here they are only
+ * carried, so that these tests keep attacking publication state — their subject.
+ */
+const t0 = instantAt(1_000);
+const t1 = instantAt(2_000);
+const t2 = instantAt(3_000);
+
+function instantAt(epochMilliseconds: number): Instant {
+  const result = instantOf(epochMilliseconds);
+  if (!result.ok) {
+    throw new Error("fixture instant is invalid");
+  }
+  return result.value;
+}
+
 function listing(
   status: Listing["status"],
   publication?: PublicationState,
 ): Listing {
+  const timestamps =
+    status === "rejected"
+      ? { submittedAt: t0, lastUpdatedAt: t0, rejectedAt: t0 }
+      : { submittedAt: t0, lastUpdatedAt: t0 };
+
   return publication === undefined
-    ? { id: listingId, status, content }
-    : { id: listingId, status, content, publication };
+    ? { id: listingId, status, content, timestamps }
+    : { id: listingId, status, content, publication, timestamps };
 }
 
 const publiclyAvailable = listing("approved", { value: "publicly_available" });
@@ -168,7 +192,7 @@ describe("criterion 3 — a missing publication state is refused, never defaulte
     // The value is decided by `docs/08`'s `[*] → publicly available : approval` edge.
     expect(publicationOnApproval()).toEqual({ value: "publicly_available" });
     // ...and it is applied on the approval edge, not to a listing whose state is absent.
-    const approved = transitionListingStatus(listing("pending"), "approved");
+    const approved = transitionListingStatus(listing("pending"), "approved", t1);
 
     expect(approved.ok).toBe(true);
     if (approved.ok) {
@@ -292,8 +316,11 @@ describe("criteria 8-10 — republishing", () => {
     expect(withdrawn.ok).toBe(true);
     if (!withdrawn.ok) return;
 
-    const corrected = withListingContent(withdrawn.value, revisedContent);
-    const restored = republishListing(corrected);
+    const corrected = withListingContent(withdrawn.value, revisedContent, t1);
+    expect(corrected.ok).toBe(true);
+    if (!corrected.ok) return;
+
+    const restored = republishListing(corrected.value);
 
     expect(restored.ok).toBe(true);
     if (restored.ok) {
@@ -430,25 +457,34 @@ describe("repeated actions are refused and change nothing (ruling, issue #139)",
 /** Criterion 11 — content replacement preserves publication state. */
 describe("criterion 11 — content replacement preserves publication state", () => {
   it("leaves an unpublished listing unpublished, with its reason intact", () => {
-    const edited = withListingContent(unpublished, revisedContent);
+    const edited = withListingContent(unpublished, revisedContent, t1);
 
-    expect(edited.content).toEqual(revisedContent);
-    expect(edited.publication).toEqual(unpublished.publication);
-    expect(isPubliclyAvailable(edited)).toBe(false);
+    expect(edited.ok).toBe(true);
+    if (!edited.ok) return;
+
+    expect(edited.value.content).toEqual(revisedContent);
+    expect(edited.value.publication).toEqual(unpublished.publication);
+    expect(isPubliclyAvailable(edited.value)).toBe(false);
   });
 
   it("leaves a publicly available listing publicly available", () => {
-    const edited = withListingContent(publiclyAvailable, revisedContent);
+    const edited = withListingContent(publiclyAvailable, revisedContent, t1);
 
-    expect(isPubliclyAvailable(edited)).toBe(true);
+    expect(edited.ok).toBe(true);
+    if (edited.ok) {
+      expect(isPubliclyAvailable(edited.value)).toBe(true);
+    }
   });
 
   it("does not republish through the approved → approved content edge", () => {
     // This is the edge an approved revision travels (`ADR-006`, "approved → approved,
     // content only"). No revision-approval API exists or is added here; the edge itself
     // must not publish, because publication is never implicit (`FR-MOD-01`).
-    const edited = withListingContent(unpublished, revisedContent);
-    const transitioned = transitionListingStatus(edited, "approved");
+    const edited = withListingContent(unpublished, revisedContent, t1);
+    expect(edited.ok).toBe(true);
+    if (!edited.ok) return;
+
+    const transitioned = transitionListingStatus(edited.value, "approved", t2);
 
     expect(transitioned.ok).toBe(true);
     if (transitioned.ok) {
@@ -458,7 +494,7 @@ describe("criterion 11 — content replacement preserves publication state", () 
   });
 
   it("produces no publication state on the pending -> rejected transition", () => {
-    const rejected = transitionListingStatus(listing("pending"), "rejected");
+    const rejected = transitionListingStatus(listing("pending"), "rejected", t1);
 
     expect(rejected.ok).toBe(true);
     if (rejected.ok) {
@@ -502,6 +538,7 @@ describe("malformed publication state is refused, never thrown and never public"
       status: "approved",
       content,
       publication: publication as PublicationState,
+      timestamps: { submittedAt: t0, lastUpdatedAt: t0 },
     };
   }
 
@@ -566,9 +603,9 @@ describe("malformed publication state is refused, never thrown and never public"
     (_label, offered) => {
       const subject = approvedWith(offered);
 
-      expect(() => transitionListingStatus(subject, "approved")).not.toThrow();
+      expect(() => transitionListingStatus(subject, "approved", t1)).not.toThrow();
 
-      const result = transitionListingStatus(subject, "approved");
+      const result = transitionListingStatus(subject, "approved", t1);
 
       expect(result.ok).toBe(false);
       if (!result.ok) {
@@ -586,7 +623,7 @@ describe("malformed publication state is refused, never thrown and never public"
       resolvePublicationState(subject);
       isPubliclyAvailable(subject);
       projectListingPublicly(subject);
-      transitionListingStatus(subject, "approved");
+      transitionListingStatus(subject, "approved", t1);
       unpublishListing(subject, "Reported as misleading.");
       republishListing(subject);
 
@@ -631,7 +668,7 @@ describe("malformed publication state is refused, never thrown and never public"
  */
 describe("publication state through transitionListingStatus (criteria 3 and 11)", () => {
   it("initializes publicly available on the initial pending -> approved transition", () => {
-    const approved = transitionListingStatus(listing("pending"), "approved");
+    const approved = transitionListingStatus(listing("pending"), "approved", t1);
 
     expect(approved.ok).toBe(true);
     if (approved.ok) {
@@ -642,7 +679,7 @@ describe("publication state through transitionListingStatus (criteria 3 and 11)"
 
   it("preserves a valid existing state across the approved -> approved edge", () => {
     for (const subject of [publiclyAvailable, unpublished]) {
-      const result = transitionListingStatus(subject, "approved");
+      const result = transitionListingStatus(subject, "approved", t1);
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -652,7 +689,7 @@ describe("publication state through transitionListingStatus (criteria 3 and 11)"
   });
 
   it("refuses an approved -> approved transition on a listing whose state is missing", () => {
-    const result = transitionListingStatus(listing("approved"), "approved");
+    const result = transitionListingStatus(listing("approved"), "approved", t1);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -666,7 +703,7 @@ describe("publication state through transitionListingStatus (criteria 3 and 11)"
       { value: "sort-of-public" } as unknown as PublicationState,
     );
 
-    const result = transitionListingStatus(malformed, "approved");
+    const result = transitionListingStatus(malformed, "approved", t1);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -680,7 +717,7 @@ describe("publication state through transitionListingStatus (criteria 3 and 11)"
   it("refuses an approved -> approved transition on an unpublished listing with a blank reason", () => {
     const blank = listing("approved", { value: "unpublished", reason: "   " });
 
-    const result = transitionListingStatus(blank, "approved");
+    const result = transitionListingStatus(blank, "approved", t1);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -696,7 +733,7 @@ describe("publication state through transitionListingStatus (criteria 3 and 11)"
     ];
 
     for (const subject of subjects) {
-      const result = transitionListingStatus(subject, "approved");
+      const result = transitionListingStatus(subject, "approved", t1);
 
       expect(result.ok).toBe(false);
       if (result.ok) continue;

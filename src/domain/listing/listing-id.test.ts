@@ -3,6 +3,7 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { instantOf, type Instant } from "./instant";
 import { withListingContent, type Listing, type ListingContent } from "./listing";
 import * as listingIdModule from "./listing-id";
 import { listingIdEquals, listingIdOf } from "./listing-id";
@@ -16,32 +17,52 @@ const content: ListingContent = {
   country: "IE",
 };
 
+function instantAt(epochMilliseconds: number): Instant {
+  const result = instantOf(epochMilliseconds);
+  if (!result.ok) {
+    throw new Error("fixture instant is invalid");
+  }
+  return result.value;
+}
+
+const t0 = instantAt(1_000);
+const t1 = instantAt(2_000);
+
+/** `P1` Slice C (issue #141) — every listing carries its administrative moments. */
 const listing: Listing = {
   id: listingIdOf("listing-1"),
   status: "pending",
   content,
+  timestamps: { submittedAt: t0, lastUpdatedAt: t0 },
 };
 
 describe("listing identity (DI-8)", () => {
   it("survives a content edit — including a change of name", () => {
-    const edited = withListingContent(listing, {
-      ...content,
-      name: "Harbour Bakery & Cafe",
-      description: "A small bakery and cafe.",
-    });
+    const edited = withListingContent(
+      listing,
+      {
+        ...content,
+        name: "Harbour Bakery & Cafe",
+        description: "A small bakery and cafe.",
+      },
+      t1,
+    );
 
-    expect(listingIdEquals(edited.id, listing.id)).toBe(true);
-    expect(edited.content.name).not.toBe(listing.content.name);
+    expect(edited.ok).toBe(true);
+    if (!edited.ok) return;
+
+    expect(listingIdEquals(edited.value.id, listing.id)).toBe(true);
+    expect(edited.value.content.name).not.toBe(listing.content.name);
   });
 
   it("survives every permitted status transition", () => {
-    const approved = transitionListingStatus(listing, "approved");
+    const approved = transitionListingStatus(listing, "approved", t1);
     expect(approved.ok).toBe(true);
     if (!approved.ok) return;
 
     expect(listingIdEquals(approved.value.id, listing.id)).toBe(true);
 
-    const rejected = transitionListingStatus(listing, "rejected");
+    const rejected = transitionListingStatus(listing, "rejected", t1);
     expect(rejected.ok).toBe(true);
     if (!rejected.ok) return;
 
@@ -49,7 +70,12 @@ describe("listing identity (DI-8)", () => {
   });
 
   it("is not derived from content — identical content does not make one identity", () => {
-    const other: Listing = { id: listingIdOf("listing-2"), status: "pending", content };
+    const other: Listing = {
+      id: listingIdOf("listing-2"),
+      status: "pending",
+      content,
+      timestamps: { submittedAt: t0, lastUpdatedAt: t0 },
+    };
 
     expect(listingIdEquals(other.id, listing.id)).toBe(false);
   });
