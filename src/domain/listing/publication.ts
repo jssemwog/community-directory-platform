@@ -37,6 +37,14 @@
  * is recorded anywhere is `OQ-14`/`NOQ-8` (`DG-3`), undecided — this rule neither
  * requires nor forbids such a record, and decides no audit policy.
  *
+ * **Publication moves no timestamp** (`P1` Slice C, issue #141, ruling 8). A
+ * publication-state change is **neither a content change nor a status change** — the
+ * three dimensions are never collapsed (`ADR-006`) — so `NFR-DATA-05` is not engaged by
+ * it, and `unpublishListing` and `republishListing` carry `submittedAt`, `lastUpdatedAt`
+ * and any `rejectedAt` through **exactly** as they stand. Neither takes an instant,
+ * because neither has a moment to record. A **refused** publication action changes
+ * nothing whatsoever, timestamps included.
+ *
  * **What this module does not decide.** No stored field, column, type, flag, timestamp,
  * table, or any other representation (`ADR-017` selects the physical design; this is the
  * logical layer). No HTTP status code, route, payload, or cache behaviour. No screen,

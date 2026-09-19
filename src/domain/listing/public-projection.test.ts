@@ -15,6 +15,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Listing, ListingContent } from "./listing";
+import { instantOf, type Instant } from "./instant";
 import { listingIdOf } from "./listing-id";
 import type { PublicationState } from "./publication";
 import {
@@ -43,11 +44,35 @@ const fullyPublicContent: ListingContent = {
 
 const listingId = listingIdOf("listing-1");
 
+function instantAt(epochMilliseconds: number): Instant {
+  const result = instantOf(epochMilliseconds);
+  if (!result.ok) {
+    throw new Error("fixture instant is invalid");
+  }
+  return result.value;
+}
+
+const t0 = instantAt(1_000);
+
+/**
+ * `P1` Slice C (issue #141) — administrative timestamps are part of what a listing is.
+ * They are supplied here so these tests keep attacking their own subject; a rejected
+ * fixture carries the rejection anchor its status requires.
+ */
+const pendingTimestamps = { submittedAt: t0, lastUpdatedAt: t0 };
+const rejectedTimestamps = { submittedAt: t0, lastUpdatedAt: t0, rejectedAt: t0 };
+
+function timestampsFor(status: Listing["status"]) {
+  return status === "rejected" ? rejectedTimestamps : pendingTimestamps;
+}
+
+
 function approvedListing(content: ListingContent): Listing {
   return {
     id: listingId,
     status: "approved",
     content,
+    timestamps: pendingTimestamps,
     publication: { value: "publicly_available" },
   };
 }
@@ -59,6 +84,7 @@ function unpublishedListing(content: ListingContent): Listing {
     id: listingId,
     status: "approved",
     content,
+    timestamps: pendingTimestamps,
     publication: { value: "unpublished", reason: unpublishReason },
   };
 }
@@ -71,6 +97,7 @@ describe("record-level exposure (FR-VIS-02, DI-5)", () => {
         id: listingId,
         status,
         content: fullyPublicContent,
+        timestamps: timestampsFor(status),
       });
 
       expect(result.ok).toBe(false);
@@ -101,6 +128,7 @@ describe("criterion 5 — publication state gates the projection (FR-ADM-12)", (
       id: listingId,
       status: "approved",
       content: fullyPublicContent,
+      timestamps: timestampsFor("approved"),
     });
 
     expect(result.ok).toBe(false);
@@ -114,6 +142,7 @@ describe("criterion 5 — publication state gates the projection (FR-ADM-12)", (
       id: listingId,
       status: "approved",
       content: fullyPublicContent,
+      timestamps: timestampsFor("approved"),
       publication: { value: "sort-of-public" } as unknown as PublicationState,
     });
 
@@ -132,11 +161,13 @@ describe("criterion 12 — one unavailable outcome (FR-VIS-08, BI-4)", () => {
       id: listingId,
       status: "pending",
       content: fullyPublicContent,
+      timestamps: timestampsFor("pending"),
     }),
     rejected: projectListingPublicly({
       id: listingId,
       status: "rejected",
       content: fullyPublicContent,
+      timestamps: timestampsFor("rejected"),
     }),
     unpublished: projectListingPublicly(unpublishedListing(fullyPublicContent)),
   } as const;

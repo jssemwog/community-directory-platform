@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { instantOf, type Instant } from "./instant";
 import type { Listing, ListingContent } from "./listing";
 import { listingIdEquals, listingIdOf } from "./listing-id";
 import {
@@ -29,7 +30,35 @@ const content: ListingContent = {
 };
 
 const listingId = listingIdOf("listing-1");
-const approved: Listing = { id: listingId, status: "approved", content };
+
+function instantAt(epochMilliseconds: number): Instant {
+  const result = instantOf(epochMilliseconds);
+  if (!result.ok) {
+    throw new Error("fixture instant is invalid");
+  }
+  return result.value;
+}
+
+const t0 = instantAt(1_000);
+
+/**
+ * `P1` Slice C (issue #141) — administrative timestamps are part of what a listing is.
+ * They are supplied here so these tests keep attacking their own subject; a rejected
+ * fixture carries the rejection anchor its status requires.
+ */
+const pendingTimestamps = { submittedAt: t0, lastUpdatedAt: t0 };
+const rejectedTimestamps = { submittedAt: t0, lastUpdatedAt: t0, rejectedAt: t0 };
+
+function timestampsFor(status: Listing["status"]) {
+  return status === "rejected" ? rejectedTimestamps : pendingTimestamps;
+}
+
+const approved: Listing = {
+  id: listingId,
+  status: "approved",
+  content,
+  timestamps: pendingTimestamps,
+};
 
 function proposal(overrides: Partial<ListingRevision> = {}): ListingRevision {
   return {
@@ -103,7 +132,7 @@ describe("admitting a pending revision (FR-ADM-10)", () => {
     "refuses a revision against a %s listing",
     (status) => {
       const result = admitPendingRevision(
-        { id: listingId, status, content },
+        { id: listingId, status, content, timestamps: timestampsFor(status) },
         [],
         proposal(),
       );

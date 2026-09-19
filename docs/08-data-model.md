@@ -229,6 +229,7 @@ resource proposed for, or present in, the directory.
 | **Status** | Exactly one of *pending*, *approved*, *rejected* at all times. | **System/administrator only** | `FR-AUD-01`, `NFR-DATA-01` |
 | **Submitted at** | The moment the record was submitted. Written once; never changes. | **System only** | `FR-AUD-02`, `NFR-DATA-05` |
 | **Last updated at** | The moment the record's content or status last changed. | **System only** | `FR-AUD-03`, `NFR-DATA-05` |
+| **Rejection timestamp** | The moment the record became *rejected*. Present **if and only if** the status is *rejected*; written once; never changes. **Separate from last-updated**, and used **only** to anchor retention eligibility. | **System only** | `FR-AUD-06`, `NFR-PRIV-05`, `DI-6`; `ADR-017` Q-1/Q-2 (issue #137) |
 
 **Identity is a logical commitment, not a key choice.** The model requires that a
 listing have a stable identity independent of its content — because a listing's name
@@ -244,6 +245,19 @@ consequence, which is easy to miss: **approving a listing changes its last-updat
 timestamp even though no content changed**, because status is a change. Any
 implementation that only touches the timestamp on content edits violates
 `NFR-DATA-05`.
+
+**The moment is supplied, and it must advance** (ungated Product Owner ruling, issue
+#141). At submission the two moments are **initialized to the same caller-supplied
+instant**. Thereafter every content change and every permitted status transition requires
+an instant **strictly later** than the current last-updated, and an **equal or earlier**
+one is **refused without mutation** — `NFR-DATA-05` requires the value to *change*, and an
+equal instant does not change it, which is exactly what a coarse clock would otherwise
+produce. **A publication-state change moves no timestamp**, because publication is neither
+content nor status (`OQ-11`, `ADR-006`), and a **refused** action moves none either. The
+rejection timestamp is written in the same change that rejects the record, equal to that
+change's last-updated. **Time is supplied by the caller; no ambient clock is read** — which
+is what keeps `DI-6` provable in-process. This fixes **meanings only**; the physical
+representation remains `ADR-017`'s.
 
 **What is *not* on the listing record, deliberately.** No submitter account reference
 (no accounts exist — `docs/03`). No owner. No view count, rating, or promotion flag.
@@ -968,7 +982,7 @@ The invariants. Each must hold at every moment, not merely after a successful op
 | `DI-3` | Every create, edit, or moderation action completes **fully or not at all**. No record is ever left partially written — and in particular, never **partially public**. | `NFR-DATA-03` |
 | `DI-4` | Administrative attributes are settable only by the system or an authorized administrator, and are never modifiable by a public actor. | `NFR-DATA-04` |
 | `DI-5` | **No record whose status is not *approved* is reachable through any public path** — not by browsing, not by search, not by direct reference to its identity, and not by a restored backup. | `FR-VIS-02`, `NFR-PRIV-03`, `NFR-BACK-04` |
-| `DI-6` | `submitted at` is written once and never changes. `last updated at` changes on **every** content **or status** change. A **rejection timestamp**, where one exists, is written once and never changes (issue #137). | `NFR-DATA-05`, `FR-AUD-06` |
+| `DI-6` | `submitted at` is written once and never changes. `last updated at` changes on **every** content **or status** change, and each such change requires an instant **strictly later** than the current value (issue #141). A **rejection timestamp**, where one exists, is written once, is present **if and only if** the status is *rejected*, and never changes (issue #137). | `NFR-DATA-05`, `FR-AUD-06` |
 | `DI-7` | Stored data reflects the last successful action, with no silent loss or alteration. | `NFR-DATA-06` |
 | `DI-8` | A record's identity is stable for its entire life and survives every content edit and status change. | **P2** |
 | `DI-9` | A category value on a listing always references a member of the predefined set. | `FR-DATA-02`, `FR-DATA-10` |

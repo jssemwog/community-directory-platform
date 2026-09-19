@@ -8,9 +8,12 @@
  * `docs/08` *Listing entity* and *Field classification*.
  *
  * Deliberately absent, because Slice A does not own them:
- * - **Submitted-at / last-updated-at** (`FR-AUD-02/03`, `DI-6`) — `DI-6` belongs to a
- *   later slice, and no timestamp is added here by convention.
  * - **Review data** (`E4`) — seam `S-7`, open.
+ *
+ * **Administrative timestamps** (`FR-AUD-02/03`, `DI-6`) were absent in Slice A because
+ * `DI-6` belonged to a later slice. That slice is `P1` Slice C (issue #141), so they are
+ * added below — submitted-at, last-updated-at, and the write-once rejection timestamp
+ * `ADR-017` Q-1/Q-2 anchors retention on. Their rules live in `timestamps.ts`.
  *
  * **Publication state** (`OQ-11`) was absent in Slice A because its representation was
  * `DDM-9`, unresolved. `DDM-9` is discharged by `Accepted` `ADR-017` (2026-09-17), so
@@ -20,9 +23,17 @@
  * types, keys, indexes, nullability, or storage shape.
  */
 
+import type { Instant } from "./instant";
 import type { ListingId } from "./listing-id";
 import type { PublicationState } from "./publication";
+import { err, ok, type DomainError, type Result } from "./result";
 import type { ListingStatus } from "./status";
+import {
+  advancedTimestamps,
+  resolveListingTimestamps,
+  timestampsOnSubmission,
+  type ListingTimestamps,
+} from "./timestamps";
 
 /**
  * A value the business may designate for public display.
@@ -84,6 +95,46 @@ export interface Listing {
    * (`resolvePublicationState`, `FR-MOD-01`).
    */
   readonly publication?: PublicationState;
+  /**
+   * `P1` Slice C — the administrative moments (`DI-6`, issue #141).
+   *
+   * Required on every listing, because every listing was submitted at some moment and
+   * `FR-AUD-02` admits no record without one. They are **system-set only** and **never
+   * public** (`FR-DATA-09`, `NFR-DATA-04`, `NFR-PRIV-01`): no public path supplies them,
+   * and the public projection carries none of them.
+   */
+  readonly timestamps: ListingTimestamps;
+}
+
+/**
+ * Creates the listing one initial submission produces (`docs/08` *Data lifecycle* step 1).
+ *
+ * The record arrives **pending** — a submission *is* a listing whose status is *pending*
+ * (`ADR-006` decision 1) — with `submittedAt` and `lastUpdatedAt` both equal to the
+ * supplied instant (ruling 1), **no** rejection timestamp, and **no** publication state,
+ * which applies only while *approved*.
+ *
+ * **What this deliberately does not do.** It applies **no content validation**. `VR-S1`
+ * lives in `validation.ts` and is unchanged; composing the two into the submission
+ * operation is the operation's own slice, not this one, and doing it here would decide
+ * behaviour issue #141 does not authorise. The only governed failure this function can
+ * report is a malformed instant.
+ *
+ * Pure: it reads no clock and mutates nothing.
+ */
+export function submitListing(
+  id: ListingId,
+  content: ListingContent,
+  at: Instant,
+): Result<Listing, DomainError> {
+  const timestamps = timestampsOnSubmission(at);
+  const validated = resolveListingTimestamps({ id, status: "pending", content, timestamps });
+
+  if (!validated.ok) {
+    return validated;
+  }
+
+  return ok({ id, status: "pending", content, timestamps: validated.value });
 }
 
 /**
@@ -98,7 +149,31 @@ export interface Listing {
  * replaced — including when that content came from an approved revision (`docs/08` *The
  * unpublish and republish lifecycle*; `FR-MOD-01`). Only an explicit republish makes a
  * listing public again.
+ *
+ * **`P1` Slice C — a content change is a change** (`FR-AUD-03`, `DI-6`). It therefore
+ * requires a supplied instant **strictly later** than the current `lastUpdatedAt`, and it
+ * records it. An equal or earlier instant is refused and nothing is written, which is why
+ * this reports a `Result` rather than a listing: replacing content without moving the
+ * timestamp would violate `NFR-DATA-05`, so the operation can no longer always succeed.
+ * `submittedAt` and any `rejectedAt` are carried through unchanged — a content edit is
+ * neither a submission nor a rejection.
  */
-export function withListingContent(listing: Listing, content: ListingContent): Listing {
-  return { ...listing, content };
+export function withListingContent(
+  listing: Listing,
+  content: ListingContent,
+  at: Instant,
+): Result<Listing, DomainError> {
+  const current = resolveListingTimestamps(listing);
+
+  if (!current.ok) {
+    return current;
+  }
+
+  const advanced = advancedTimestamps(current.value, at, false);
+
+  if (!advanced.ok) {
+    return advanced;
+  }
+
+  return ok({ ...listing, content, timestamps: advanced.value });
 }

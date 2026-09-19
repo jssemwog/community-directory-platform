@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Listing, ListingContent } from "./listing";
+import { instantOf, type Instant } from "./instant";
 import { listingIdOf } from "./listing-id";
 import {
   LISTING_STATUSES,
@@ -32,8 +33,30 @@ const content: ListingContent = {
  * legality — their subject — rather than tripping over a listing that is invalid for an
  * unrelated reason. Publication state's own rules are attacked in `publication.test.ts`.
  */
+function instantAt(epochMilliseconds: number): Instant {
+  const result = instantOf(epochMilliseconds);
+  if (!result.ok) {
+    throw new Error("fixture instant is invalid");
+  }
+  return result.value;
+}
+
+const t0 = instantAt(1_000);
+const t1 = instantAt(2_000);
+
+/**
+ * `P1` Slice C (issue #141) adds the administrative timestamps, and a *rejected* fixture
+ * carries the rejection anchor its status requires. Every transition below supplies `t1`,
+ * strictly later than the fixture's `lastUpdatedAt`, so these tests keep attacking
+ * transition legality rather than tripping over the chronological rule — which is
+ * attacked on its own terms in `timestamps.test.ts`.
+ */
 function listingAt(status: ListingStatus): Listing {
-  const base = { id: listingIdOf("listing-1"), status, content };
+  const timestamps =
+    status === "rejected"
+      ? { submittedAt: t0, lastUpdatedAt: t0, rejectedAt: t0 }
+      : { submittedAt: t0, lastUpdatedAt: t0 };
+  const base = { id: listingIdOf("listing-1"), status, content, timestamps };
   return status === "approved"
     ? { ...base, publication: { value: "publicly_available" as const } }
     : base;
@@ -98,7 +121,7 @@ describe("permitted transitions (NFR-DATA-02, DI-2)", () => {
     for (const from of LISTING_STATUSES) {
       for (const to of LISTING_STATUSES) {
         const before = listingAt(from);
-        const result = transitionListingStatus(before, to);
+        const result = transitionListingStatus(before, to, t1);
         const permitted = EXPECTED_PERMITTED.has(`${from}>${to}`);
 
         expect(result.ok).toBe(permitted);
@@ -121,7 +144,7 @@ describe("permitted transitions (NFR-DATA-02, DI-2)", () => {
 
   it("leaves rejected terminal — no transition out of it exists", () => {
     for (const to of LISTING_STATUSES) {
-      expect(transitionListingStatus(listingAt("rejected"), to).ok).toBe(false);
+      expect(transitionListingStatus(listingAt("rejected"), to, t1).ok).toBe(false);
     }
   });
 
@@ -130,6 +153,7 @@ describe("permitted transitions (NFR-DATA-02, DI-2)", () => {
       const result = transitionListingStatus(
         listingAt("pending"),
         offered as unknown as ListingStatus,
+        t1,
       );
 
       expect(result.ok).toBe(false);
@@ -140,11 +164,11 @@ describe("permitted transitions (NFR-DATA-02, DI-2)", () => {
   });
 
   it("reports failure as a value rather than throwing", () => {
-    expect(() => transitionListingStatus(listingAt("approved"), "pending")).not.toThrow();
+    expect(() => transitionListingStatus(listingAt("approved"), "pending", t1)).not.toThrow();
   });
 
   it("carries content through a permitted transition unchanged", () => {
-    const result = transitionListingStatus(listingAt("pending"), "approved");
+    const result = transitionListingStatus(listingAt("pending"), "approved", t1);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
