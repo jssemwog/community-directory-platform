@@ -198,11 +198,12 @@ application code. Until `DG-1` and `DG-2` open, there are none to add.
 ## View 3 — Invariants and the tests that attack them
 
 **Every `BI-*` and `DI-*` names the test that attacks it. An invariant with no attacking test
-is an invariant with no evidence.** The test column is **pending** for all — no test exists
-yet, and an empty cell here is honest (`DG-4` must not be pre-answered with an aspirational
-test). The standard, when the cell is filled, is *"we tried to break it and could not"* —
-proven **at the level where the invariant is enforced** (the operation, not the UI — `BI-9`,
-`IP-5`), not merely "the test passes."
+is an invariant with no evidence.** The test column is **pending** except where a merged
+increment names its attacking test. Elsewhere no test exists yet, and an empty cell here is
+honest (`DG-4` must not be pre-answered with an aspirational test). The standard, when the
+cell is filled, is *"we tried to break it and could not"* — proven **at the level where the
+invariant is enforced** (the operation, not the UI — `BI-9`, `IP-5`), not merely "the test
+passes."
 
 ### Boundary invariants (`docs/11`)
 
@@ -232,7 +233,7 @@ proven **at the level where the invariant is enforced** (the operation, not the 
 | `DI-3` | Every action completes fully or not at all (never partially public) | `NFR-DATA-03` | P1 | pending |
 | `DI-4` | Administrative attributes settable only by system/admin | `FR-AUD-04`, `NFR-DATA-04` | P1 | pending |
 | `DI-5` | No non-approved record reachable through any public path | `FR-VIS-02`, `NFR-PRIV-03` | P1/P2 | pending |
-| `DI-6` | `submitted at` write-once; `last updated at` on every content **or status** change, each requiring a **strictly later** instant (issue #141); rejection timestamp write-once and present iff *rejected* (issue #137) | `FR-AUD-02/03`, `NFR-DATA-05`, `FR-AUD-06` | P1 | **pending** — a domain increment is **proposed** for `P1` Slice C (issue #141) on branch `feat/141-listing-timestamp-semantics` (core modules: `src/domain/listing/instant.ts`, `timestamps.ts` and their tests; other listing modules, tests and owning documents are also touched); **not merged, not on `main`**, so this row stays `pending`. Retention execution, purge and the physical representation remain out of scope |
+| `DI-6` | `submitted at` write-once; `last updated at` on every content **or status** change, each requiring a **strictly later** instant (issue #141); rejection timestamp write-once and present iff *rejected* (issue #137) | `FR-AUD-02/03`, `NFR-DATA-05`, `FR-AUD-06` | P1 | **domain level, `P1` Slice C** (issue #141, merged by PR #142): the domain increment is **on `main`**, and its attacking tests prove caller-supplied logical instants, write-once `submitted at`, a **strictly advancing** `last updated at`, a write-once rejection timestamp present **iff** *rejected*, timestamps **preserved** across publication-state changes, and **governed refusal** of malformed or chronologically impossible timestamp state (`src/domain/listing/instant.ts`, `timestamps.ts` and their tests). **Domain-level enforcement only** — none of the following is implemented or proven by these tests: `ADR-017` has **selected** the physical design, but its persistence implementation is **not part of Slice C**; retention execution, purge scheduling and execution, and restoration remain **Deferred** and outstanding (`docs/08`); clock sourcing, time-zone handling and serialization are **Excluded** from Slice C and none is selected here; revision timestamps and audit policy remain **undecided** |
 | `DI-7` | Stored data reflects last successful action; no silent loss | `NFR-DATA-06` | P1 | pending |
 | `DI-8` | Identity stable for the record's whole life | `docs/08` (`DDM-2` physical) | P1 | pending |
 | `DI-9` | Category value always a member of the predefined set | `FR-DATA-10`, `FR-DATA-02` | P1 | pending |
