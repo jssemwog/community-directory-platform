@@ -42,6 +42,7 @@ export function err<E>(error: E): Err<E> {
  * `P1` Slice B adds the publication-state failures (`OQ-11`, issue #139).
  * `P1` Slice C adds the timestamp failures (`DI-6`, issue #141).
  * `P1` Slice D adds the revision-resolution failures (`FR-ADM-10`, issue #145).
+ * `P1` Slice E adds the retention-eligibility failures (`FR-AUD-06`, issue #149).
  */
 export type DomainError =
   /** `DI-2` — the ordered status pair is outside the `NFR-DATA-02` permitted set. */
@@ -58,6 +59,30 @@ export type DomainError =
   | { readonly code: "REVISION_LISTING_MISMATCH" }
   /** `FR-ADM-10` — only a proposal in the *pending* revision state can enter the pending state. */
   | { readonly code: "REVISION_NOT_PENDING"; readonly state: string }
+  /**
+   * `FR-AUD-06`, `OQ-13` — retention eligibility was asked of a listing that is not
+   * *rejected*, and therefore has no retention period running.
+   *
+   * Refused rather than answered `false`. "Not eligible" is a true statement about a
+   * rejected record still inside its 90 days, and a false one about a record that was
+   * never rejected at all; collapsing the two would tell a caller that a *pending* or
+   * *approved* listing is merely waiting out a period it does not have. Distinct from
+   * `LISTING_NOT_APPROVED`, which reports the opposite applicability gap on the approved
+   * chain, and from `REJECTION_TIMESTAMP_NOT_APPLICABLE`, which is about an anchor a
+   * non-rejected record must not carry rather than about a question it cannot be asked.
+   */
+  | { readonly code: "LISTING_NOT_REJECTED"; readonly status: string }
+  /**
+   * `FR-AUD-06`, `OQ-13` — retention eligibility was asked of a revision that is not
+   * *rejected*.
+   *
+   * The revision counterpart of `LISTING_NOT_REJECTED`, kept apart from it because the two
+   * record types are separately validated and a caller must know which one it handed over.
+   * Distinct from `REVISION_NOT_PENDING` (the admission rule's opposite applicability gap)
+   * and from `INVALID_REVISION` (a *state* outside the governed set is a shape defect,
+   * whereas a well-formed *pending* or *approved* revision is a lifecycle fact).
+   */
+  | { readonly code: "REVISION_NOT_REJECTED"; readonly state: string }
   /** `DI-11` — an approved listing has no more than one pending revision at a time. */
   | { readonly code: "PENDING_REVISION_ALREADY_EXISTS" }
   /**
@@ -195,7 +220,13 @@ export type DomainError =
       readonly code: "REJECTION_TIMESTAMP_NOT_APPLICABLE";
       readonly status: string;
     }
-  /** `ADR-017` Q-1/Q-2 — a *rejected* listing without its retention anchor is refused. */
+  /**
+   * `ADR-017` Q-1/Q-2 — a *rejected* record without its retention anchor is refused.
+   *
+   * Raised for a rejected listing by the timestamp rules (`P1` Slice C), and for a rejected
+   * revision by the retention query (`P1` Slice E): the anchor is the same concept on both
+   * covered record types, measured the same way, so one code reports its absence on either.
+   */
   | { readonly code: "REJECTION_TIMESTAMP_MISSING" }
   /** `DI-6` — the rejection timestamp is write-once; a second one is never written. */
   | { readonly code: "REJECTION_TIMESTAMP_ALREADY_SET" };
