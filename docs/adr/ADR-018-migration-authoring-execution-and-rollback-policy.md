@@ -2,23 +2,29 @@
 
 | Field | Value |
 |---|---|
-| **Status** | **`Proposed`** |
+| **Status** | **`Accepted`** — 2026-09-28 (issue #155). Published as `Proposed` 2026-09-27 (issue #153, PR #154) |
 | **Date** | 2026-09-27 |
-| **Decision owner** | **Joe S.** — product owner / architecture owner (`docs/13`, *Gate summary*). **Has not ruled.** This document records the proposal put to the owner, not a ruling. |
+| **Decision owner** | **Joe S.** — product owner / architecture owner (`docs/13`, *Gate summary*). **Ruled 2026-09-28:** the five-item policy package below is **accepted without modification**. |
 | **Decision gate** | *none* — `DG-2` is **`Resolved`** (2026-08-27, issue #93) and this ADR is **not** one of its constituents. `DG-3` and `DG-4` are **`Unresolved`** and neither holds this decision. |
 | **Related open questions** | **Depends on:** nothing unresolved. `ADR-002`, `ADR-003`, `ADR-005`, `ADR-010`, `ADR-012`, `ADR-013`, `ADR-014`, `ADR-015`, `ADR-016` and `ADR-017` are all **`Accepted`** and supply every constraint this decision must satisfy. **Must NOT answer:** **`DDM-2`**'s identity-generation locus, **`DDM-3`**, **`DDM-4`**, **`DDM-5`**, **`DDM-7`**, and every remaining `DDM-6`, `DDM-8` and `DDM-9` outstanding item; `OQ-4`, `OQ-5`, `OQ-12`, `OQ-14`/`NOQ-8`, `NOQ-9`; **provisioning**, **PostgreSQL version**, **region**, **tier**, **sizing**, **TLS**, **credentials**, **secrets**, application **pool configuration** and any **external pooler**; **purge scheduling and execution**; `DG-3`, `DG-4` |
 | **Supersedes** | *none* |
 | **Superseded by** | *none* |
 
-> **`Proposed`, and therefore NOT in force.** Per `docs/adr/README.md`, a `Proposed` ADR is
-> *"Drafted and under review. The decision is **not yet in force**; nothing may depend on it."*
-> **This document does not accept itself.** The policy below is the proposal put to the Product
-> Owner under issue **#153**; it becomes an architectural decision only through the **separate
+> **Status: `Accepted` — 2026-09-28 (issue #155). In force; later work may rely on it.**
+> Published as `Proposed` 2026-09-27 (issue #153, PR #154), and accepted through the **separate
 > governed acceptance step** that `ADR-005` (#89 / #90, then #91 / #92), `ADR-012`, `ADR-013`,
-> `ADR-014`, `ADR-015`, `ADR-016` and `ADR-017` each passed through. **Nothing here authorizes
-> installation, a file, a script, a directory, a schema, a migration or any other
-> implementation.** The Product Owner direction recorded under *The proposed policy* defines
-> **what is being proposed**, not what has been decided.
+> `ADR-014`, `ADR-015`, `ADR-016` and `ADR-017` each passed through. The Product Owner accepted
+> the complete five-item package **without modification** on 2026-09-28; it is recorded under
+> *The accepted policy*, and it is what is now in force. The count of decisions in force is
+> **thirteen**.
+>
+> **Acceptance is not implementation.** This `Accepted` ADR authorizes **no** installation, no
+> file, no script, no directory, no migrations directory, no migration, no runner, no
+> configuration, no schema, no provisioning, no CI or deployment change and no persistence
+> implementation. **Migration infrastructure** and **the first schema migration** remain
+> **separately authorized later work units**, in that order, and `DDM-2`'s identity-generation
+> locus must be decided between them. What acceptance settles is the **policy those units must
+> obey** — see *This ADR selects nothing else*.
 
 ---
 
@@ -204,13 +210,13 @@ any `package.json` script are **later, separately authorized implementation work
 
 | Option | Assessment |
 |---|---|
-| **A. Implicit execution at application startup / module load / server initialization / on the request path** | **Rejected, and prohibited by the proposed policy.** Under `ADR-005`'s long-running single-instance service this would run schema changes on every restart, inside the process that must stay available to `NFR-REL-02`, at a moment nobody chose; a failure there is an outage rather than a failed command; and with Next.js module loading, an import is enough to make it happen by accident. The prohibition is cheap to state now and expensive to retrofit once persistence modules exist. |
+| **A. Implicit execution at application startup / module load / server initialization / on the request path** | **Rejected, and prohibited by the accepted policy.** Under `ADR-005`'s long-running single-instance service this would run schema changes on every restart, inside the process that must stay available to `NFR-REL-02`, at a moment nobody chose; a failure there is an outage rather than a failed command; and with Next.js module loading, an import is enough to make it happen by accident. The prohibition is cheap to state now and expensive to retrofit once persistence modules exist. |
 | **B. Explicit developer invocation for local development** | **Proposed as the first authorized execution shape** — a separately invoked process, run deliberately against an intentionally selected local or personal PostgreSQL target. It is the only environment that exists today. |
 | **C. CI validation** | **Recorded as outstanding, not decided.** Applying migrations against a throwaway database in CI is feasible and desirable, but today's pipeline has `contents: read`, no services and no secrets, and `ADR-012` selects **no database or integration-test infrastructure** — which is `DG-4`'s neighbourhood. Deciding a CI workflow here would claim infrastructure that does not exist. |
 | **D. Deployment / release execution**, **E. A dedicated production job** | **Recorded as outstanding, not decided.** No database is provisioned, no connection configuration or secret exists, there is no deployment configuration of any kind, and `ADR-010`'s provider-capability validation must be re-verified **before** provisioning. Production execution authority and credentials belong to the provisioning and deployment units, and are named here as their prerequisite rather than pre-empted. |
 
 **Nothing in this section describes an existing workflow.** There is no local workflow, no CI
-migration validation and no production execution path today, and the proposed policy says so in
+migration validation and no production execution path today, and the accepted policy says so in
 those terms.
 
 ### 5. Rollback / down-migration policy
@@ -228,10 +234,11 @@ independent-copy or restore-rehearsal policy is created, widened or reinterprete
 `ADR-010`'s outstanding items — the independent off-provider copy and the pre-launch and quarterly
 restore rehearsals — remain exactly as `ADR-010` and `ADR-013` record them.
 
-## The proposed policy
+## The accepted policy
 
-**This is the Product Owner direction recorded under issue #153, stated as the proposal under
-review. It is not in force.**
+**This is the Product Owner direction recorded under issue #153, accepted without modification
+on 2026-09-28 (issue #155). It is in force, and it is the policy later migration work must
+obey. It authorizes none of that work.**
 
 ### 1. Migration-contents boundary
 
@@ -261,7 +268,8 @@ review. It is not in force.**
   **`FileMigrationProvider`**.
 - **Do not select or install `kysely-ctl`.**
 - **`kysely-ctl` remains documented as a later, separately governed alternative.**
-- **This `Proposed` ADR itself creates no runner, script, configuration or dependency.**
+- **This ADR itself creates no runner, script, configuration or dependency, and accepting it
+  creates none.**
 
 ### 4. Execution environment and timing
 
@@ -292,13 +300,13 @@ review. It is not in force.**
 - **No backup, recovery, independent-copy or restore-rehearsal policy is invented, extended or
   reinterpreted.**
 
-### What this proposal would settle, and what it would not
+### What this decision settles, and what it does not
 
-**It would settle**, on acceptance: the contents boundary across three units; the authoring format
+**It settles**, as of 2026-09-28: the contents boundary across three units; the authoring format
 and its exception rule; the invocation mechanism; the first execution shape and the startup
 prohibition; and the rollback default.
 
-**It would still leave open:** CI migration validation; production execution, deployment
+**It still leaves open:** CI migration validation; production execution, deployment
 integration, credentials and authority; the entry point's own file, name and script surface;
 migration naming beyond the mechanism's inseparable ascending-name ordering; whether
 `disableTransactions` is ever set for a specific migration; `DDM-2`'s identity-generation locus;
@@ -306,15 +314,18 @@ and everything under *This ADR selects nothing else*.
 
 ## Implementation sequencing
 
-**This sequence is a map, not an authorization. No step below is authorized by this document.**
+**This sequence is a map, not an authorization. No step below is authorized by this document**,
+and acceptance authorizes none of the steps that remain.
 
-1. **Propose `ADR-018`** — this document, issue #153.
-2. **Review, and separately accept or reject `ADR-018`** through the governed acceptance step.
-3. **If accepted**, reconcile the present-tense `DDM-10` and data-boundary status text — the
-   `DDM-10` row in `docs/08-data-model.md`, the outstanding-items list in `src/data/README.md`,
-   `docs/13-decision-log.md` and the register rows — **as acceptance-stage work, in its own unit**.
+1. ~~**Propose `ADR-018`**~~ — **done:** this document, issue #153, PR #154.
+2. ~~**Review, and separately accept or reject `ADR-018`**~~ — **done:** **`Accepted` 2026-09-28,
+   issue #155**, through the governed acceptance step.
+3. ~~**If accepted**, reconcile the present-tense `DDM-10` and data-boundary status text~~ —
+   **done in this acceptance unit (issue #155):** the `DDM-10` row in `docs/08-data-model.md`, the
+   outstanding-items list in `src/data/README.md`, `docs/13-decision-log.md` and the register rows.
 4. **Separately authorize migration infrastructure** — the directory, the programmatic entry
-   point, and whatever script surface that unit decides.
+   point, and whatever script surface that unit decides. **Still outstanding, and not authorized
+   by this acceptance.**
 5. **Decide `DDM-2`'s identity-generation locus** before any schema work.
 6. **Separately authorize the first schema migration**, expressing `ADR-017`'s `PS-1`–`PS-11`.
 7. **Separately decide or implement CI and production execution** when their test, provisioning,
@@ -387,7 +398,7 @@ history exists in one idiom — which is exactly why it is proposed now, at zero
 
 | Risk | Consequence | Response |
 |---|---|---|
-| **A `Proposed` ADR is treated as in force** | Someone creates a migrations directory, a runner or a script on the strength of a draft | The header callout, the policy preamble and *This ADR selects nothing else* each state that nothing is in force and nothing is authorized; the register and traceability rows say `Proposed` |
+| **An `Accepted` policy is treated as implementation authority** | Someone creates a migrations directory, a runner or a script on the strength of acceptance alone | The header callout, the policy preamble and *This ADR selects nothing else* each state that acceptance authorizes no implementation; the register, the `DDM-10` row, `src/data/README.md` and the traceability rows all record the policy as settled and the implementation as absent and separately authorized |
 | **The hybrid decays into two conventions** | Half the history in the builder, half in SQL, with no stated rule applied | The exception rule is narrow and written; review applies it per operation; no parallel schema declaration is permitted |
 | **The startup prohibition is bypassed by an import** | A module-load side effect reintroduces implicit migration | The prohibition names startup, module load, server initialization and the request path explicitly, and requires that the entry point not be imported by the application server; the infrastructure unit is where that is enforced and reviewed |
 | **A `down` migration is trusted as a recovery mechanism** | Data loss is discovered after a reversal that could not restore it | The policy states that a `down` must not imply restorability; destructive changes require explicit authorization and an `ADR-010`-based assessment |
@@ -411,7 +422,8 @@ history exists in one idiom — which is exactly why it is proposed now, at zero
 
 ## This ADR selects nothing else
 
-It creates **no** file other than itself and the two register updates; **no** migrations
+It creates **no** file other than itself and the register, traceability, `DDM-10`, data-boundary
+and decision-log reconciliations this acceptance required; **no** migrations
 directory; **no** migration; **no** runner, entry point or script; **no** Kysely or migration
 configuration file; **no** dependency, and it changes **neither** `package.json` **nor**
 `package-lock.json`; **no** CI, workflow or deployment change; **no** schema, table, column, key,
@@ -421,27 +433,31 @@ selection; **no** `OQ-*`, `NOQ-*` or gate resolution; and **no** amendment to `A
 `ADR-003`, `ADR-005`, `ADR-010`, `ADR-012`, `ADR-013`, `ADR-014`, `ADR-015`, `ADR-016` or
 `ADR-017` — **none of which is amended, reopened or superseded**.
 
-**It leaves the present-tense status text unchanged.** The `DDM-10` row in
-`docs/08-data-model.md`, the outstanding-items list in `src/data/README.md` and
-`docs/13-decision-log.md` are **accurate while this ADR is `Proposed`** — the five items remain
-open until acceptance — and are therefore **untouched at this stage**. Reconciling them is
-acceptance-stage work.
+**The present-tense status text is reconciled by this acceptance, and only where acceptance made
+it false.** While this ADR was `Proposed`, the `DDM-10` row in `docs/08-data-model.md`, the
+outstanding-items list in `src/data/README.md` and `docs/13-decision-log.md` correctly recorded
+the five items as open; **issue #155 reconciled them to record the five items as settled by this
+`Accepted` ADR and the implementation as still absent and separately authorized**. Nothing else
+in those documents changed.
 
 ## Owner-decision status and lifecycle
 
-**Status: `Proposed`. Not in force. Nothing may depend on it.**
+**Status: `Accepted` — 2026-09-28 (issue #155). In force; later work may rely on it.**
 
-**The two-stage lifecycle applies**, per the `ADR-005` (#89 / #90, then #91 / #92), `ADR-012`,
+**The two-stage lifecycle applied**, per the `ADR-005` (#89 / #90, then #91 / #92), `ADR-012`,
 `ADR-013`, `ADR-014`, `ADR-015`, `ADR-016` and `ADR-017` precedents: publication as `Proposed`
-under one issue, then a **separate governed acceptance step** under its own issue. **This
-document performs the first stage only.**
+under one issue — 2026-09-27, issue #153, PR #154 — then a **separate governed acceptance step**
+under its own issue — 2026-09-28, issue #155. **Both stages are complete.**
 
-**What acceptance would require.** A Product Owner ruling on the five-item package; then, in the
-acceptance unit, reconciliation of the present-tense `DDM-10` and data-boundary text, the
-register row, the traceability row and `docs/13-decision-log.md` — each only where acceptance
-makes a present-tense statement false. **Acceptance opens no gate and authorizes no
-implementation**; migration infrastructure and the first schema migration remain separate
-authorized units, in that order, with `DDM-2`'s identity-generation locus decided between them.
+**What acceptance required, and what it did.** A Product Owner ruling on the five-item package —
+**given 2026-09-28, accepting the package without modification** — and then, in this acceptance
+unit, reconciliation of the present-tense `DDM-10` and data-boundary text, the register row, the
+traceability row and `docs/13-decision-log.md`, each only where acceptance made a present-tense
+statement false. **Acceptance opened no gate and authorizes no implementation**: `DG-2` remains
+`Resolved` and this ADR is not a constituent of it, `DG-3` and `DG-4` remain `Unresolved`, and
+migration infrastructure and the first schema migration remain separate authorized units, in that
+order, with `DDM-2`'s identity-generation locus decided between them. **The accepted policy is
+what later work must obey; it is not permission to begin that work.**
 
 ## Traceability
 
@@ -451,10 +467,10 @@ authorized units, in that order, with `DDM-2`'s identity-generation locus decide
 | **Journeys** | *none directly* — this is an infrastructure-policy decision behind `C9`; it changes no visitor, listing-owner or administrator journey |
 | **Components** | **`C9`** (Listing Repository) — the sole data-access path, whose schema evolution this policy governs. `C1`–`C8`, `C10`–`C12` are unchanged |
 | **Invariants** | `DI-1`, `DI-10`, `DI-11` and every other `DI-*`/`BI-*` are **untouched**; no invariant is implemented, weakened or tested here. `O-1` and `O-2` are preserved verbatim in `src/data/README.md` |
-| **Deferred decisions** | **`DDM-10`** — its five outstanding items are the subject of this proposal; **`DDM-2`**'s identity-generation locus is named as a later prerequisite and left undecided; `DDM-3`, `DDM-4`, `DDM-5`, `DDM-7` remain open |
+| **Deferred decisions** | **`DDM-10`** — discharged by `ADR-015`, and its five outstanding policy items are **settled by this `Accepted` ADR**; the migration infrastructure and the first schema migration those items govern remain **separately authorized future work**. **`DDM-2`**'s identity-generation locus is named as a prerequisite for the first schema migration and **remains undecided**; `DDM-3`, `DDM-4`, `DDM-5`, `DDM-7` remain open |
 | **Fed by** | `ADR-002`, `ADR-003`, `ADR-005`, `ADR-010`, `ADR-012`, `ADR-013`, `ADR-014`, `ADR-015`, `ADR-016`, `ADR-017` — all **`Accepted`**, **none amended** |
-| **Documents amended** | **At this `Proposed` stage:** this file (new), `docs/adr/README.md` (register row) and `docs/traceability-matrix.md` (register row) — the `Proposed`-stage surface established by `ADR-013` (PR #102) and followed by `ADR-014`, `ADR-015`, `ADR-016` and `ADR-017`. **`docs/08-data-model.md`, `src/data/README.md` and `docs/13-decision-log.md` are deliberately untouched** — their present-tense text stays true while this ADR is `Proposed`. **No gate is marked `Resolved`** |
-| **Issue / pull request** | **Proposed:** issue **#153** — `architecture: propose ADR-018 migration policy for the ADR-015 outstanding items`. **Acceptance:** a separate later issue, not yet created |
+| **Documents amended** | **At the `Proposed` stage (issue #153, PR #154):** this file (new), `docs/adr/README.md` (register row) and `docs/traceability-matrix.md` (register row) — the `Proposed`-stage surface established by `ADR-013` (PR #102) and followed by `ADR-014`, `ADR-015`, `ADR-016` and `ADR-017`. **At the acceptance stage (issue #155):** this file (status, lifecycle and the status-dependent wording only), `docs/adr/README.md`, `docs/traceability-matrix.md`, the `DDM-10` status cell in `docs/08-data-model.md`, `src/data/README.md` and `docs/13-decision-log.md` — each only where acceptance made a present-tense statement false. **No gate is marked `Resolved`** |
+| **Issue / pull request** | **Proposed:** issue **#153**, PR **#154** — `architecture: propose ADR-018 migration policy for the ADR-015 outstanding items`. **Accepted:** issue **#155** — `architecture: accept ADR-018 migration policy`, 2026-09-28 |
 
 ## Mutable-fact verification
 

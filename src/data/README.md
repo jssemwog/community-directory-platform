@@ -48,17 +48,54 @@ unselected.**
 
 `ADR-015` (`Accepted` 2026-09-14, issue #121) **discharged `DDM-10`**, the
 migration and schema-evolution tooling: **Kysely's built-in `Migrator`**.
-**Still outstanding, and not discharged by selecting the tool:**
 
-- migration contents;
-- migration authoring-format policy beyond what the `Migrator` makes
-  inseparable;
-- `kysely-ctl` versus programmatic invocation;
-- migration execution environment and timing;
-- rollback / down-migration policy.
+`ADR-018` (`Accepted` 2026-09-28, issue #155; published as `Proposed`
+2026-09-27, issue #153, PR #154) **settles the five policy items `ADR-015`
+left outstanding**. The **selected policy**, which later migration work must
+obey:
 
-**No migration exists**, and none of the questions above is answered here.
-This file records that they are open; it recommends nothing and decides
+- **Contents.** The decision, the migration infrastructure and the first
+  schema migration are **three separately authorized units, in that order**.
+- **Authoring format.** A **governed hybrid** inside Kysely's `up`/`down`
+  shape: **raw PostgreSQL DDL through the `sql` tag is the default**, and the
+  schema builder is permitted **only** where it states the intended PostgreSQL
+  operation more clearly without weakening or obscuring its semantics. The two
+  forms must **not** become competing schema sources of truth, and ordinary
+  application queries are **not** the default format.
+- **Invocation.** A **repository-owned programmatic entry point** using core
+  `Migrator` and `FileMigrationProvider`. **`kysely-ctl` is not selected and
+  not installed**, and remains only a later, separately governed alternative.
+- **Execution.** **Explicit local developer invocation** is the first
+  authorized shape. **CI migration validation remains outstanding**, and
+  **production execution, deployment integration, credentials and authority
+  remain outstanding**. Migrations must **never** execute implicitly during
+  **application startup**, **Next.js module loading**, **server
+  initialization** or **ordinary request handling**, and the migration entry
+  point must be separately invoked and **must not be imported by the
+  application server**.
+- **Rollback.** **Forward-only corrective migrations** are the default
+  recovery path. A `down` migration may be written **only** where reversal is
+  genuinely safe, complete and honest, and must never imply that lost or
+  transformed data can be restored. **Destructive or irreversible migrations
+  require separate explicit authorization and a documented safeguard and
+  recovery assessment against existing `ADR-010` obligations** — that
+  assessment *reads* `ADR-010`, and **no backup, disaster-recovery,
+  independent-copy or restore-rehearsal policy is created, extended or
+  reinterpreted**.
+
+**Still outstanding, and not settled by accepting the policy:** `DDM-2`'s
+**identity generation locus** (application or database default), which
+**remains undecided** and is only a **prerequisite** for the first schema
+migration; **CI migration validation**; and **production execution**,
+deployment integration, credentials and authority.
+
+**Policy is selected; implementation is absent.** **No migration exists**, and
+**no migration infrastructure, migrations directory, migration file, runner,
+script, Kysely or migration configuration, schema, CI workflow, production
+workflow, provisioning or persistence implementation exists or is authorized
+by that acceptance.** Migration infrastructure is a **separately authorized
+future issue**, and the first schema migration is another, later one. This
+file records the policy and the absence; it recommends nothing and decides
 nothing.
 
 ## The physical data-design items
