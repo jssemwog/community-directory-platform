@@ -23,6 +23,22 @@ no identity column, no trigger acting as a default. The omission is
 author who adds the default back silently adopts the alternative `ADR-019`
 rejected. The **format** remains `ADR-017` `PS-1`: opaque random UUID v4.
 
+**Location attributes are free text** (`ADR-020`, `Accepted` 2026-10-07,
+issue #161). Declare `locality`, `administrativeArea`, `country` and
+`postalCode` as free text, honouring `OQ-6`'s presence rules — locality and
+country **not null**, administrative area and postal code nullable — with
+**no reference table, no foreign key, no country-code constraint and no seed
+data**. **Do not invent a `varchar(n)` length:** no exact numeric limit is
+governed anywhere (`VR-S3` leaves every safety/length boundary to
+`DD-1`/`DD-2`), and PostgreSQL `text` needs none — choosing a number here
+would settle a decision nobody has made. A governed bound may be added later,
+additively, once it is decided.
+
+**The first schema migration is still blocked.** `DDM-3`/`OQ-5` — category
+representation, cardinality and curation — **remains unresolved**, and a
+listing structure carries a required category. Resolving it is the next gate;
+until then no migration here can be written honestly.
+
 ## The rules a file placed here must follow
 
 - **Filename: `NNN-kebab-case-summary.ts`** — a zero-padded three-digit
