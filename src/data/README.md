@@ -163,7 +163,19 @@ These remain **open**, and none may be resolved by code placed here:
 
 - **`DDM-3`** category representation — `OQ-5`.
 - **`DDM-4`** indexing and text-search strategy — `OQ-4`, `NOQ-4`.
-- **`DDM-5`** normalization of location — open; physical.
+- **`DDM-5`** normalization of location — ~~open; physical.~~ **Selected for the
+  MVP by `ADR-020`** (`Accepted` 2026-10-07, issue #161): `locality`,
+  `administrativeArea`,
+  `country` and `postalCode` are **free text**, subject only to `OQ-6`'s existing
+  presence requirements — locality and country **required**, administrative area and
+  postal code **optional**, unchanged — and **reasonable governed length constraints**.
+  **No country standard, reference table, curated list, validation library, new
+  formatting expression or external location service** is selected. **No exact numeric
+  length limit** is selected, because none is governed: `VR-S3` leaves every
+  safety/length boundary to `DD-1`/`DD-2`, so the bound is an **obligation** and its
+  value a **narrow later decision**. **Future normalisation remains separately governed,
+  is not prohibited, and should arrive additively**; **no backfill is owed today because
+  no schema and no rows exist**. **No implementation is authorized here.**
 - **`DDM-7`** audit-entry storage — `OQ-14`, and meaningful only if `E5` is
   known to exist.
 
