@@ -10,10 +10,18 @@ database is provisioned, and `C9` persistence is not implemented.
 
 ## Adding a migration is separate, later, authorized work
 
-The **first schema migration requires its own issue and branch**, and it may
-not be written until **`DDM-2`'s identity-generation locus** — application
-generated identity versus a database default — **is decided**. It remains
-undecided; a `DEFAULT gen_random_uuid()` in DDL would settle it silently.
+The **first schema migration requires its own issue and branch**. Its
+prerequisite — **`DDM-2`'s identity-generation locus** — **is now decided**:
+`ADR-019` (`Accepted` 2026-10-07, issue #159) selects **application-generated
+identity**.
+
+**What that obliges a migration placed here to do.** Declare the listing and
+revision identity columns as `uuid`, **primary key**, **not null**, and
+**with no generation default** — no `DEFAULT gen_random_uuid()`, no sequence,
+no identity column, no trigger acting as a default. The omission is
+**deliberate and governed**, and the migration should say so, because an
+author who adds the default back silently adopts the alternative `ADR-019`
+rejected. The **format** remains `ADR-017` `PS-1`: opaque random UUID v4.
 
 ## The rules a file placed here must follow
 
