@@ -91,11 +91,17 @@ obey:
   independent-copy or restore-rehearsal policy is created, extended or
   reinterpreted**.
 
-**Still outstanding, and not settled by accepting the policy:** `DDM-2`'s
-**identity generation locus** (application or database default), which
-**remains undecided** and is only a **prerequisite** for the first schema
-migration; **CI migration validation**; and **production execution**,
-deployment integration, credentials and authority.
+**Outstanding when the policy was accepted, and since settled:** `DDM-2`'s
+**identity generation locus** — **decided by `ADR-019`** (`Accepted`
+2026-10-07, issue #159, on a Product Owner ruling): **the application
+generates** listing and revision UUID v4 identifiers, and **PostgreSQL
+declares no normal generation default** while still enforcing `uuid`,
+primary-key uniqueness and not-null. It was a **prerequisite** for the first
+schema migration, and it is now met.
+
+**Still outstanding, and not settled by accepting the policy:** **CI migration
+validation**; and **production execution**, deployment integration,
+credentials and authority.
 
 **The policy was selected by `ADR-018` and authorized nothing.** Migration
 **infrastructure** was then separately authorized and built as its own unit
@@ -130,8 +136,19 @@ module-type warnings; they are expected, and are not suppressed.
 `DDM-8` and `DDM-9`**, each with named outstanding items, and **authorized no
 implementation**:
 
-- **`DDM-2`** identity strategy — opaque random UUID v4. *Outstanding:* the
-  identity generation locus (application or database default).
+- **`DDM-2`** identity strategy — opaque random UUID v4. ~~*Outstanding:* the
+  identity generation locus (application or database default).~~ **The
+  generation locus is decided by `ADR-019`** (`Accepted` 2026-10-07, issue
+  #159): **the application is the sole normal generator**, generating at an
+  **orchestration boundary before the pure, id-first domain function is
+  called** and **never** inside `listing-id.ts`; **PostgreSQL stores `uuid`
+  and enforces primary-key uniqueness and not-null, with no normal generation
+  default**; the **first migration must omit that default deliberately**; and
+  **direct database writes and any governed import path must supply
+  identifiers explicitly**. **Database-generated and hybrid generation are
+  rejected.** *Still outstanding:* the **domain carrier type**, the **revision
+  identity domain type**, and **public identity transport**. **No generator
+  exists, and none is authorized here.**
 - **`DDM-6`** physical separation of non-public attributes and per-contact
   public-display designations. *Outstanding:* the public projection form (a
   view or a single `C9` query module), replacement-value semantics, and
