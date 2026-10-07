@@ -87,7 +87,7 @@ read from the working tree.
 | `DDM-3` is **held by `OQ-5`** (cardinality, curation), and *"implementing category persistence requires `OQ-5` and `DDM-3` to be resolved first"* | `docs/08:1071`; `ADR-017` | Category is a **separate, later** gate and is **not** decided here |
 | The domain models location as plain strings: `locality: string`, `country: string`, `administrativeArea?: string`, `postalCode?: DesignatableValue` | `src/domain/listing/listing.ts` | A **logical** model only (`docs/08` **P6**, *Logical is not physical*); it commits no column type, which is why `ADR-017` could exclude `DDM-5` |
 | `postalCode` is a `DesignatableValue` — value plus a mandatory public-display designation | `src/domain/listing/listing.ts`; `PS-2` | Whatever representation is used must keep the designation **beside** the value |
-| `validation.ts` implements **blankness only**: *"no regular expression, length limit, normalization, formatting policy, or email/phone/URL semantics is introduced, and no validation library is used"* | `src/domain/listing/validation.ts:18-22` | **No exact length limit is governed anywhere today** |
+| `validation.ts` implements **blankness only**: *"no regular expression, length limit, normalization, formatting policy, or email/phone/URL semantics is introduced, and no validation library is used"* | `src/domain/listing/validation.ts:20-22` | **No exact length limit is governed anywhere today** |
 | *"every safety/length boundary `VR-S3` leaves to `DD-1`/`DD-2`"*, and `DDM-5` named among what is *"not decided here and therefore not implemented"* | `src/domain/listing/validation.ts:28-30` | Exact numeric bounds are `VR-S3` → `DD-1`/`DD-2`, **not this ADR** |
 | No country list, postal-code pattern, geographic lookup or validation dependency exists anywhere | `src/`, `package.json` | Nothing to preserve, and nothing adopted |
 | Nothing persists: no schema, no `.sql` file, no `C9` repository, query, connection or pool configuration; `src/data/migrations/` holds only its `README.md` | `src/data/` | **Zero rows exist**, so no backfill is owed today |
@@ -173,6 +173,46 @@ Therefore:
 - **The absence of numeric bounds does not reopen normalisation.** Items 6–11 stand on their own;
   length is a separate axis entirely.
 
+### Relationship to `FR-DATA-06` — recorded, not glossed
+
+**`FR-DATA-06` says more about `country` than presence**, and this ADR must not be read as having
+satisfied all of it. Its requirement text is:
+
+> The system shall represent each listing with a country, **drawn where practical from a
+> standardised country list and represented consistently across listings.**
+
+Its own notes column then limits that:
+
+> **Required on every listing.** … **No country-list source, representation, or provider is
+> selected here.** Decided: `OQ-6`.
+
+`docs/08`'s `E1` **Country** attribute row restates the same sentence, and `docs/13`'s `OQ-6`
+record says `country` is *"drawn where practical from a standardised country list, represented
+consistently"* while its scope limits select *"no store, country list, validation library, format
+expression, or technology"*.
+
+**How free text stands against it:**
+
+- **`FR-DATA-06` is not violated.** It selects **no** country-list source, representation or
+  provider, and its list clause is explicitly conditional — *"where practical"*. With no standard
+  selected, no curation owner named and no list adopted, drawing from one is **not** practical
+  today, so free text is a permitted representation under the requirement as written. The
+  **required-on-every-listing**, **multi-country-from-launch** and **never-defaulted-to-one-country**
+  obligations are all carried unchanged by a free-text value.
+- **But its *"represented consistently across listings"* clause is an aspiration this decision
+  does not meet, and does not claim to.** Free text cannot enforce consistency; this ADR's
+  *Consequences* record exactly that — *"Nothing guarantees that two records naming the same place
+  spell it the same way"*, with `"USA"`, `"U.S.A."`, `"United States"` named. **That clause
+  therefore remains outstanding**, as a quality obligation rather than a blocker, and is one of the
+  things future normalisation would serve.
+- **This does not reopen the ruling.** The Product Owner ruled that no country standard is adopted
+  for the MVP, with Option C — free text plus a standardised `country` code, the option that would
+  serve this clause directly — **rejected for the MVP as premature, not as invalid**, and recorded
+  above as the most likely first step if normalisation is later authorized.
+- **Nothing here selects a standard, a list, a source or a provider**, and `FR-DATA-06` is
+  **read, not amended**. Changing its text, or electing to satisfy its consistency clause, would
+  be a separate product decision.
+
 ## Rationale
 
 ### From repository evidence
@@ -180,10 +220,11 @@ Therefore:
 - **It is the only option that answers no question `OQ-6` left open.** `OQ-6` selected no country
   list, format library, validation expression, storage type or external service. Options B and C
   each require adopting one, and D requires two.
-- **The existing authoritative obligation is already satisfied.** `locality` and `country` are
+- **The authoritative *presence* obligation is already satisfied.** `locality` and `country` are
   required and `administrativeArea`/`postalCode` optional under `OQ-6`; free text carries all
   four without altering any of it, and `VR-S1`'s presence rule is already implemented in
-  `validation.ts`.
+  `validation.ts`. **`FR-DATA-06`'s consistency aspiration is a separate matter, and is not
+  satisfied today** — see *Relationship to `FR-DATA-06`* below.
 - **The domain already matches.** `locality: string` and `country: string` need no change, and
   `docs/08` **P6** keeps that logical shape free of any physical commitment.
 - **No schema, no rows and no provisioned database exist**, so the normalisation that this
@@ -344,6 +385,10 @@ the backfill, not the difficulty of the schema change.
 - **`ADR-013`** — the named provider, with **no version, region, tier, sizing or provisioning
   selected**; read, not amended.
 - **`FR-DATA-04`, `FR-DATA-05`, `FR-DATA-06`, `FR-DATA-06b`** — the four attributes.
+  `FR-DATA-06`'s *“represented consistently across listings”* clause is **not satisfied** by
+  free text and **remains outstanding** — see *Relationship to `FR-DATA-06`*; its
+  required-on-every-listing and multi-country obligations are carried unchanged, and the
+  requirement is **read, not amended**.
 - **`FR-VAL-01`, `VR-S1`** — required at initial submission; **`VR-S3`** — format and safety for
   supplied optional values, exact boundaries deferred to `DD-1`/`DD-2`.
 - **`PS-2` / `DDM-6`** — the mandatory public-display designation stored beside `postalCode`.
