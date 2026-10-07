@@ -226,6 +226,20 @@ describe("operation parsing", () => {
       MigrationConfigurationError,
     );
   });
+
+  it("does not echo the received value, which may be a pasted credential", () => {
+    let message = "";
+
+    try {
+      parseOperation([CONNECTION_STRING]);
+    } catch (cause) {
+      message = (cause as Error).message;
+    }
+
+    expect(message).not.toContain(CONNECTION_STRING);
+    expect(message).not.toContain("s3cr3t-pw");
+    expect(message).toContain("latest | down");
+  });
 });
 
 describe("secret redaction", () => {
@@ -237,6 +251,43 @@ describe("secret redaction", () => {
     expect(redacted).not.toContain(CONNECTION_STRING);
     expect(redacted).not.toContain("s3cr3t-pw");
     expect(redacted).toContain(REDACTED);
+  });
+
+  it("removes the username, as a pg authentication failure reports it", () => {
+    const text = 'password authentication failed for user "someone"';
+
+    const redacted = redactSecrets(text, secretsOf(CONNECTION_STRING));
+
+    expect(redacted).not.toContain("someone");
+    expect(redacted).toContain(REDACTED);
+  });
+
+  it("removes a percent-encoded password in both its forms", () => {
+    const encoded = "postgres://u:p%40ss%3Aword@localhost:5432/local";
+    const secrets = secretsOf(encoded);
+
+    expect(redactSecrets("saw p%40ss%3Aword", secrets)).not.toContain(
+      "p%40ss%3Aword",
+    );
+    expect(redactSecrets("saw p@ss:word", secrets)).not.toContain("p@ss:word");
+  });
+
+  it("removes a credential carried as a query parameter", () => {
+    const secrets = secretsOf(
+      "postgres://localhost:5432/local?sslpassword=key-material",
+    );
+
+    expect(redactSecrets("ssl error: key-material", secrets)).not.toContain(
+      "key-material",
+    );
+  });
+
+  it("redacts an unparseable value whole, rather than leaking it", () => {
+    const secrets = secretsOf("postgres://[unparseable");
+
+    expect(redactSecrets("target postgres://[unparseable", secrets)).toBe(
+      `target ${REDACTED}`,
+    );
   });
 });
 
@@ -378,6 +429,21 @@ describe("runMigration", () => {
 
     expect(emitted).not.toContain(CONNECTION_STRING);
     expect(emitted).not.toContain("s3cr3t-pw");
+    expect(emitted).toContain(REDACTED);
+  });
+
+  it("never emits the username a pg authentication failure reports", async () => {
+    const fake = recorder({
+      latest: async () => ({
+        error: new Error('password authentication failed for user "someone"'),
+      }),
+    });
+
+    await runMigration("latest", fake.deps);
+
+    const emitted = [...fake.info, ...fake.errors].join("\n");
+
+    expect(emitted).not.toContain("someone");
     expect(emitted).toContain(REDACTED);
   });
 

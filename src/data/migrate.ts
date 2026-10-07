@@ -129,20 +129,50 @@ export function redactSecrets(
     .reduce((redacted, secret) => redacted.split(secret).join(REDACTED), text);
 }
 
-/** The secret values derived from a connection string, longest first. */
+/**
+ * Query parameters whose values are credentials in a PostgreSQL URL, and so
+ * must be redacted individually as well as inside the whole URL.
+ */
+const CREDENTIAL_QUERY_PARAMETERS = ["password", "sslpassword"];
+
+/**
+ * The secret values derived from a connection string, longest first so that
+ * the whole URL is removed before its parts and no partial match is left
+ * behind.
+ *
+ * The username is treated as a secret too: a `pg` authentication failure
+ * reports it verbatim (`password authentication failed for user "…"`), and
+ * that message reaches a log line. The trade-off is accepted deliberately — a
+ * pathologically short credential will garble otherwise readable output, which
+ * is a safe failure, whereas emitting it is not.
+ */
 export function secretsOf(connectionString: string): readonly string[] {
   const secrets = [connectionString];
 
   try {
-    const { password } = new URL(connectionString);
-    if (password.length > 0) {
-      secrets.push(decodeURIComponent(password), password);
+    const url = new URL(connectionString);
+
+    for (const credential of [url.password, url.username]) {
+      if (credential.length > 0) {
+        secrets.push(credential, decodeURIComponent(credential));
+      }
+    }
+
+    for (const [name, value] of url.searchParams) {
+      if (
+        CREDENTIAL_QUERY_PARAMETERS.includes(name.toLowerCase()) &&
+        value.length > 0
+      ) {
+        secrets.push(value);
+      }
     }
   } catch {
     // An unparseable value is still redacted whole, above.
   }
 
-  return [...secrets].sort((left, right) => right.length - left.length);
+  return [...new Set(secrets)].sort(
+    (left, right) => right.length - left.length,
+  );
 }
 
 /**
@@ -195,8 +225,12 @@ export function parseOperation(
   );
 
   if (operation === undefined) {
+    // The received value is not echoed: a developer who pastes a connection
+    // URL where an operation belongs would otherwise have it printed back.
     throw new MigrationConfigurationError(
-      `Unknown operation "${requested}". Expected one of: ${allowed}.`,
+      `Unknown operation. Expected one of: ${allowed}. The value received is ` +
+        `not reproduced here, because it may be a credential pasted into the ` +
+        `wrong argument.`,
     );
   }
 
