@@ -11,7 +11,9 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "migrate:latest": "node --experimental-strip-types src/data/migrate.ts latest",
+    "migrate:down": "node --experimental-strip-types src/data/migrate.ts down"
   },
   "dependencies": {
     "kysely": "0.29.6",
