@@ -3,7 +3,11 @@
 Holds **`C9`** (Listing Repository) — **the single data-access path**
 (`ADR-002` `O-1`). It depends on nothing else in `src/`.
 
-**This directory is empty, and that is load-bearing.**
+**`C9` is still unimplemented, and that is load-bearing.** The only code here is
+**migration infrastructure** — `migrate.ts` and the empty `migrations/` folder
+it reads (issue #157). It is **schema-neutral**: a mechanism with nothing to
+migrate. **No `C9` repository, query, transaction or connection-pool code
+exists.**
 
 Seven states are kept apart below, because collapsing them is how a decision
 turns into an implementation nobody authorized:
@@ -12,9 +16,13 @@ turns into an implementation nobody authorized:
   It is the register's own term, and it is **not** a synonym for implemented.
 - **Selected** — a named choice exists within a discharged decision.
 - **Installed** — the package is present as a dependency.
-- **Configured** — settings exist for it. **Nothing here is configured.**
+- **Configured** — settings exist for it. **Nothing is configured for the
+  application.** The migration entry point builds its own dialect at
+  invocation and reads its target from the environment; no committed setting,
+  credential or application pool configuration exists.
 - **Provisioned** — an external resource exists. **Nothing is provisioned.**
-- **Implemented** — code exists. **No code exists here.**
+- **Implemented** — code exists. **Only the migration mechanism exists; no
+  `C9` persistence code does.**
 - **Deferred / still open** — recorded as unanswered, by ruling or by an open
   question.
 
@@ -89,14 +97,32 @@ obey:
 migration; **CI migration validation**; and **production execution**,
 deployment integration, credentials and authority.
 
-**Policy is selected; implementation is absent.** **No migration exists**, and
-**no migration infrastructure, migrations directory, migration file, runner,
-script, Kysely or migration configuration, schema, CI workflow, production
-workflow, provisioning or persistence implementation exists or is authorized
-by that acceptance.** Migration infrastructure is a **separately authorized
-future issue**, and the first schema migration is another, later one. This
-file records the policy and the absence; it recommends nothing and decides
-nothing.
+**The policy was selected by `ADR-018` and authorized nothing.** Migration
+**infrastructure** was then separately authorized and built as its own unit
+(**issue #157**), and the **first schema migration is still another, later
+one**. What exists now, and what still does not:
+
+- **Exists** — `migrate.ts`, the repository-owned programmatic entry point
+  (core `Migrator` over `FileMigrationProvider`, `pg` through
+  `PostgresDialect`); the `migrations/` folder it reads; the `migrate:latest`
+  and `migrate:down` scripts in `package.json`; and tests that exercise the
+  mechanism **without any database**.
+- **Does not exist** — **any migration**, **any schema**, any table, column,
+  constraint, index, type or default; any CI or production migration workflow;
+  any provisioning; any persistence implementation.
+
+**A mechanism is not a schema.** `migrations/` is deliberately empty, nothing
+has ever been applied anywhere, and **`kysely-ctl` is neither selected nor
+installed** — no dependency was added to build this.
+
+**Execution is explicit local developer invocation only.** The entry point is
+**not imported by the application**, and `ADR-018` prohibits implicit execution
+during application startup, Next.js module loading, server initialization and
+ordinary request handling. **CI migration validation and production execution,
+deployment integration, credentials and authority remain outstanding** —
+nothing here claims otherwise. Local invocation runs TypeScript directly under
+Node's type stripping, so a run prints Node's experimental-feature and
+module-type warnings; they are expected, and are not suppressed.
 
 ## The physical data-design items
 
@@ -129,11 +155,17 @@ their recorded classification, and it is not softened or hardened here.
 
 ## What does not exist, and what is not authorized
 
-**No schema, migration, connection configuration, pool configuration,
-repository or persistence implementation exists in this repository.** A
+**No schema, no migration, no application connection or pool configuration, and
+no repository or persistence implementation exists in this repository.** A
 placeholder repository or a stub client would encode assumptions about every
 outstanding item above — issue #95 therefore added none, and the application
 remains **datastore-independent at runtime**.
+
+The migration entry point is the one exception, and it is a narrow one: it
+obtains its target **explicitly** from `MIGRATION_DATABASE_URL` at invocation
+time, has **no default**, stores **no credential**, and is **unreachable from
+the application**. It is not application connection configuration, and running
+it against a target nobody has provisioned simply fails.
 
 **Neither an `Accepted` ADR nor an installed dependency is implementation
 authority.** Each of the above was recorded precisely so that the work it
@@ -152,4 +184,4 @@ Two obligations bind whatever eventually lands here:
   datastore credential and no public route reaches the store
   (`NFR-SEC-08`; `docs/07` `R-10`).
 
-**Still empty.**
+**Still no `C9`, and still no schema.**
