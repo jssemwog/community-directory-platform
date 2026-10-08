@@ -40,14 +40,19 @@ cleared.** ~~`DDM-3`/`OQ-5` — category representation, cardinality and curatio
 2026-10-07, issue #163): a listing carries **exactly one required** category from
 a **predefined, finite, platform-owned, flat** vocabulary, curated by the Product
 Owner as **repository-owned configuration changed through deployment**. That is a
-**product** answer only. Two things must still happen before a migration here can
-be written honestly, **in this order**: the **initial category values** require a
-**separate Product Owner approval**, and **`DDM-3`** must then select the
-**physical representation** — text column versus reference table, foreign-key
+**product** answer only. ~~Two things must still happen before a migration here can
+be written honestly, in this order: the initial category values require a separate
+Product Owner approval, and `DDM-3` must then select the physical
+representation.~~ **The first of those is done:** the **initial category values
+were approved on 2026-10-08** (Product Owner ruling, issue #165) — **16
+categories**, recorded in `docs/05` *The approved MVP category vocabulary*. **One
+thing still must happen:** **`DDM-3`** must select the **physical
+representation** — text column versus reference table, foreign-key
 structure, stable identifiers versus display labels, constraints, and the
-configuration/seed-data mechanism. **Do not pre-empt either:** declare no
+configuration/seed-data mechanism. **Do not pre-empt it:** declare no
 category column, type, enumeration, reference table, foreign key, constraint or
-seed data, and **do not infer a representation from the product ruling**.
+seed data, and **do not infer a representation from the product ruling or from the
+approved list of labels** — those labels are **display text, not identifiers**.
 
 ## The rules a file placed here must follow
 

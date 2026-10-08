@@ -316,9 +316,14 @@ review turnaround time) define "success" for the first release.
    truthfully applies the existing refusal/rejection behaviour applies. Administrators
    **may correct** a category during moderation, and a post-approval change uses the
    existing `OQ-10` revision path. **Multi-category filtering (`FR-SRCH-09`) remains
-   unapproved and deferred.** **The initial category values are not approved by this
-   ruling** and require a **separate Product Owner approval**; the **physical
-   representation remains `DDM-3`**, and **no implementation is authorized**. See
+   unapproved and deferred.** ~~The initial category values are not approved by this
+   ruling and require a separate Product Owner approval.~~ **Those values were approved
+   on 2026-10-08 (Joe S., issue #165): exactly 16 categories**, whose labels,
+   definitions, boundary notes, tie-breaker rules and alphabetical display order are
+   recorded authoritatively in `docs/05` *The approved MVP category vocabulary*. The
+   approval covers **product vocabulary only**; the **physical representation remains
+   `DDM-3`** — undecided, but **no longer blocked by any product question** — and **no
+   implementation, configuration or seed data is authorized**. See
    `docs/05` `FR-SRCH-04`, `FR-SRCH-09`, `FR-DATA-02`, `FR-DATA-10` and `docs/13`.
 5. ~~**Removing/unpublishing approved listings**~~ — **Decided 2026-08-04 (Joe S.
    — `OQ-11`).** An authorized administrator **may unpublish** an approved

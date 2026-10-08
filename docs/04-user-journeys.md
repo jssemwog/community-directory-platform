@@ -105,7 +105,9 @@ Each journey below uses this structure:
 
 - **Primary actor:** Visitor
 - **Goal:** Narrow listings to a single category.
-- **Preconditions:** A predefined set of categories exists.
+- **Preconditions:** A predefined set of categories exists — the **16 approved
+  categories** (`docs/05` *The approved MVP category vocabulary*; 2026-10-08, issue
+  #165). **Not yet implemented.**
 - **Trigger:** The visitor selects a category.
 - **Main success path:**
   1. The visitor chooses a category from the available set.
@@ -123,7 +125,10 @@ Each journey below uses this structure:
   (MVP open question).~~ **Decided (`OQ-5`, 2026-10-07):** a listing carries
   **exactly one** category from a **predefined, finite, platform-owned, flat**
   vocabulary curated by the **Product Owner** as repository configuration, so the
-  filter is **single-select** over **canonical** values. **Multi-category
+  filter is **single-select** over **canonical** values. **The vocabulary's 16 values
+  were approved on 2026-10-08** (issue #165) and are presented in the approved
+  **alphabetical display order**; they are recorded in `docs/05` *The approved MVP
+  category vocabulary* and are not restated here. **Multi-category
   selection (`FR-SRCH-09`) remains unapproved and deferred.** Whether a keyword
   also matches category remains `OQ-4`.
 

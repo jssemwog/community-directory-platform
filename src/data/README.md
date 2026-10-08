@@ -170,11 +170,18 @@ These remain **open**, and none may be resolved by code placed here:
   entirely physical:** text column versus reference table, foreign-key structure, stable
   category identifiers versus display labels, the configuration-file format, the
   seed-data and deployment-loading mechanism, database constraints, and the shape of the
-  category migration — **none of them decided, and none inferable from `OQ-5`**. It is
-  **now blocked by approval of the initial category vocabulary**, whose values require a
-  **separate Product Owner approval**; the **first schema migration follows `DDM-3`**.
-  **`DI-9` set-membership validation remains separately authorized**, and **no category
-  list, configuration, reference data or seed data exists or is authorized here.**
+  category migration — **none of them decided, and none inferable from `OQ-5` or from the
+  approved vocabulary**. ~~It is now blocked by approval of the initial category
+  vocabulary, whose values require a separate Product Owner approval.~~ **That blocker is
+  discharged:** the initial vocabulary was **approved on 2026-10-08** (Product Owner
+  ruling, issue #165) — **16 categories**, recorded with labels, definitions, boundary
+  notes, tie-breaker rules and alphabetical display order in `docs/05` *The approved MVP
+  category vocabulary*. The approved labels are **user-facing display text, not machine
+  identifiers**. **`DDM-3` is therefore undecided but no longer blocked, and is ready for
+  its own separately governed physical-design decision**; the **first schema migration
+  follows `DDM-3`**. **`DI-9` set-membership validation remains separately authorized**,
+  and **no category configuration, reference data or seed data exists or is authorized
+  here.**
 - **`DDM-4`** indexing and text-search strategy — `OQ-4`, `NOQ-4`.
 - **`DDM-5`** normalization of location — ~~open; physical.~~ **Selected for the
   MVP by `ADR-020`** (`Accepted` 2026-10-07, issue #161): `locality`,
@@ -195,7 +202,9 @@ These remain **open**, and none may be resolved by code placed here:
 ~~`OQ-5` and `OQ-4` **shape** this work rather than blocking a phase~~ — both were
 classified as **shaping inputs**, and **`OQ-5` is now Decided** (2026-10-07, issue #163)
 while **`OQ-4` remains Unresolved**. That classification is not softened or hardened
-here, and deciding `OQ-5` authorizes nothing in this directory.
+here, and **neither deciding `OQ-5` nor approving the category vocabulary** (2026-10-08,
+issue #165) **authorizes anything in this directory** — no configuration, no reference
+data, no seed data, no schema and no migration.
 
 ## What does not exist, and what is not authorized
 
