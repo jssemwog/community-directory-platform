@@ -118,9 +118,14 @@ Each journey below uses this structure:
 - **Postcondition:** The visitor sees listings limited to the chosen category.
 - **Related MVP capabilities:** Basic category filtering; public browsing;
   responsive design; basic accessibility.
-- **Open questions:** Whether multiple categories can be selected at once (the
+- **Open questions:** ~~Whether multiple categories can be selected at once (the
   MVP describes "a single predefined category"); who curates the category list
-  (MVP open question).
+  (MVP open question).~~ **Decided (`OQ-5`, 2026-10-07):** a listing carries
+  **exactly one** category from a **predefined, finite, platform-owned, flat**
+  vocabulary curated by the **Product Owner** as repository configuration, so the
+  filter is **single-select** over **canonical** values. **Multi-category
+  selection (`FR-SRCH-09`) remains unapproved and deferred.** Whether a keyword
+  also matches category remains `OQ-4`.
 
 ### V4. Filter listings by location
 
@@ -590,8 +595,14 @@ choices implied):
 3. **Default listing order (V1).** Alphabetical, newest, or otherwise.
 4. **Search scope and matching (V2).** Which fields are searched; exact vs.
    partial vs. fuzzy matching.
-5. **Category selection (V3).** Single vs. multiple categories; who curates the
-   category set (MVP open question #4).
+5. ~~**Category selection (V3).** Single vs. multiple categories; who curates the
+   category set (MVP open question #4).~~ **Decided (`OQ-5`, 2026-10-07):** exactly
+   **one required** category per listing from a **predefined, finite,
+   platform-owned, flat** vocabulary curated by the **Product Owner** as
+   repository configuration; **single-select** filtering, **no free text, no
+   “Other”, no proposal workflow**, and **`FR-SRCH-09` remains unapproved**.
+   Administrators may correct a category during moderation (A3); a post-approval
+   change uses the existing `OQ-10` path (A6).
 6. **Location granularity (V4).** City only, or city/region/country (MVP open
    questions #1–2).
 7. **Public vs. private fields (V5, privacy).** Which listing/contact fields are
