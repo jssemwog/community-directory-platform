@@ -184,12 +184,12 @@ filtering, location filtering.
 | FR-SRCH-01 | The system shall allow a visitor to search approved listings by a text keyword and return matching approved listings. | Visitor | V2; keyword search | Must | Only approved listings are searchable. |
 | FR-SRCH-02 | The system shall apply a defined keyword-search scope (which listing fields are searched) and a defined matching mode (exact, partial, or fuzzy). | System | V2 | Should | The specific fields and matching mode are not yet approved; the requirement does not select them. Decision pending: OQ-4. |
 | FR-SRCH-03 | The system shall treat an empty or whitespace-only keyword as a request to browse all approved listings (or prompt for input) rather than as a failed search. | Visitor | V2 (exception) | Should | Prevents spurious no-results. |
-| FR-SRCH-04 | The system shall allow a visitor to filter approved listings by a predefined category. | Visitor | V3; category filtering | Must | Category set per FR-DATA. Curation is **~~OQ-5~~ Decided** — a platform-owned, Product Owner-curated finite flat set held as repository configuration. Filtering is on the **single canonical category**, so **no spelling tolerance is required**. |
+| FR-SRCH-04 | The system shall allow a visitor to filter approved listings by a predefined category. | Visitor | V3; category filtering | Must | Category set per FR-DATA. Curation is **~~OQ-5~~ Decided** — a platform-owned, Product Owner-curated finite flat set held as repository configuration. Filtering is on the **single canonical category**, so **no spelling tolerance is required**. **The 16 filterable values are approved** (2026-10-08, issue #165) and recorded in *The approved MVP category vocabulary*; **no filtering implementation exists**. |
 | FR-SRCH-05 | The system shall allow a visitor to filter approved listings by a location value. | Visitor | V4; location filtering | Must | Granularity decided by **OQ-6**: locality and country are required, administrative area and postal code optional (FR-DATA-04, FR-DATA-05, FR-DATA-06, FR-DATA-06b). *Which* location fields a visitor may filter on remains bounded by the public projection (**OQ-7**). |
 | FR-SRCH-06 | The system shall allow a visitor to combine keyword, category, and location criteria, returning approved listings that satisfy all applied criteria. | Visitor | V2–V4 | Should | Combined narrowing per journeys' alternate paths. |
 | FR-SRCH-07 | The system shall allow a visitor to clear or reset any applied search or filter criterion and return to browsing all approved listings. | Visitor | V3, V4, V6 | Should | Supports recovery from no-results. |
 | FR-SRCH-08 | The system shall show a distinct no-results message when a search or filter matches zero approved listings, and offer a way to adjust or clear the criteria. | Visitor | V6; empty states | Must | Distinct from empty directory and errors. See FR-ERR-02. |
-| FR-SRCH-09 | The system shall allow a visitor to select more than one category at once when filtering. | Visitor | V3 | Should | The MVP baseline (FR-SRCH-04) is a single predefined category. **OQ-5 is Decided and expressly left this unapproved** (2026-10-07): multi-category selection **remains unapproved and deferred**, and no multi-select filtering is built. |
+| FR-SRCH-09 | The system shall allow a visitor to select more than one category at once when filtering. | Visitor | V3 | Should | The MVP baseline (FR-SRCH-04) is a single predefined category. **OQ-5 is Decided and expressly left this unapproved** (2026-10-07): multi-category selection **remains unapproved and deferred**, and no multi-select filtering is built. **Unchanged by the vocabulary approval** (2026-10-08, issue #165), which approved values only and reaffirmed this deferral. |
 
 ---
 
@@ -201,7 +201,7 @@ information a listing record holds — **not** any storage technology or schema.
 | ID | Requirement | Actor | Source | Priority | Notes |
 |---|---|---|---|---|---|
 | FR-DATA-01 | The system shall represent each listing with a business or organization name. | System | Scope: data | Must | Required core identity. |
-| FR-DATA-02 | The system shall represent each listing with a single category drawn from a predefined set. | System | Scope: data; V3 | Must | Enables category filtering. **~~OQ-5~~ Decided:** **exactly one required** category per listing, drawn from a **predefined, finite, platform-owned** vocabulary that is **flat**. Physical representation remains `DDM-3`. |
+| FR-DATA-02 | The system shall represent each listing with a single category drawn from a predefined set. | System | Scope: data; V3 | Must | Enables category filtering. **~~OQ-5~~ Decided:** **exactly one required** category per listing, drawn from a **predefined, finite, platform-owned** vocabulary that is **flat**. **The 16 approved values are recorded in *The approved MVP category vocabulary* below** (Product Owner ruling 2026-10-08, issue #165). Physical representation remains `DDM-3`. |
 | FR-DATA-03 | The system shall represent each listing with a description. | System | Scope: data | Must | Required short descriptive text. |
 | FR-DATA-04 | The system shall represent each listing with a locality — the town, city, village, municipality, or comparable named place associated with the business. | System | Scope: data; V4 | Must | Required. "Locality" is the neutral underlying concept (renamed from *city*); a user-facing label may read "City, town, or locality." Decided: OQ-6. |
 | FR-DATA-05 | The system shall support an optional administrative area on a listing — a state, province, region, county, district, parish, or comparable subdivision. | System | Scope: data | Must | Optional for every listing, and **not** required where no such subdivision meaningfully applies. A user-facing label may read "State, province, region, or district." Decided: OQ-6. |
@@ -211,10 +211,125 @@ information a listing record holds — **not** any storage technology or schema.
 | FR-DATA-07 | The system shall support optional contact methods on a listing: phone, email, and website. | System | Scope: data | **Must** | Raised from `Should` by OQ-8b: FR-DATA-08 is now `Must` and cannot hold unless all three fields exist to satisfy it. **The fields' optionality is unchanged** — each individually optional **at the field level and at initial submission** — no single one of the three is ever required. The obligation in FR-DATA-08 is a **cross-field** minimum, not a per-field requirement. |
 | FR-DATA-08 | The system shall require at least one usable contact method — phone, email, or website — on every listing before that listing may be approved. | System | Scope: data | **Must** | Decided: OQ-8b. **Applies before approval, not at initial submission** — a submission with no contact method enters moderation normally (FR-SUB-05) but cannot be approved. A contact method is **usable** when it is non-blank, passes the applicable format and safety checks, and is retained as the value proposed for the listing (FR-VAL-05). **Locality, administrative area, postal code, country, and any physical-location information are not contact methods** and never satisfy this minimum. A business with no usable phone, email, or website cannot be approved under the MVP policy; **no offline-business exemption exists.** "Usable" means structurally usable — **not** verified as owned, reachable, or currently active; no confirmation email, SMS, call, ownership proof, or domain check is introduced. |
 | FR-DATA-09 | The system shall maintain administrative fields on each listing — status, submission date, and last-updated date — that are set by the system or administrators and are never entered or edited by the public. | System | Scope: data | Must | See FR-AUD; never public content (FR-DATA-11). |
-| FR-DATA-10 | The system shall record the predefined category set as a defined, finite list available for both submission and filtering. | System | V3; scope | Must | **~~OQ-5~~ Decided:** the **Product Owner** curates the set, which is **repository-owned configuration changed through deployment**; **no administrator category-management screen is authorized**. **The initial values are not approved by that ruling** and require a **separate Product Owner approval**. |
+| FR-DATA-10 | The system shall record the predefined category set as a defined, finite list available for both submission and filtering. | System | V3; scope | Must | **~~OQ-5~~ Decided:** the **Product Owner** curates the set, which is **repository-owned configuration changed through deployment**; **no administrator category-management screen is authorized**. ~~The initial values are not approved by that ruling and require a separate Product Owner approval.~~ **The initial values are now approved** — Product Owner ruling 2026-10-08 (Joe S.), issue #165: **exactly 16 categories**, with their labels, definitions, boundary notes, tie-breaker rules and alphabetical display order recorded in ***The approved MVP category vocabulary*** below, which is the authoritative record this requirement calls for. **The list is product vocabulary only** — no storage key, slug, identifier, configuration format, schema or implementation is approved, and `DDM-3` remains undecided. |
 | FR-DATA-11 | The system shall expose to visitors only the fields of the approved public projection — business name, category, description, locality, country, administrative area where provided, postal code only where provided and designated for public display, and each contact method the business designated public — and shall never present any other stored field as public content. | System | V5; cross-cutting privacy | Must | The public read path shall **not** expose every stored field by default. Full classification in `docs/08` *Field classification*. Decided: OQ-7. |
 | FR-DATA-11b | The system shall classify every listing field it holds as **public**, **administrator-visible**, or **audit-only**, shall treat any field whose classification is undecided as not public, and shall never include administrator-visible or audit-only information in the public projection. | System | V5; cross-cutting privacy | Must | Fail-closed by default. Administrator-visible: record status, submission, update and review timestamps, reviewer identity, moderation notes, rejection reasons, approval/unpublishing history, and submitter information where another approved requirement authorises its collection. Audit-only: audit entries and security-event records. Decided: OQ-7; whether each such field is collected or retained remains OQ-13 (retention) and OQ-14/NOQ-8 (audit). **OQ-11 is Decided and adds no public field:** it requires a listing's **current publication state** and **current unpublish reason** to be administrator-visible and **never public**, leaving the public projection unchanged. OQ-8/OQ-8b are Decided and add no field — they set obligation and validation only. OQ-10 is Decided and adds no field — a revision changes the values of already-approved fields, and the public field set is unchanged. |
 | FR-DATA-11c | The system shall allow a business to designate which of its supplied contact methods (phone, email, website) may be displayed publicly, and shall publish a contact method only where it was intentionally supplied as a business contact, was designated for public display, and passed moderation. | System | V5; cross-cutting privacy | Must | Contact methods remain individually optional (FR-DATA-07); this requirement adds no contact-method minimum of its own — the cross-field minimum is **FR-DATA-08**, Decided under OQ-8b and enforced before approval — and it introduces no contact form, messaging service, or social-media field. How the designation is represented is `DDM-6`, selected by `ADR-017` (Accepted 2026-09-17). Decided: OQ-7. **Designation authority and defaults (ungated Product Owner policy clarification, ADR-017 Q-4, issue #135):** the business chooses public or private for **each** contact value it supplies, and for a supplied postal code (FR-DATA-06b), **at submission**; **the default is private**. An administrator may **restrict** a value's visibility but **cannot make a business-withheld value public** — approval alone never grants public visibility. A **new or replacement** contact value or postal code **defaults to private** and does **not inherit** the replaced value's designation. A designation change to an approved listing follows the existing revision and approval workflow (FR-ADM-10, FR-ADM-10b). This adds no actor, permission or business editing route. |
+
+### The approved MVP category vocabulary (`FR-DATA-10`)
+
+**Approved by Product Owner ruling, 2026-10-08 (Joe S.), issue #165.** This subsection is
+the **authoritative record of the category values** required by `FR-DATA-10`, and the
+single source of truth for them. `docs/08` `E2`, `docs/09` `OP-11`, `docs/10`'s S1 and S3
+category controls, and `docs/04` `V3` each reference this list rather than restating it.
+
+**What the ruling approved:** the user-facing labels; their exact spelling, capitalization
+and punctuation; each category's inclusion definition; each category's boundary note; the
+tie-breaker rules; and the alphabetical display order. **Exactly 16 categories.**
+
+**What the ruling did not approve, and what must not be inferred from this list:** storage
+keys or slugs, UUID or numeric category identifiers, the configuration-file format,
+physical database representation, any seed mechanism, schema or migration, category
+validation implementation, filtering implementation, an administrator
+category-management interface, provisioning, or persistence. **The labels below are
+user-facing display text, not machine identifiers.** Physical representation — including
+whether a stable identifier exists apart from the display label — remains **`DDM-3`**,
+undecided.
+
+#### Approved labels, definitions and boundaries
+
+Listed in the **approved alphabetical display order**. The *Boundary* column records where
+a listing that could plausibly sit here belongs instead; it is semantic guidance for
+submitters and for administrator correction, not a validation rule.
+
+| # | Approved label | Inclusion definition | Boundary |
+|---|---|---|---|
+| 1 | **Arts, Culture & Entertainment** | Creative practice, cultural venues and performance; artists and makers selling their own work; venues and entertainment services. | Teaching an art form as the core offering → *Education & Childcare*. Reselling others' goods → *Retail & Shopping*. Physical recreation → *Fitness & Recreation*. |
+| 2 | **Automotive & Transport** | Vehicle sale, repair, servicing and hire; driving instruction; taxi, courier, delivery, removals and freight. | Arranging trips and stays → *Travel & Accommodation*. Vehicle insurance → *Financial & Insurance Services*. Parts retail without service → *Retail & Shopping*. |
+| 3 | **Beauty & Personal Care** | Hair, nails, skin, grooming and cosmetic treatment; spa and non-clinical personal treatment. | Clinically regulated treatment → *Health & Medical*. Exercise and physical training → *Fitness & Recreation*. Product retail without treatment → *Retail & Shopping*. |
+| 4 | **Community & Nonprofit** | Nonprofits, charities, voluntary and mutual-aid groups, community associations, public and community resources, places of worship and faith groups, support and advocacy organizations. | Reserved for organizations whose **purpose itself** is community, representation or mutual support. An organization that principally trades is classified by its **operational sector**, not its legal form — a charity-run café is *Food & Drink*, a fee-charging school is *Education & Childcare*. |
+| 5 | **Education & Childcare** | Schools and nurseries, childcare and after-school provision, tutoring, training, driving and music instruction, adult and vocational learning. | Childminding offered as domestic help → *Home & Trade Services*. Sports coaching → *Fitness & Recreation*. Corporate consultancy → *Professional Services*. |
+| 6 | **Financial & Insurance Services** | Banking and credit, mortgage and insurance broking, financial advice and planning, pensions, bookkeeping and tax where the business presents itself as financial. | Legal practice → *Professional Services*. Financial software → *Technology & Digital Services*. Accountancy and bookkeeping sit **here** rather than in *Professional Services*, because submitters and visitors look for them as financial. |
+| 7 | **Fitness & Recreation** | Gyms and studios, sports clubs and coaching, instructor-led exercise, leisure and outdoor-activity providers. | Clinical rehabilitation or physiotherapy → *Health & Medical*. Cosmetic treatment → *Beauty & Personal Care*. Spectator entertainment → *Arts, Culture & Entertainment*. Equipment retail → *Retail & Shopping*. |
+| 8 | **Food & Drink** | Restaurants, cafés, bars and pubs, takeaways, catering, bakeries, grocers, delicatessens, breweries, farm shops and food producers selling locally. | A venue hired out where food is incidental → *Arts, Culture & Entertainment*. General stores with a food counter → *Retail & Shopping*. Nutrition and dietetic advice → *Health & Medical*. Food manufacturing or wholesale distribution → *Industrial & Wholesale*. |
+| 9 | **Health & Medical** | Clinical and regulated healthcare — medical and dental practice, pharmacy, optical and hearing care, physiotherapy and clinical therapies, mental-health practice, nursing and care provision. | **Deliberately narrow**, so that the filter stays clinically meaningful. Cosmetic treatment → *Beauty & Personal Care*. Exercise provision → *Fitness & Recreation*. Animal health → *Pets & Animal Services*. Classifies the **provider** only — never a patient, condition or demographic. |
+| 10 | **Home & Trade Services** | Building, renovation and repair; the trades (plumbing, electrical, roofing, joinery, decorating); gardening and landscaping; cleaning, domestic help and property maintenance; installers and fitters. | Property sale, letting and management → *Professional Services*. Materials retail without fitting → *Retail & Shopping*. IT support → *Technology & Digital Services*. Materials manufacturing or wholesale supply → *Industrial & Wholesale*. |
+| 11 | **Industrial & Wholesale** | Manufacturing operations; wholesale distribution; industrial services; business-supply operations not principally serving consumers through ordinary retail. | **Not a miscellaneous catch-all**, and must never be used as one. Consumer-facing product shops → *Retail & Shopping*. Individualized consulting and knowledge work → *Professional Services*. Software and digital-product businesses → *Technology & Digital Services*. Transport operations → *Automotive & Transport*. Home repair and construction trades → *Home & Trade Services*. |
+| 12 | **Pets & Animal Services** | Veterinary practice, grooming, boarding, kennels and catteries, dog walking and training, pet supplies and feed. | Human healthcare → *Health & Medical*. Livestock and commercial agricultural production → *Industrial & Wholesale* where it is a manufacturing or wholesale operation; a farm shop selling locally is *Food & Drink*. |
+| 13 | **Professional Services** | Legal practice; architecture, surveying and engineering consultancy; business, marketing and HR consultancy; design and communications agencies; estate agency, letting and property management; funeral directors; other advisory and business-to-business professional practice. | Financial and insurance advice → *Financial & Insurance Services*. Software and IT → *Technology & Digital Services*. Physical work on property → *Home & Trade Services*. Manufacturing, wholesale distribution and industrial supply → *Industrial & Wholesale*. **The broadest approved category**, and the first candidate for a later governed additive split. |
+| 14 | **Retail & Shopping** | Shops and physical retail of goods; online sellers of physical products; markets and stalls; secondhand, antique and charity retail; specialist and gift retail. | A **named sector category takes precedence over general retail**: food and drink → *Food & Drink*; pet supplies → *Pets & Animal Services*. Goods sold incidentally alongside a service → the service's category. Wholesale and business supply rather than consumer sale → *Industrial & Wholesale*. |
+| 15 | **Technology & Digital Services** | Software development, web and app development, IT support and managed services, hosting, data and digital consultancy, and digital marketing where the offering is technical. | Device and hardware retail → *Retail & Shopping*. Non-technical business consultancy → *Professional Services*. Hardware manufacturing or wholesale distribution → *Industrial & Wholesale*. Repair of consumer devices may truthfully sit here or in *Retail & Shopping*, decided by the principal offering. |
+| 16 | **Travel & Accommodation** | Hotels, guest houses, bed and breakfast, self-catering and short-stay accommodation; campsites; travel agents and tour operators; local tours and guides. | Passenger transport, taxis and vehicle hire → *Automotive & Transport*. Hospitality without accommodation → *Food & Drink*. Visitor attractions → *Arts, Culture & Entertainment*. |
+
+**Display order.** The alphabetical order above is the **approved initial display order**,
+and is a **user-facing product decision** — it governs the order in which the vocabulary is
+presented in the S1 filter control and the S3 submission control (`docs/10`). It says
+**nothing** about physical storage order, sort keys, enumeration member order,
+configuration-file order or any index: those remain `DDM-3`. The exact control element,
+typography and layout remain `DU-2`.
+
+#### Approved tie-breaker rules
+
+A listing carries **exactly one** category (`FR-DATA-02`, `docs/08` `VR-S5`), so a business
+that plausibly fits more than one must resolve to a single value. These rules are approved
+guidance for submitters and for administrator correction during moderation. **They are not
+a validation algorithm, and they never authorize assigning more than one category.**
+
+1. **Classify by the listing's principal customer-facing offering** — what the business
+   mainly does for the people who come to it, not its legal form, its trade body, or a
+   secondary activity.
+2. **Prefer the category most useful to a visitor seeking that offering** — where two
+   labels are both truthful, choose the one under which a visitor would look for this
+   business.
+3. **A named sector category takes precedence over a general one** — *Food & Drink* over
+   *Retail & Shopping* for a delicatessen; *Pets & Animal Services* over *Retail &
+   Shopping* for a pet shop.
+4. **Sector before legal form** — a nonprofit that principally trades is classified by its
+   operational sector; *Community & Nonprofit* is for organizations whose purpose itself is
+   community, representation or mutual support.
+5. **Use administrator correction during moderation** where the submitter's selection is
+   not the closest truthful fit (`docs/08` field authority; `docs/04` `A3`). A post-approval
+   correction travels the existing `OQ-10` revision path.
+6. **Never assign a knowingly false category merely to avoid rejection.** The obligation is
+   the *closest truthful applicable* category, not the nearest available box.
+7. **Where no approved category truthfully applies, the existing refusal/rejection
+   behaviour applies.** There is **no `Other`, `Miscellaneous` or `Uncategorized` value, no
+   "uncategorized" state, and no category-proposal workflow** (`OQ-5`).
+
+#### Deliberate exclusions
+
+The ruling explicitly declined each of the following, and none may be introduced without a
+new governed Product Owner decision:
+
+- **No `Other`, `Miscellaneous` or `Uncategorized` category**, and no proposal workflow.
+- **No `Health & Wellness` merge** — *Beauty & Personal Care*, *Fitness & Recreation* and
+  *Health & Medical* remain **three separate categories**, which is what keeps the medical
+  filter clinically meaningful.
+- **No `Religious & Faith Organizations` category** — faith groups and places of worship
+  are covered by *Community & Nonprofit*; a category keyed to religion would classify
+  listings by a protected trait, and no requirement asks for it.
+- **No `Events` category** — event *services* are classified by sector (a caterer is *Food
+  & Drink*; a photographer is *Arts, Culture & Entertainment*).
+- **No `Agriculture` category** — a farm shop selling locally is *Food & Drink*; a
+  production or wholesale operation is *Industrial & Wholesale*.
+- **No hierarchy, parent/child relationship, tags, facets, aliases, synonyms, localized
+  labels or icons** (`OQ-5`; `docs/08`, `docs/10` — *do not pre-build*).
+
+**Supersession.** The 16-category list above **supersedes the Compact 9, Balanced 15 and
+Granular 22 alternatives** considered in issue #165; none carries residual standing.
+
+**Later changes are separately governed.** Any addition, removal, rename or boundary change
+requires a **separately governed Product Owner decision**, applied through a **deployment**
+— the vocabulary is repository-owned configuration, there is **no runtime management path**,
+and **no administrator category-management interface is authorized** (`OQ-5`).
+
+**Implementation status — nothing below is built.** No category configuration, reference
+data or seed data exists; `OP-11` is unimplemented; no filtering or browsing exists; and
+`DI-9` set-membership validation is **unimplemented** — `src/domain/listing/validation.ts`
+still accepts **any non-blank category string**, so the executable domain does not yet
+enforce this vocabulary. The category strings in the shared test fixtures remain **test
+data, not approved values**. No schema, migration, DDL, provisioning or persistence exists
+or is authorized.
 
 ---
 
@@ -403,7 +518,7 @@ requirements above. They are recorded, not newly decided.
   (`03-mvp-scope.md`).
 - **A-2.** Submission volume is low enough that manual administrator review is
   practical (`01-vision.md`, `03-mvp-scope.md`).
-- **A-3.** A small, predefined set of categories is sufficient for launch.
+- **A-3.** A small, predefined set of categories is sufficient for launch. **Discharged into a concrete list:** the approved vocabulary is **16 categories** (2026-10-08, issue #165) — see *The approved MVP category vocabulary*.
 - **A-4.** Simple location fields — locality and country, with an optional
   administrative area and postal code — support useful filtering, and the
   directory is multi-country capable from launch (`OQ-6`).
@@ -431,7 +546,7 @@ committed.
 | OQ-2 | With no lister accounts, does a lister receive any reference or outcome notification (approval/rejection)? | FR-SUB-08 | Journeys OQ-2; L4, A5 |
 | OQ-3 | What is the default ordering of listings (alphabetical, newest, etc.)? | FR-VIS-03 | Journeys OQ-3; V1 |
 | OQ-4 | Which fields are searched, and is matching exact, partial, or fuzzy? | FR-SRCH-02 | Journeys OQ-4; V2 |
-| ~~OQ-5~~ | ~~Single vs. multiple category selection; who curates the category set and can admins manage it?~~ **Decided 2026-10-07 (Joe S.):** **exactly one required** category per listing, drawn from a **predefined, finite, platform-owned** vocabulary that is **flat** — **no hierarchy, tags, facets, aliases or localized labels**. Submitters select the **closest truthful applicable** category; there is **no free-text category, no "Other" value and no category-proposal workflow**. **Administrators may correct the category during moderation**, and a post-approval category change travels the **existing OQ-10 revision path** — **no new moderation object or state is introduced**. Where no approved category truthfully applies, the listing follows the **existing refusal/rejection behavior**; **no "uncategorized" state or value exists**. **FR-SRCH-09 multi-category selection remains unapproved and deferred**, and MVP filtering uses the **single canonical category**. The vocabulary is **repository-owned configuration changed through deployment**. **The initial category values are not selected by this ruling** and require a **separate Product Owner approval** before `DDM-3` and the first schema migration. **`DDM-3` remains responsible for physical representation**, and **no implementation is authorized** — the executable domain still accepts any non-blank category string, so **`DI-9` remains unimplemented**. See FR-SRCH-04, FR-SRCH-09, FR-DATA-02, FR-DATA-10 and `docs/13`. | FR-SRCH-09, FR-DATA-02, FR-DATA-10 | Journeys OQ-5; Scope OQ-4; V3 |
+| ~~OQ-5~~ | ~~Single vs. multiple category selection; who curates the category set and can admins manage it?~~ **Decided 2026-10-07 (Joe S.):** **exactly one required** category per listing, drawn from a **predefined, finite, platform-owned** vocabulary that is **flat** — **no hierarchy, tags, facets, aliases or localized labels**. Submitters select the **closest truthful applicable** category; there is **no free-text category, no "Other" value and no category-proposal workflow**. **Administrators may correct the category during moderation**, and a post-approval category change travels the **existing OQ-10 revision path** — **no new moderation object or state is introduced**. Where no approved category truthfully applies, the listing follows the **existing refusal/rejection behavior**; **no "uncategorized" state or value exists**. **FR-SRCH-09 multi-category selection remains unapproved and deferred**, and MVP filtering uses the **single canonical category**. The vocabulary is **repository-owned configuration changed through deployment**. ~~The initial category values are not selected by this ruling and require a separate Product Owner approval before `DDM-3` and the first schema migration.~~ **Those values were approved on 2026-10-08 (Joe S., issue #165): 16 categories, recorded with definitions, boundaries, tie-breakers and display order in *The approved MVP category vocabulary*. `DDM-3` is therefore no longer blocked by vocabulary approval — it remains **undecided** and is now **ready for its own physical-design decision**, which the first schema migration still follows.** **`DDM-3` remains responsible for physical representation**, and **no implementation is authorized** — the executable domain still accepts any non-blank category string, so **`DI-9` remains unimplemented**. See FR-SRCH-04, FR-SRCH-09, FR-DATA-02, FR-DATA-10 and `docs/13`. | FR-SRCH-09, FR-DATA-02, FR-DATA-10 | Journeys OQ-5; Scope OQ-4; V3 |
 | ~~OQ-6~~ | ~~Location granularity — city only, or also state/region and country (and is launch multi-country)?~~ **Decided:** locality **required**, country **required** (multi-country from launch), administrative area **optional**, postal code **optional** (international text), street address **not collected**. See FR-DATA-04, FR-DATA-05, FR-DATA-06, FR-DATA-06b, FR-DATA-06c and `docs/13`. | FR-SRCH-05, FR-DATA-04, FR-DATA-05, FR-DATA-06, FR-DATA-06b, FR-DATA-06c | Journeys OQ-6; Scope OQ-1, OQ-2; V4 |
 | ~~OQ-7~~ | ~~Which listing/contact fields are ever shown publicly vs. withheld?~~ **Decided:** the public projection is business name, category, description, locality, country, administrative area where provided, postal code only where provided and designated public, and each contact method the business designated public; everything else is administrator-visible or audit-only and never public. See FR-DATA-11, FR-DATA-11b, FR-DATA-11c, FR-VIS-04, `docs/08` *Field classification*, and `docs/13`. | FR-VIS-04, FR-VIS-05, FR-DATA-11, FR-DATA-11b, FR-DATA-11c | Journeys OQ-7; V5, privacy |
 | ~~OQ-8~~ | ~~Which fields are required at submission (and format checks)?~~ **Decided:** required at initial submission — business name, category, description, locality, country. Optional at initial submission — administrative area, postal code, phone, email, website. Format checks are **permissive, international-friendly, and technology-neutral**, rejecting values that are blank where required, malformed beyond practical use, unsafe, outside established length or content boundaries, or incompatible with the field's basic purpose; no regular expression, library, widget, schema type, database constraint, country-specific phone format, URL parser, or email algorithm is prescribed. A supplied-but-invalid optional value fails visibly, is preserved for correction, and is never silently dropped. An administrator may complete or correct information during moderation before approval, without bypassing validation. See FR-SUB-02, FR-SUB-05, FR-ADM-04, FR-VAL-01, FR-VAL-03, FR-VAL-05 and `docs/13`. | FR-SUB-02, FR-SUB-05, FR-ADM-04, FR-ADM-06, FR-VAL-01, FR-VAL-03, FR-VAL-05 | Journeys OQ-8; L2, L3 |
