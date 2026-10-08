@@ -223,7 +223,7 @@ the entry point is an operational detail, and the authentication mechanism is de
 | An administrator dashboard with counts/metrics | No journey requires it. Analytics is out of scope (`docs/03`). Would be a screen for symmetry (**U7**). |
 | A lister "check my submission" screen | **Impossible to build safely.** With no lister identity, any retrieval path would expose a pending record to an unauthenticated caller, violating `DI-5`. `docs/09` reaches the same conclusion. Blocked on `OQ-2`. |
 | An "about"/"help"/settings page | No journey. |
-| A category-management screen | Only needed if `OQ-5` makes the category set administrator-curated. **Seam `S-3`.** |
+| A category-management screen | ~~Only needed if `OQ-5` makes the category set administrator-curated. **Seam `S-3`.**~~ **Not in the MVP, and now explicitly unauthorized:** `OQ-5` (Decided 2026-10-07) makes the set **repository-owned configuration changed through deployment**, not administrator-curated data. **Seam `S-3` is resolved.** |
 
 ---
 
@@ -279,7 +279,7 @@ explicitly forbids.
 | Criterion | UI concept | Seam — **not decided here** |
 |---|---|---|
 | **Keyword** | A text input over approved listings. | **`S-4` / `OQ-4`** — *which fields it searches* and whether matching is exact, partial or fuzzy. The UI must not **claim** a scope it has not been given: placeholder or helper text saying "search by name and description" would **answer `OQ-4`**. |
-| **Category** | A selection from the predefined set (`OP-11`). | **`S-3` / `OQ-5`** — **single or multiple selection is open.** This is a *control-shape* decision: a radio group or single-select decides "one"; a checkbox list decides "many". **Drawing either closes the seam.** |
+| **Category** | A **single** selection from the predefined set (`OP-11`). | ~~**`S-3` / `OQ-5`** — **single or multiple selection is open.** This is a *control-shape* decision: a radio group or single-select decides "one"; a checkbox list decides "many". **Drawing either closes the seam.**~~ **Closed: `OQ-5` is Decided** (2026-10-07) — **single** selection, because a listing carries **exactly one** category and `FR-SRCH-09` remains **unapproved and deferred**. The control is therefore **single-select** (a radio group or a select), populated from `OP-11`’s **flat, finite** set; **no checkbox list, no free-text entry, no “Other” option**. **No values are listed here, and no filtering implementation is introduced.** |
 | **Location** | A selection or input over a location value. | **`S-6` / `OQ-6`** — *which* location fields exist (city; state/region; country) is open, so the number and kind of controls is open. |
 
 **The invariant this document commits despite the open scopes** (inherited from `docs/09`
@@ -971,7 +971,7 @@ Deliberately **not designed**. Each is recorded so that its absence reads as a d
 | **Audit-trail / history view** | Exists only if `OQ-14` commits audit logging. **Resolve with `S-7`.** | `OQ-14`, `S-8` |
 | **"Mark as duplicate" control** | A7 needs a way to express "duplicates that"; `OQ-12` is open. | `OQ-12`, `S-10` |
 | **Rejected-record view** | **Retention is approved** (`OQ-13`, Decided) — a rejected initial submission or rejected approved-listing revision is administrator-visible for **90 days from rejection**, including its **current rejection reason**, and stays visible while purge-eligible until purged. The screen must make clear that a rejected record is **terminal** — no edit, no approve. **Its form, placement, and layout are still not designed.** | ~~`OQ-13`~~ — **Decided**; `S-11` — **resolved** |
-| **Category-management screen** | Only if `OQ-5` makes the set administrator-curated. | `OQ-5`, `S-3` |
+| **Category-management screen** | ~~Only if `OQ-5` makes the set administrator-curated.~~ **Not deferred — unauthorized.** `OQ-5` (Decided 2026-10-07) makes the vocabulary **repository-owned configuration changed through deployment**, so **no administrator category-management interface is authorized** and no category-management permissions exist. | ~~`OQ-5`~~ — **Decided**; `S-3` — **resolved** |
 | **Lister "check my submission" view** | **Cannot be built safely** without a lister identity — it would expose a pending record to an unauthenticated caller (`DI-5`). | `OQ-2` |
 | **Anti-spam challenge UI** | `OQ-9` is open, and the safeguard must not break `NFR-ACC-01/02`. | `OQ-9`, `S-9` |
 | **Queue sorting / filtering / bulk actions** | No journey requires them. | `AQ-3` |
@@ -991,7 +991,7 @@ contribution to it.
 | `OQ-2` | Does a lister get a reference or outcome notification? | Whether S4 can promise anything, and whether a lister-facing view can ever exist. | — |
 | `OQ-3` | Default ordering of results? | S1's result order; if "recently updated", an administrative field starts shaping public output. | — |
 | `OQ-4` | Which fields are searched; matching mode? | What the search box does — and what its helper text may claim. Bounded by `UP-5`. | `S-4` |
-| `OQ-5` | Category model — single or multiple; who curates? | **The shape of the category control** (single-select vs. multi-select) and whether a management screen exists. | `S-3` |
+| ~~`OQ-5`~~ **Decided** | Category model — single or multiple; who curates? | **Answered:** the category control — on both the filter (S1) and the submission form (S3) — is **single-select**, drawing from `OP-11`’s **flat, finite, platform-owned** set, with **no free-text entry and no “Other” option**; `FR-SRCH-09` remains **unapproved and deferred**. **No category-management screen exists or is authorized** — the set is **repository-owned configuration changed through deployment**. The administrator review surface keeps its **existing** ability to correct a category (A3); a post-approval change travels the existing `OQ-10` revision path (S7). **No new screen, state, queue, or permission is introduced; no values are listed; the exact control element, labels and layout stay `DU-2`.** | `S-3` — **resolved** |
 | `OQ-6` | Location granularity? | How many location controls exist, on both the filter and the form. | `S-6` |
 | `OQ-7` | Which fields are public vs. withheld? | **The content of S2 and of every result summary.** The largest open question in this document. | `S-2` |
 | ~~`OQ-8` / `OQ-8b`~~ **Decided** | Required submission fields; contact minimum? | **Answered.** S3 marks name, category, description, locality, and country as required at initial submission; the other five as optional, **including all three contact inputs**. The contact minimum is **cross-field and blocks at approval, not at submission** — so its group-level message (`UV-5`) belongs to the administrator's review surface, with at most non-blocking guidance on the public form. Format feedback is **permissive**; no pattern, mask, or control type is chosen. | `S-1` — **resolved** |
@@ -1126,7 +1126,7 @@ excluded from the MVP by `docs/03`.
 | Listing analytics | An owner-facing dashboard | Out of scope; also presupposes accounts. |
 | Paid promotion | Visual differentiation of promoted results — **directly touching "trust over volume"** | A UI decision with a product-ethics dimension. |
 | Community events | A time-based browsing model | A genuinely different information architecture. |
-| Richer categorisation / geographic browsing | Hierarchical filters; map views | `OQ-5` and `OQ-6` are the first steps; do not pre-build. |
+| Richer categorisation / geographic browsing | Hierarchical filters; map views | **Both out of MVP scope.** `OQ-5` (Decided 2026-10-07) commits a **flat** vocabulary and **single-select** filtering, explicitly rejecting hierarchy, tags and facets for the MVP; `OQ-6` is Decided. **Do not pre-build.** |
 | Native mobile app | **No new screens** — but it makes the API contract external | Noted because it changes *nothing* here. |
 | Report-inaccuracy path (`OQ-1`) | A second public write path — doubling the abuse surface | Deferred, **not** out of scope forever. |
 
@@ -1144,7 +1144,12 @@ has produced, and a field drawn on a form reads as a promise. **Mitigation:** th
 is conceptual and labeled illustrative; no field list is drawn where a seam owns it.
 
 **R-U3 — Closing a seam by drawing a control.** This is the dominant risk, and it is
-specific: a **checkbox list decides `OQ-5`**; a **field on the detail screen decides
+specific: a **checkbox list decided `OQ-5`** — `OQ-5` is now Decided, and the control is
+**single-select**, so the residual risk inverts: drawing a multi-select control, a
+free-text category input, an “Other” option, or a category-management screen would
+**contradict** the approved model, and listing illustrative category values would
+**pre-empt** the separate Product Owner approval those values still require. A **field on
+the detail screen decides
 `OQ-7`**. A **Remove button** once decided `OQ-11`; `OQ-11` is now Decided, and the risk
 moved rather than disappeared — drawing a publication control that reads as a *status*
 value, or one that destroys rather than withdraws, would pre-empt **`DDM-9`** and

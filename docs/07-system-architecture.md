@@ -1517,7 +1517,7 @@ table above. That table is the primary driver-to-requirement trace.
 | **FR-VIS-01..10** (visitor) | C1, C4, C9 | F1 | FR-VIS-02 is guaranteed *by construction* in C4. FR-VIS-10 (report a problem) is **decision-pending on OQ-1** — no component is built for it |
 | **FR-SUB-01..09** (submission) | C2, C5, C7, C9; C11 *(conditional)* | F2 | FR-SUB-04 holds by construction (C5 can only write pending). FR-SUB-08 depends on **OQ-2 / DD-16**; FR-SUB-09 on **OQ-9 / DD-6** |
 | **FR-ADM-01..13** (administrator, incl. FR-ADM-10b) | C3, C8, C6, C7, C9 | F3 | FR-ADM-10 and FR-ADM-10b are **settled by OQ-10** — C6 implements the revision lifecycle. FR-ADM-12 depends on **OQ-11**. FR-ADM-13 on **OQ-12** |
-| **FR-SRCH-01..09** (search and filter) | C1, C4, C9 | F1 | FR-SRCH-02 depends on **OQ-4 / DD-14** (seam in C4). FR-SRCH-05 on **OQ-6**. FR-SRCH-09 on **OQ-5** |
+| **FR-SRCH-01..09** (search and filter) | C1, C4, C9 | F1 | FR-SRCH-02 depends on **OQ-4 / DD-14** (seam in C4). FR-SRCH-05 on **OQ-6** (Decided). **FR-SRCH-09 is settled by OQ-5** (Decided 2026-10-07) — multi-category selection **remains unapproved and deferred**, so no component is built for it; FR-SRCH-04 filters on the **single canonical** category |
 | **FR-DATA-01..11** (listing data) | C7, C9, and the data design | — | The detailed shape is **DD-1**, no longer blocked by any DG-1 product question. FR-DATA-11 maps to the public projection in C4 (**OQ-7**). **FR-DATA-08 is settled by OQ-8b** — a cross-field, before-approval obligation evaluated in C7 and enforced at the C6 approval step |
 | **FR-VAL-01..06** (validation) | **C7** (shared), C2, C3 | F2, F3 | FR-VAL-04 is satisfied *because* C5 and C6 share C7 — which is also why administrator completion (FR-ADM-04) cannot bypass validation. **FR-VAL-05 is settled by OQ-8/8b** and is C7's stage-aware rule set: required at initial submission, required when supplied, required before approval |
 | **FR-MOD-01..08** (moderation) | **C6** (sole status writer), C8 | F3 | FR-MOD-01 holds by construction. FR-MOD-06 is **settled by OQ-11** — corrective action for already-public content is unpublishing via C6. FR-MOD-08 (escalation) on **OQ-15** — a human process, no component |
@@ -1587,10 +1587,13 @@ because a deferred decision without a visible cost is just a decision nobody mad
 change behavior rather than structure: **OQ-1** (a visitor problem-reporting path —
 though a "yes" adds a small public write surface), **OQ-2** (lister outcome
 notification — a "yes" adds an outbound dependency, DD-16), **OQ-3** (default
-ordering — lands in C4), **OQ-5** (category curation and multi-select — lands in C4
-plus configuration), **OQ-12** (duplicate resolution — an administrator procedure
+ordering — lands in C4), **OQ-12** (duplicate resolution — an administrator procedure
 supported by the existing C6 actions), and **OQ-15** (abuse escalation — a human
-process, not a component).
+process, not a component). ~~**OQ-5** (category curation and multi-select — lands in C4
+plus configuration)~~ **has left this list: OQ-5 is Decided** (2026-10-07) — the
+vocabulary is **platform-owned repository configuration** and category selection is
+**single**, with multi-select **unapproved and deferred**. It had, and still has, **no
+architectural consequence**, and its physical representation remains **DDM-3**.
 
 > **The shortest useful summary of this section.** Of the seventeen questions in the
 > table above, **eight are Decided** — OQ-6, OQ-7, OQ-8/8b, OQ-10, OQ-11, OQ-13, NOQ-2,

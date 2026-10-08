@@ -211,7 +211,7 @@ about them — not to add an operation.
 | Criterion | Behavior | Seam |
 |---|---|---|
 | **Keyword** | Matches approved listings against a defined set of fields, using a defined matching mode. | **`S-4` / `OQ-4`** — *which* fields are searched and whether matching is exact, partial, or fuzzy is **not decided here**. |
-| **Category** | Restricts results to listings in a category drawn from the predefined set. | **`S-3` / `OQ-5`** — single vs. multiple selection is open. `FR-SRCH-04` commits single; `FR-SRCH-09` contemplates multiple. |
+| **Category** | Restricts results to listings in a category drawn from the predefined set. | ~~**`S-3` / `OQ-5`** — single vs. multiple selection is open.~~ **Closed: `OQ-5` is Decided** (2026-10-07) — `FR-SRCH-04`’s **single** canonical category is the MVP behaviour, and **`FR-SRCH-09` multi-category selection remains unapproved and deferred**. Because every value is **canonical**, the criterion needs **no spelling tolerance and no “did you mean”**. **No filtering implementation is introduced.** |
 | **Location** | Restricts results to listings matching a location value. | **`S-6` / `OQ-6`** — the granularity (city; state/region; country) is open. |
 
 **The invariant this document does commit, despite the seams (P5):** *the set of searched
@@ -611,9 +611,13 @@ administrator-managed lifecycle arrives, revisit.
 
 **The category set is a different case, and the difference is instructive.** Unlike
 status, the category set is *not* fixed by a requirement — `FR-DATA-10` requires it to be
-"a defined, finite list available for both submission and filtering", and `OQ-5` leaves
-open whether administrators curate it. The submission form and the filter UI both need to
-*present* it, so a **read-the-category-set** capability is genuinely required by V3 and L1.
+"a defined, finite list available for both submission and filtering", and ~~`OQ-5` leaves
+open whether administrators curate it~~ — **`OQ-5` is Decided** (2026-10-07): the
+**Product Owner** curates it as **repository-owned configuration changed through
+deployment**, and **administrators do not manage it at runtime**. The submission form and
+the filter UI both need to *present* it, so a **read-the-category-set** capability is
+genuinely required by V3 and L1. **Its values are not approved here**, and **no
+administrative category-management operation is needed or designed.**
 
 ### OP-11 — Retrieve the category set
 
@@ -623,7 +627,7 @@ open whether administrators curate it. The submission form and the filter UI bot
 | **Journeys** | V3 (filter by category), L1 (open the form) |
 | **Returns** | The predefined category set. |
 | **Authorization** | None. |
-| **Seam** | **`S-3` / `OQ-5`** — whether this set is static configuration or administrator-managed *data* is open. If administrators curate it, a further administrative operation to manage it is needed, and that operation is **not designed here**. |
+| **Seam** | ~~**`S-3` / `OQ-5`** — whether this set is static configuration or administrator-managed *data* is open. If administrators curate it, a further administrative operation to manage it is needed, and that operation is **not designed here**.~~ **Closed: `S-3` is resolved by `OQ-5`** (2026-10-07) — the set is **static, repository-owned configuration changed through deployment**, **not** administrator-managed data, so **no administrative category-management operation is needed, and none is authorized**. The operation returns a **flat, finite** set and a listing carries **exactly one** of its members. **Its values are not approved here**, and the **representation remains `DDM-3`**. **No implementation is introduced.** |
 
 ---
 
@@ -740,7 +744,7 @@ and *not* filled in here):
 | ~~`VR-S2`~~ **Filled** | Whether at least one contact method is enforced — **yes, before approval**, at least one *usable* phone, email, or website. Not enforced by `OP-3`. Location values never count | ~~`OQ-8b`~~ — **Decided** |
 | ~~`VR-S3`~~ **Filled** | Format checks and their strictness — **permissive, international-friendly, technology-neutral**; no pattern, parser, or library named | ~~`OQ-8`~~ — **Decided** |
 | `VR-S4` | Whether state/region and country are required | `OQ-6` |
-| `VR-S5` | Whether one or several categories are permitted | `OQ-5` |
+| ~~`VR-S5`~~ **Filled** | Whether one or several categories are permitted — **exactly one required** category per listing, a member of the **predefined, finite, platform-owned, flat** vocabulary; **never free text, never an “Other” value** (`AV-7`). `FR-SRCH-09` remains **unapproved**. **Not yet implemented** — `DI-9` membership is still unenforced in the executable domain | ~~`OQ-5`~~ — **Decided** |
 
 **`AV-8` deserves defending, because "ignore unknown fields" is the conventional choice.**
 Ignoring an administrative field silently accepts a request that was *wrong* — the caller
@@ -963,7 +967,7 @@ prefixed `AQ`.
 | `OQ-2` | Does a lister get any reference or outcome notification? | Decides whether any lister-facing retrieval operation can exist at all. Today none can, safely. | — |
 | `OQ-3` | Default ordering of listings? | `OP-1` result order. If "most recently updated", an administrative field begins influencing public output. | — |
 | `OQ-4` | Which fields are searched; exact, partial or fuzzy? | `OP-1` keyword criterion. Bounded by **P5**. | `S-4` |
-| `OQ-5` | Category model — single or multiple; who curates? | `OP-1` category criterion; `OP-11`; whether an administrative category-management operation is needed. | `S-3` |
+| ~~`OQ-5`~~ **Decided** | Category model — single or multiple; who curates? | **Answered: exactly one required category per listing**, from a **predefined, finite, platform-owned, flat** vocabulary curated by the **Product Owner** as **repository-owned configuration changed through deployment**. `OP-1`’s category criterion filters on that **single canonical** value and needs **no spelling tolerance**; **`FR-SRCH-09` remains unapproved and deferred**. `OP-11` returns the flat finite set; **no administrative category-management operation is needed, and none is authorized**. Fills `VR-S5`; `AV-7` is unchanged — **no free-text value and no “Other”**. **No operation was added, removed, or resequenced**, the **initial values are not approved**, and the **representation remains `DDM-3`**. Whether category participates in **keyword** search remains `OQ-4` / `S-4`. | `S-3` — **resolved** |
 | `OQ-6` | Location granularity? | `OP-1` location criterion; the submittable field set. | `S-6` |
 | `OQ-7` | Which fields are public vs. withheld? | **The public projection's membership.** The single largest open question in this document. | `S-2` |
 | ~~`OQ-8` / `OQ-8b`~~ **Decided** | Required submission fields; contact-method minimum? | **Answered.** `OP-3` requires name, category, description, locality, and country, and **accepts a submission with no contact method**. The contact minimum — at least one **usable** phone, email, or website — is enforced **before approval** (`OP-7`, and `OP-10` for a revision), never at the write. Location values never count as contact. Format checks are **permissive and technology-neutral**; a supplied-but-invalid optional value is a **field-level validation failure**, not a silent omission. Fills `VR-S1`–`VR-S3`. **No operation was added, removed, or resequenced.** | `S-1` — **resolved** |

@@ -161,7 +161,20 @@ implementation**:
 
 These remain **open**, and none may be resolved by code placed here:
 
-- **`DDM-3`** category representation — `OQ-5`.
+- **`DDM-3`** category representation — ~~`OQ-5`.~~ **The product model is decided**
+  (`OQ-5`, Product Owner ruling 2026-10-07, issue #163): a listing carries **exactly
+  one required** category from a **predefined, finite, platform-owned** vocabulary that
+  is **flat**, curated by the Product Owner as **repository-owned configuration changed
+  through deployment**, with **no free-text value, no “Other”, no proposal workflow and
+  no administrator category-management screen**. **`DDM-3` itself remains open and
+  entirely physical:** text column versus reference table, foreign-key structure, stable
+  category identifiers versus display labels, the configuration-file format, the
+  seed-data and deployment-loading mechanism, database constraints, and the shape of the
+  category migration — **none of them decided, and none inferable from `OQ-5`**. It is
+  **now blocked by approval of the initial category vocabulary**, whose values require a
+  **separate Product Owner approval**; the **first schema migration follows `DDM-3`**.
+  **`DI-9` set-membership validation remains separately authorized**, and **no category
+  list, configuration, reference data or seed data exists or is authorized here.**
 - **`DDM-4`** indexing and text-search strategy — `OQ-4`, `NOQ-4`.
 - **`DDM-5`** normalization of location — ~~open; physical.~~ **Selected for the
   MVP by `ADR-020`** (`Accepted` 2026-10-07, issue #161): `locality`,
@@ -179,8 +192,10 @@ These remain **open**, and none may be resolved by code placed here:
 - **`DDM-7`** audit-entry storage — `OQ-14`, and meaningful only if `E5` is
   known to exist.
 
-`OQ-5` and `OQ-4` **shape** this work rather than blocking a phase; that is
-their recorded classification, and it is not softened or hardened here.
+~~`OQ-5` and `OQ-4` **shape** this work rather than blocking a phase~~ — both were
+classified as **shaping inputs**, and **`OQ-5` is now Decided** (2026-10-07, issue #163)
+while **`OQ-4` remains Unresolved**. That classification is not softened or hardened
+here, and deciding `OQ-5` authorizes nothing in this directory.
 
 ## What does not exist, and what is not authorized
 

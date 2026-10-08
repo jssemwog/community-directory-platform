@@ -254,7 +254,7 @@ where most of the value is.
 |---|---|---|
 | V1 Browse | Approved listings appear; nothing else does. | `BI-1` |
 | V2 Search | Keyword narrows results within the approved set. | Scope bounded by `BI-3` |
-| V3 / V4 Filter | Category and location narrow results; combine with keyword; clear independently. | Control shape is **open** — `OQ-5`, `OQ-6` |
+| V3 / V4 Filter | Category and location narrow results; combine with keyword; clear independently. | ~~Control shape is **open** — `OQ-5`, `OQ-6`~~ — the **category control is single-select** over a flat canonical set (`OQ-5`, Decided 2026-10-07); **multi-select filtering is unapproved** and **must not be asserted**. Location follows `OQ-6` (Decided). **No filter implementation exists yet** |
 | V5 Detail | One approved listing opens; **return restores the previous result set**. | `FR-VIS-07` — a requirement, not a nicety |
 | **V6 No results** | The no-results state is **distinguishable** from an empty directory and from an error, and offers a way to adjust criteria. | **First-class. Not an edge case.** |
 | V7 Inaccurate info | The listing is viewable. **No reporting path is tested** — it does not exist. | **`OQ-1`** |
@@ -899,7 +899,7 @@ becomes the decision (**T4**).
 | **`OQ-2`** lister notification/reference | Any outcome notification, or any lister-facing retrieval. | Yes — that **no** such unauthenticated retrieval exists (`DI-5`). |
 | **`OQ-3`** default ordering | A specific order. | Yes — that ordering is **consistent** (`FR-VIS-03`). |
 | **`OQ-4`** searchable fields | *Which* fields match a keyword. | **Yes — `BI-3`: search scope never exceeds publication scope.** The relationship is testable; the scope is not. |
-| **`OQ-5`** category model | Single vs. multiple selection; who curates. | Yes — a category is always from the predefined set (`DI-9`). |
+| ~~**`OQ-5`**~~ **Decided** category model | ~~Single vs. multiple selection; who curates.~~ — nothing is untestable here any longer **except the vocabulary’s values**, which remain unapproved: **no test may assert a category value as approved**, and the existing fixture strings are **test data, not an approved vocabulary**. **Multi-category selection must not be asserted** — `FR-SRCH-09` is unapproved. | **Yes:** that **exactly one** category is required; that it is always a member of the predefined set (`DI-9`); that a **free-text** or **“Other”** value is refused; that an administrator may **correct** a category during moderation; and that a post-approval change follows the existing `OQ-10` revision path. **`DI-9` is still unimplemented**, so the membership assertions are **specifiable, not yet satisfied** |
 | **`OQ-6`** location granularity | Whether `state/region` or `country` exist or are required. | — |
 | **`OQ-7`** public vs. private fields | **An enumeration of public fields.** | **Yes — as a rule:** no field outside the approved public set is ever exposed. |
 | ~~**`OQ-8` / `OQ-8b`**~~ **Decided** | — nothing is untestable here any longer | **Yes:** that a submission carrying only name, category, description, locality, and country is **accepted**; that a submission with **no** contact method is accepted into moderation but **cannot be approved**; that a listing with at least one usable phone, email, or website **can** be; that an **invalid** contact value does **not** satisfy the minimum; that locality or other location data **never** satisfies it; that a supplied-but-invalid optional value **fails visibly and is preserved**, never silently dropped; that administrator completion is validated by the **same** rules; and that the same rules apply to a revision, whose failure **leaves the approved listing unchanged**. **Still not testable: any concrete format pattern** — assertions must exercise the permissive posture, not a chosen expression |
@@ -960,7 +960,7 @@ quietly becomes a missing performance *test*, permanently.
 | `OQ-2` | Lister notification or reference? | No notification tests; the **absence** of unauthenticated retrieval **is** tested. |
 | `OQ-3` | Default ordering? | Consistency testable; the specific order is not. |
 | `OQ-4` | Searchable fields and matching mode? | `BI-3` testable; the scope is not. |
-| `OQ-5` | Category model? | Set membership testable; cardinality is not. |
+| ~~`OQ-5`~~ **Decided** | Category model? | **Cardinality and membership are both now specifiable** — exactly one required category, always a member of the predefined set, free text and “Other” refused. **`DI-9` remains unimplemented**, so those tests are **owed, not passing**. **No category value may be asserted as approved** (the values are unapproved; existing fixture strings are test data), and **multi-category selection must not be asserted** (`FR-SRCH-09` unapproved). |
 | `OQ-6` | Location granularity? | No location-field obligations tested. |
 | `OQ-7` | Public vs. private fields? | **The rule is testable; the enumeration is not.** |
 | ~~`OQ-8` / `OQ-8b`~~ **Decided** | Required fields; contact minimum? | **Obligation tests are now specifiable** — by stage: at initial submission, on any supplied value, and before approval. **Concrete format patterns remain untestable**, and a test asserting one would overwrite the permissive posture. |

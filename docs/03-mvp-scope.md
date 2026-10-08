@@ -305,8 +305,21 @@ review turnaround time) define "success" for the first release.
    count. **No offline-business exemption.** Recorded alongside the `OQ-8` submission
    obligations in *Data required for a listing* above; see `docs/05` `FR-DATA-08`,
    `FR-VAL-05` and `docs/13`.
-4. **Category source** — Who defines the predefined category list, and can
-   administrators manage it in the MVP or is it fixed?
+4. ~~**Category source**~~ — **Decided 2026-10-07 (Joe S. — `OQ-5`).** A listing carries
+   **exactly one required** category, drawn from a **predefined, finite, platform-owned**
+   vocabulary that is **flat** — no hierarchy, tags, facets, aliases or localized labels.
+   The **Product Owner** defines its contents; for the MVP it is **repository-owned
+   configuration changed through deployment**, so **administrators do not manage it at
+   runtime** and **no category-management screen is authorized**. A submitter selects the
+   **closest truthful applicable** category; there is **no free-text category, no
+   “Other” value and no category-proposal workflow**, and where no approved category
+   truthfully applies the existing refusal/rejection behaviour applies. Administrators
+   **may correct** a category during moderation, and a post-approval change uses the
+   existing `OQ-10` revision path. **Multi-category filtering (`FR-SRCH-09`) remains
+   unapproved and deferred.** **The initial category values are not approved by this
+   ruling** and require a **separate Product Owner approval**; the **physical
+   representation remains `DDM-3`**, and **no implementation is authorized**. See
+   `docs/05` `FR-SRCH-04`, `FR-SRCH-09`, `FR-DATA-02`, `FR-DATA-10` and `docs/13`.
 5. ~~**Removing/unpublishing approved listings**~~ — **Decided 2026-08-04 (Joe S.
    — `OQ-11`).** An authorized administrator **may unpublish** an approved
    listing and **may republish** it. Unpublishing is **reversible**, requires a

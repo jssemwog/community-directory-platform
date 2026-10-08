@@ -34,10 +34,20 @@ governed anywhere (`VR-S3` leaves every safety/length boundary to
 would settle a decision nobody has made. A governed bound may be added later,
 additively, once it is decided.
 
-**The first schema migration is still blocked.** `DDM-3`/`OQ-5` — category
-representation, cardinality and curation — **remains unresolved**, and a
-listing structure carries a required category. Resolving it is the next gate;
-until then no migration here can be written honestly.
+**The first schema migration is still blocked — and the gate has moved, not
+cleared.** ~~`DDM-3`/`OQ-5` — category representation, cardinality and curation
+— **remains unresolved**~~. **`OQ-5` is Decided** (Product Owner ruling
+2026-10-07, issue #163): a listing carries **exactly one required** category from
+a **predefined, finite, platform-owned, flat** vocabulary, curated by the Product
+Owner as **repository-owned configuration changed through deployment**. That is a
+**product** answer only. Two things must still happen before a migration here can
+be written honestly, **in this order**: the **initial category values** require a
+**separate Product Owner approval**, and **`DDM-3`** must then select the
+**physical representation** — text column versus reference table, foreign-key
+structure, stable identifiers versus display labels, constraints, and the
+configuration/seed-data mechanism. **Do not pre-empt either:** declare no
+category column, type, enumeration, reference table, foreign key, constraint or
+seed data, and **do not infer a representation from the product ruling**.
 
 ## The rules a file placed here must follow
 
