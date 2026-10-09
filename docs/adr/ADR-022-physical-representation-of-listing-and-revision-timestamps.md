@@ -202,12 +202,68 @@ rediscover or guess them.
 - **Application correctness must therefore compare the absolute instant, never formatted
   text.** Ordering, the `DI-6` strict-increase rule and the `OQ-13` elapsed-duration
   boundary are all comparisons of instants.
-- **`(3)` constrains fractional seconds to milliseconds.** Values are stored at millisecond
-  resolution.
-- **The write path must avoid silently sending greater precision**, so that the constraint is
-  never the thing that discards detail (decision 15).
+- **`(3)` constrains fractional seconds to milliseconds** — values are stored at millisecond
+  resolution. **It achieves that by rounding, not by rejecting.** A value arriving with
+  greater fractional precision is **rounded to the declared precision and accepted**;
+  PostgreSQL raises no error. **This ADR makes no claim that `timestamptz(3)` itself rejects
+  excess fractional precision, because it does not.**
+- **Therefore decision 15's prohibition on silent rounding is an obligation of the
+  adapter and input boundary, not of the column.** The declared precision is a *guarantee
+  about what is stored*; it is **not** an enforcement mechanism. The write path must not send
+  greater precision in the first place, and a database value that does not map exactly to
+  integer milliseconds must **fail at the boundary** (decision 14) rather than be rounded
+  there. **No database `CHECK` or trigger is selected to enforce this**, and none is implied —
+  if one is ever wanted, it is a **separately governed migration-design choice**, not a
+  consequence of this decision.
 - **Nullability is a separate declaration.** Where a datum is required, the migration must
   declare `NOT NULL` explicitly; the type implies nothing about it.
+- **Neither `NOT NULL` nor the type choice enforces lifecycle consistency.** `NOT NULL`
+  refuses a missing value and nothing more; it says nothing about *when* a nullable value
+  must be present. The **presence-if-and-only-if-*rejected*** coupling is a **store check
+  already governed by `ADR-017`** (`PS-8`/`PS-9` state these as single-row store checks) —
+  this ADR neither invents nor re-derives it — and **application and domain validation remain
+  necessary** regardless, exactly as `ADR-019` records that *"boundary validation and database
+  constraints remain mandatory"*.
+
+## Range and exceptional values
+
+**Three ranges are involved, and none contains the others.** Recorded honestly, because
+assuming otherwise is the easiest way to build a boundary that silently narrows or silently
+accepts:
+
+| Layer | Range | Note |
+|---|---|---|
+| **Domain carrier** | A **safe integer** count of epoch milliseconds — `±9,007,199,254,740,991` ms, roughly **±285,000 years** from the epoch (`Number.isSafeInteger`, `instant.ts`) | The domain's own admissibility test, and the **only** one it applies |
+| **PostgreSQL `timestamptz`** | **4713 BC to 294276 AD** | **Much narrower than the carrier below the epoch**, and wider above it |
+| **JavaScript `Date`** | `±8,640,000,000,000,000` ms, about **±273,790 years** | **Narrower than the carrier in both directions** — relevant wherever a driver adapter uses `Date` internally |
+
+**Consequences, stated plainly:**
+
+1. **A safe epoch-millisecond integer is not automatically representable** as a
+   `timestamptz`, nor as a `Date`. The claim "it is a safe integer, therefore it round-trips"
+   is **false**, and nothing in this ADR may be read as making it.
+2. **The admissible range is the intersection** of the layers a value actually crosses. A
+   value outside it **must fail at the boundary** (decision 14) — it must not be clamped,
+   wrapped or silently narrowed.
+3. **No range is narrowed without disclosure.** The domain's accepted range is unchanged by
+   this ADR; what changes is that a value the *store* cannot represent is now known to fail
+   rather than to be assumed storable.
+4. **PostgreSQL `infinity` and `-infinity` are valid `timestamptz` values and must not be
+   accepted as domain instants.** The `pg` driver can surface them as the JavaScript values
+   `Infinity` and `-Infinity`, which are **not** safe integers and therefore **not** valid
+   `Instant` carriers. They must be **rejected explicitly at the boundary**, not coerced and
+   not permitted to reach the domain. **This ADR writes no such value**, and nothing in the
+   governed rules has any use for one.
+5. **`NaN` and any non-finite number are rejected**, on the same ground.
+6. **Malformed strings are rejected** — a value that does not parse as an offset-aware
+   instant fails, rather than yielding a default or a partially-parsed result.
+7. **Pre-epoch values are governed by existing domain validity, not by their sign.** A
+   negative epoch-millisecond value is admissible if the domain admits it and every layer it
+   crosses can represent it; it is **never rejected merely for being negative**.
+8. **No mechanism is invented here to solve this.** Where the check belongs, how it is
+   expressed, and whether any of it is shared with other boundary validation are
+   **implementation decisions**. This ADR states the obligation and the ranges, and selects no
+   code, library or constraint.
 
 ## Round-trip contract
 
@@ -249,12 +305,25 @@ it.
   side effect.
 - **The exact registration mechanism remains an implementation decision**, as nothing
   governs it today.
-- **Parser tests must include**: the same instant expressed with **multiple different
-  offsets**; **DST-boundary** examples; **pre-epoch** values if domain-valid; **millisecond
-  edge** values; and **invalid** values that must fail.
+- **Parser tests must include**, at minimum:
+  - **ordinary instants**, round-tripping to the identical epoch-millisecond integer;
+  - the **same instant expressed with multiple different offsets**, all yielding the **same**
+    domain integer;
+  - **DST-boundary** examples;
+  - **millisecond edge** values;
+  - **pre-epoch** values where domain-valid — admitted, not rejected for their sign;
+  - **malformed** input, which must fail;
+  - **out-of-range** input — outside the intersection of the ranges in *Range and exceptional
+    values* — which must fail;
+  - **`infinity` and `-infinity`**, which must be **rejected** and must never reach the
+    domain;
+  - **session-timezone independence**: the same stored value yields the same domain integer
+    under different session `TimeZone` settings.
 
-**No test is added by this decision unit.** The obligation is recorded; the tests belong to
-the unit that configures the parser.
+**No test is added by this decision unit**, and **no database integration-test framework is
+claimed to exist** — **database-test tooling is unselected** and testing depth remains
+`DG-4`, `Unresolved` (`docs/11`). The obligation is recorded; the tests belong to the unit
+that configures the parser, working within whatever tooling is governed by then.
 
 ## Alternatives considered
 
@@ -309,7 +378,7 @@ schema**, with the rationale preserved so it is not silently re-made (`IR-6`).
 | 2 | **The same instant expressed with different offsets** | Both resolve to the **same** absolute instant and compare equal; PostgreSQL normalises on input and retains no offset label. **No change required** — and this is a required **parser test case** |
 | 3 | **Millisecond boundary values** | Representable exactly by both `timestamptz(3)` and the carrier. **No change required** — a required **parser test case** |
 | 4 | **Rejected versus non-rejected nullability** | `rejectedAt` is `NULL` on a *pending* or *approved* record and present on a *rejected* one, enforced by the existing presence-**iff** constraint; the domain maps `NULL` ↔ absent. **No change required** |
-| 5 | **Very old or far-future domain-valid values** | Admitted so long as they are safe epoch-millisecond integers and within `timestamptz` range, which is far wider. **No change required**; pre-epoch values are a required **parser test case** |
+| 5 | **Very old or far-future domain-valid values** | Admitted only where the value is representable **in every layer it crosses** — see *Range and exceptional values* below. **Being a safe integer is not sufficient**, and the three ranges do not nest. **No migration change is required**; the boundary must enforce the intersection, and **pre-epoch values are a required parser test case** (a negative value is **not** rejected merely for being negative) |
 | 6 | **An invalid database value reaches the adapter** | It **fails explicitly** at the boundary (decisions 14–15) — never rounded, normalised or silently coerced. **Requires no migration; requires the adapter's validation** to exist, which is later implementation |
 | 7 | **Parser misconfiguration** | A `Date`, a locale-dependent parse, or a lost millisecond would otherwise reach the domain. **Requires an adapter fix and a parser test**, not a migration — which is why decisions 16–18 make the configuration explicit and tested rather than default |
 | 8 | **Session timezone change** | **Stored instants do not change.** Rendered text may differ; comparisons are unaffected because they compare instants, not text. **No change required** — and no application logic may depend on rendered text |
