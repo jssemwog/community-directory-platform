@@ -1593,7 +1593,10 @@ process, not a component). ~~**OQ-5** (category curation and multi-select — la
 plus configuration)~~ **has left this list: OQ-5 is Decided** (2026-10-07) — the
 vocabulary is **platform-owned repository configuration** and category selection is
 **single**, with multi-select **unapproved and deferred**. It had, and still has, **no
-architectural consequence**, and its physical representation remains **DDM-3**.
+architectural consequence**, and ~~its physical representation remains **DDM-3**~~ **its
+physical representation is since decided by `Accepted` `ADR-021`**, 2026-10-09 (issue #167)
+— a stable machine key in a `text` column under a `CHECK` constraint — which likewise has
+**no architectural consequence**: no component is added, moved or removed.
 
 > **The shortest useful summary of this section.** Of the seventeen questions in the
 > table above, **eight are Decided** — OQ-6, OQ-7, OQ-8/8b, OQ-10, OQ-11, OQ-13, NOQ-2,

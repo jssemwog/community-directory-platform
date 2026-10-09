@@ -321,8 +321,12 @@ review turnaround time) define "success" for the first release.
    on 2026-10-08 (Joe S., issue #165): exactly 16 categories**, whose labels,
    definitions, boundary notes, tie-breaker rules and alphabetical display order are
    recorded authoritatively in `docs/05` *The approved MVP category vocabulary*. The
-   approval covers **product vocabulary only**; the **physical representation remains
-   `DDM-3`** — undecided, but **no longer blocked by any product question** — and **no
+   approval covers **product vocabulary only**; ~~the **physical representation remains
+   `DDM-3`** — undecided, but **no longer blocked by any product question**~~ — **the
+   physical representation was then decided by `Accepted` `ADR-021`, 2026-10-09 (issue
+   #167):** a **stable, repository-owned textual machine key** in a mandatory, non-null
+   PostgreSQL **`text`** column, enforced by a **`CHECK`** constraint over the approved
+   key set, with **no reference table, enum or seed data** — and **no
    implementation, configuration or seed data is authorized**. See
    `docs/05` `FR-SRCH-04`, `FR-SRCH-09`, `FR-DATA-02`, `FR-DATA-10` and `docs/13`.
 5. ~~**Removing/unpublishing approved listings**~~ — **Decided 2026-08-04 (Joe S.
