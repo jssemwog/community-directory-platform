@@ -34,25 +34,44 @@ governed anywhere (`VR-S3` leaves every safety/length boundary to
 would settle a decision nobody has made. A governed bound may be added later,
 additively, once it is decided.
 
-**The first schema migration is still blocked — and the gate has moved, not
-cleared.** ~~`DDM-3`/`OQ-5` — category representation, cardinality and curation
-— **remains unresolved**~~. **`OQ-5` is Decided** (Product Owner ruling
-2026-10-07, issue #163): a listing carries **exactly one required** category from
-a **predefined, finite, platform-owned, flat** vocabulary, curated by the Product
-Owner as **repository-owned configuration changed through deployment**. That is a
-**product** answer only. ~~Two things must still happen before a migration here can
-be written honestly, in this order: the initial category values require a separate
-Product Owner approval, and `DDM-3` must then select the physical
-representation.~~ **The first of those is done:** the **initial category values
-were approved on 2026-10-08** (Product Owner ruling, issue #165) — **16
-categories**, recorded in `docs/05` *The approved MVP category vocabulary*. **One
-thing still must happen:** **`DDM-3`** must select the **physical
-representation** — text column versus reference table, foreign-key
-structure, stable identifiers versus display labels, constraints, and the
-configuration/seed-data mechanism. **Do not pre-empt it:** declare no
-category column, type, enumeration, reference table, foreign key, constraint or
-seed data, and **do not infer a representation from the product ruling or from the
-approved list of labels** — those labels are **display text, not identifiers**.
+~~**The first schema migration is still blocked — and the gate has moved, not
+cleared.**~~ **The category gate is now cleared.** ~~`DDM-3`/`OQ-5` — category
+representation, cardinality and curation — **remains unresolved**~~. **`OQ-5` is
+Decided** (Product Owner ruling 2026-10-07, issue #163): a listing carries **exactly
+one required** category from a **predefined, finite, platform-owned, flat**
+vocabulary, curated by the Product Owner as **repository-owned configuration changed
+through deployment**. That was a **product** answer only. ~~Two things must still
+happen before a migration here can be written honestly, in this order: the initial
+category values require a separate Product Owner approval, and `DDM-3` must then
+select the physical representation.~~ **Both are now done:** the **initial category
+values were approved on 2026-10-08** (Product Owner ruling, issue #165) — **16
+categories**, recorded in `docs/05` *The approved MVP category vocabulary* — and
+**`DDM-3` selected the physical representation on 2026-10-09**: `ADR-021`,
+`Accepted` (issue #167).
+
+**What that obliges a migration placed here to do.** Declare the category as **one
+mandatory, non-null `text` column** holding a **stable, repository-owned textual
+machine key**, and restrict it with a **`CHECK` constraint over the complete approved
+key set**, authored as **raw PostgreSQL DDL through Kysely's `sql` tag**. **Do not
+store the display label** — the approved labels are **display text, not
+identifiers**, and storing one would make a later rename a data rewrite. **Do not
+invent a `varchar(n)`**, for the same reason as the location attributes: no numeric
+limit is governed anywhere. **Declare no category table, foreign key, join table,
+PostgreSQL enum, reference-data rows or seed data** — the approved values enter the
+database as the **constraint's own predicate**, not as rows — and **declare no
+display order**, which stays in documentation and future configuration. **The
+authoritative 16-key mapping is in `ADR-021` alone; take the keys from there and
+invent none.** The omission of a reference table and of seed data is **deliberate and
+governed**, and the migration should say so, for the same reason `ADR-019`'s missing
+UUID default must be stated: an author who adds either back silently adopts an
+alternative `ADR-021` rejected.
+
+**Narrowing the constraint is not an ordinary forward step.** Removing a key that
+listings still reference requires an **explicit reassignment/backfill decision
+first** — a constraint cannot validate while forbidden values remain, and that
+failure is the signal to seek the decision, never to widen the predicate back.
+**Rollback stays honest** (`ADR-018`): widening is cleanly reversible only while no
+row uses the new key.
 
 ## The rules a file placed here must follow
 

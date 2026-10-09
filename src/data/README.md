@@ -159,15 +159,31 @@ implementation**:
   replacement-value semantics.
 - **`DDM-9`** soft-delete versus hard-delete, publication state, and purge.
 
-These remain **open**, and none may be resolved by code placed here:
+**`DDM-3` has left this list — it is decided.** The rest remain **open**, and none may be
+resolved by code placed here:
 
-- **`DDM-3`** category representation — ~~`OQ-5`.~~ **The product model is decided**
+- ~~**`DDM-3`** category representation~~ — **decided, and no longer open: `Accepted`
+  `ADR-021`, 2026-10-09 (issue #167)** selects a **stable, repository-owned textual machine
+  key** in a **mandatory, non-null PostgreSQL `text` column**, enforced by a **`CHECK`
+  constraint** over the complete approved key set, authored as **raw DDL through Kysely's
+  `sql` tag**. **No `varchar(n)`** — no length bound is governed. **No category table,
+  foreign key, join table, PostgreSQL enum, reference-data rows or seed mechanism**: the
+  approved values enter the database as the **constraint's own predicate**, not as data.
+  **Labels, inclusion definitions, boundary notes and the approved alphabetical display
+  order remain governed documentation and future repository configuration**, never database
+  rows, and the **authoritative 16-key mapping lives in `ADR-021` alone**. **Deciding is not
+  implementing:** **no category configuration module, no equality test, no schema, no
+  migration, no reference data and no seed data exists or is authorized here**, and
+  **`DI-9`/`VR-2`/`AV-7` remain unimplemented**. The detail below records the product model
+  the decision rests on.
+- *The product model `ADR-021` rests on, recorded when `DDM-3` was still open* — ~~`OQ-5`.~~ **The product model is decided**
   (`OQ-5`, Product Owner ruling 2026-10-07, issue #163): a listing carries **exactly
   one required** category from a **predefined, finite, platform-owned** vocabulary that
   is **flat**, curated by the Product Owner as **repository-owned configuration changed
   through deployment**, with **no free-text value, no “Other”, no proposal workflow and
-  no administrator category-management screen**. **`DDM-3` itself remains open and
-  entirely physical:** text column versus reference table, foreign-key structure, stable
+  no administrator category-management screen**. ~~**`DDM-3` itself remains open and
+  entirely physical:**~~ **`DDM-3` was then open and entirely physical, and every item in
+  this list is now selected by `ADR-021` (see above):** text column versus reference table, foreign-key structure, stable
   category identifiers versus display labels, the configuration-file format, the
   seed-data and deployment-loading mechanism, database constraints, and the shape of the
   category migration — **none of them decided, and none inferable from `OQ-5` or from the
@@ -177,11 +193,15 @@ These remain **open**, and none may be resolved by code placed here:
   ruling, issue #165) — **16 categories**, recorded with labels, definitions, boundary
   notes, tie-breaker rules and alphabetical display order in `docs/05` *The approved MVP
   category vocabulary*. The approved labels are **user-facing display text, not machine
-  identifiers**. **`DDM-3` is therefore undecided but no longer blocked, and is ready for
+  identifiers**. ~~**`DDM-3` is therefore undecided but no longer blocked, and is ready for
   its own separately governed physical-design decision**; the **first schema migration
-  follows `DDM-3`**. **`DI-9` set-membership validation remains separately authorized**,
-  and **no category configuration, reference data or seed data exists or is authorized
-  here.**
+  follows `DDM-3`**.~~ **`DDM-3` was then decided on that basis — `Accepted` `ADR-021`,
+  2026-10-09 (issue #167), as recorded above** — so the first schema migration's category
+  content is **determined**, and that migration remains a **separately authorized later
+  unit**. **`DI-9` set-membership validation, the category configuration module and the
+  mandatory configuration-versus-constraint equality test all remain separately
+  authorized**, and **no category configuration, reference data or seed data exists or is
+  authorized here.**
 - **`DDM-4`** indexing and text-search strategy — `OQ-4`, `NOQ-4`.
 - **`DDM-5`** normalization of location — ~~open; physical.~~ **Selected for the
   MVP by `ADR-020`** (`Accepted` 2026-10-07, issue #161): `locality`,
@@ -202,9 +222,11 @@ These remain **open**, and none may be resolved by code placed here:
 ~~`OQ-5` and `OQ-4` **shape** this work rather than blocking a phase~~ — both were
 classified as **shaping inputs**, and **`OQ-5` is now Decided** (2026-10-07, issue #163)
 while **`OQ-4` remains Unresolved**. That classification is not softened or hardened
-here, and **neither deciding `OQ-5` nor approving the category vocabulary** (2026-10-08,
-issue #165) **authorizes anything in this directory** — no configuration, no reference
-data, no seed data, no schema and no migration.
+here, and **neither deciding `OQ-5`, nor approving the category vocabulary** (2026-10-08,
+issue #165), **nor accepting `ADR-021`** (2026-10-09, issue #167) **authorizes anything in
+this directory** — no configuration, no reference data, no seed data, no schema and no
+migration. **`ADR-021` fixes what the first schema migration must declare; it creates
+none of it.**
 
 ## What does not exist, and what is not authorized
 
