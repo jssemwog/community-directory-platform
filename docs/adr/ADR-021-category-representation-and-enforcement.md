@@ -67,12 +67,37 @@ the approved vocabulary, or by inference from either. In particular, the approve
 user-facing display text: whether a stable machine identifier exists apart from the label, and
 what it looks like, is `DDM-3`'s to decide."*
 
-**The decision could not be avoided, because `DDM-3` was the last named content gate before
-the first schema migration.** `src/data/migrations/README.md` names it as the one remaining
-blocker and instructs an author to *"declare no category column, type, enumeration, reference
+**The decision could not be avoided, because `DDM-3` was the last open `DDM` gate standing in
+front of the first schema migration — the last *blocker*, which is not the same as the last
+open question about that migration's content.** `src/data/migrations/README.md` names it as
+the one remaining blocker and instructs an author to *"declare no category column, type, enumeration, reference
 table, foreign key, constraint or seed data, and do not infer a representation from the
 product ruling or from the approved list of labels"*. A migration could not be written
 honestly until this was settled.
+
+**What deciding `DDM-3` does and does not make ready, stated precisely.** It determines the
+**category** content of the first schema migration completely, and it removes the only
+remaining `DDM` blocker. It does **not** mean every column, constraint and table of that
+migration is decided:
+
+- **`DDM-4`** (indexing and text-search strategy) is **unresolved** with `OQ-4`/`NOQ-4`.
+  `ADR-017` selected **no index or search structure**, so the first migration is expected to
+  carry none — an acknowledged exclusion rather than a blocker, and later indexing should
+  arrive **additively**.
+- **`ADR-017` itself still defers items that could add schema**, most concretely **stale-edit
+  detection and resolution policy "and any supporting version token (for example a listing
+  version or last-updated value recorded when an edit is prepared)"**, plus the isolation
+  level for revision transactions and replacement-value semantics. A version token would be a
+  **column**, so this question can still affect first-migration content.
+- **`DDM-7`** (audit-entry storage) is unresolved and conditional on `OQ-14`/`S-8` — not
+  listing-table content.
+- **`DDM-2`** retains open items — domain carrier type, revision identity domain type, public
+  identity transport — none of which changes the identity **columns** `ADR-019` already fixed.
+
+**So this ADR claims the narrower thing: the category representation is fully determined, and
+`DDM-3` no longer blocks.** Whether the first migration is otherwise complete is for that
+separately authorized unit to establish against `ADR-017`'s remaining deferrals, and nothing
+here should be read as certifying it.
 
 **The requirements it answers to.** `FR-DATA-02` (a single category from a predefined set),
 `FR-DATA-10` (the predefined set recorded as a defined, finite list available for both
@@ -143,10 +168,27 @@ The decision has twenty-two parts, each binding.
 
 ### Enforcement
 
-7. **A database `CHECK` constraint contains the complete approved key set**, and the store
-   therefore **refuses any value outside it, and refuses none** — independently of application
-   validation and of every caller, including migrations, governed import paths and
-   administrative SQL. This is `ADR-017` `PS-7`'s mechanism applied to `DI-9`.
+7. **A database `CHECK` constraint contains the complete approved key set.** The store
+   therefore **refuses any value outside it** — independently of application validation and
+   of every caller, including migrations, governed import paths and administrative SQL. This
+   is `ADR-017` `PS-7`'s mechanism applied to `DI-9`; `PS-7` describes its effect for the
+   status datum as *"the store refuses any other value or none"*.
+
+   **The two halves are separate, and both are required.** Under SQL's three-valued logic a
+   `CHECK` whose predicate evaluates to `UNKNOWN` is **satisfied**, so a bare
+   `CHECK (category IN (…))` **does not reject `NULL`** — it passes it. **The `NOT NULL` of
+   decision 2 is what refuses a missing value**, and the `CHECK` is what refuses a wrong one.
+   A migration must therefore declare **both**, and must not treat either as implying the
+   other. (A predicate written to reject null explicitly would also work, but **`NOT NULL` is
+   the selected mechanism**: it states the obligation where a reader expects it and keeps the
+   `CHECK` to the single job of set membership.)
+
+   **The keys need no escaping, and that is a property of the convention, not an accident.**
+   Every approved key is lower-case ASCII letters and hyphens only — the `&` and the commas
+   were dropped, not transliterated — so each appears in DDL as an ordinary
+   single-quoted literal with **no embedded quote, no doubling and no escape sequence**. Had
+   the approved **labels** been stored instead, literals such as `'Arts, Culture &
+   Entertainment'` would have carried punctuation into the predicate for no benefit.
 8. **The constraint is authored as raw PostgreSQL DDL through Kysely's `sql` tag**, which is
    `ADR-018`'s default authoring format. The schema builder is permitted only where it would
    state the operation more clearly without obscuring its semantics, and the two must never
@@ -157,7 +199,12 @@ The decision has twenty-two parts, each binding.
 9. **Application configuration will later map keys to labels, inclusion definitions, boundary
    notes and display order**, in repository-owned configuration — on the `status.ts` shape.
 10. **The database and configuration key sets must be equality-tested.** A test must prove
-    that the configured key set equals the key set the database constraint admits.
+    that the configured key set equals the key set the database constraint admits. **How that
+    comparison obtains the constraint's set is not selected here** — reading the live
+    predicate back from the catalogue and comparing against the migration's own declared set
+    are both legitimate, and they differ in what they prove and in what they need to run. The
+    obligation is the equality; the strategy belongs to the unit that writes the test, and
+    **nothing here should be read as claiming the constraint is trivially introspectable**.
 
 **Both are future implementation.** Neither exists, and neither is created by this ADR.
 
@@ -179,7 +226,26 @@ The decision has twenty-two parts, each binding.
 17. **Product Owner governance remains required for every set change** — addition, removal,
     rename or boundary change.
 18. **An addition or removal requires a coordinated configuration change and a forward
-    migration** updating the `CHECK` constraint, deployed together.
+    migration** updating the `CHECK` constraint. **"Coordinated" has a direction, and the two
+    cases run opposite ways** — because the constraint and the application can be at
+    different versions for the duration of any rollout:
+
+    - **Adding a key: widen the database first, then deploy the application.** A widened
+      `CHECK` is harmless to the older application, which simply never writes the new key. The
+      unsafe order is the reverse: a **new application against an old database** would have
+      its writes of the new key **rejected by the constraint**.
+    - **Removing a key: deploy the application first, reassign the rows, then narrow the
+      database.** The older application must have stopped offering and writing the key, and
+      every row holding it must have been reassigned, before the predicate excludes it.
+      Narrowing first would reject writes the still-running older application legitimately
+      makes, and would fail validation against existing rows (decision 20).
+
+    **A key-set change is therefore not atomic across the system, and must not be planned as
+    though it were.** In each case the safe order is the one in which **the permissive side
+    leads** — the database widens before the application uses the key, and the application
+    stops using it before the database narrows. **No rename, definition or display-order
+    change raises this question at all**, because the stored key and the constraint are
+    untouched (decision 19).
 19. **A label-only, definition-only or display-order-only change does not rewrite stored
     listing rows**, and requires no migration.
 20. **Removal of a referenced key requires an explicit reassignment/backfill decision before
@@ -375,7 +441,7 @@ the one alternative that fails a **binding invariant** rather than losing on cos
 
 ### Deferring `DDM-3` again — rejected
 
-`DDM-3` was the last named content gate before the first schema migration, and both product
+`DDM-3` was the last open `DDM` gate blocking the first schema migration, and both product
 inputs were already decided. Deferring would have left the migration blocked on a question with
 no remaining prerequisite, while `src/data/migrations/README.md` continued to name it as the
 blocker. There was nothing left to wait for.
