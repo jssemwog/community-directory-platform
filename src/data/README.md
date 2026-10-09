@@ -159,6 +159,25 @@ implementation**:
   replacement-value semantics.
 - **`DDM-9`** soft-delete versus hard-delete, publication state, and purge.
 
+**Timestamp physical representation is decided** (`ADR-022`, `Accepted` 2026-10-09,
+issue #169), filling the *"names, exact data types"* deferral `ADR-017` left and
+`ADR-015`/`ADR-018` never picked up. Every governed instant is PostgreSQL
+**`timestamptz(3)`** — an **absolute instant** at **millisecond** precision:
+`submittedAt` and `lastUpdatedAt` **`not null`** on the listing, `rejectedAt`
+**nullable** on the listing and on the revision under `PS-9`'s
+presence-**iff**-*rejected* rule, which is unchanged. The **domain carrier remains an
+epoch-millisecond safe integer**, and **this directory owns the conversion**: the `C9`
+boundary converts both ways with an **exact epoch-millisecond round trip**, **`Date`
+never crosses into the domain** (and stays confined here if a driver adapter uses it),
+parsing **honours the explicit offset** and depends on **no** host timezone, DST rule,
+locale or ambient clock, and invalid, out-of-range or non-millisecond-representable
+values **fail explicitly** rather than being rounded or normalised. **An explicit,
+repository-owned and tested `pg` timestamp parser is required before persistence
+implementation is complete — the default `Date` conversion must not be relied on — and
+none exists here yet.** `ADR-022` names the required parser test cases and leaves the
+registration mechanism an implementation decision. **No parser configuration, schema,
+migration, DDL, provisioning or persistence exists or is authorized here.**
+
 **`DDM-3` has left this list — it is decided.** The rest remain **open**, and none may be
 resolved by code placed here:
 

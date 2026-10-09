@@ -66,6 +66,27 @@ governed**, and the migration should say so, for the same reason `ADR-019`'s mis
 UUID default must be stated: an author who adds either back silently adopts an
 alternative `ADR-021` rejected.
 
+**Timestamps are `timestamptz(3)`** (`ADR-022`, `Accepted` 2026-10-09, issue #169).
+Declare every governed instant as **`timestamptz(3)`** — **millisecond
+precision, absolute instant**. On the listing structure that is
+**`submittedAt`** and **`lastUpdatedAt`**, both **`not null`**, and
+**`rejectedAt`**, **nullable**; on the revision structure it is the revision's
+own **`rejectedAt`**, **nullable**. The **presence-if-and-only-if-*rejected***
+rule for both rejection timestamps is `ADR-017` `PS-9`'s and is **unchanged**.
+**Declare no other timestamp**: the revision structure carries **no**
+`submittedAt` and **no** `lastUpdatedAt` (`revision.ts` declares none), purge
+eligibility is **derived** (`PS-10`), unpublishing and republishing move no
+timestamp, and no audit timestamp exists because `E5` is still `OQ-14`.
+
+**Do not omit the `(3)`, and do not omit `NOT NULL`.** Bare `timestamptz`
+would let the store hold sub-millisecond detail the domain cannot represent,
+breaking the exact epoch-millisecond round trip `ADR-022` requires; and the
+type implies nothing about nullability, so a required datum needs its
+`not null` stated. **Do not use `timestamp without time zone`, `date`,
+`bigint` or text** — each is rejected by `ADR-022`, and the first of them
+would make a later correction reinterpret every stored row rather than change
+a type.
+
 **Narrowing the constraint is not an ordinary forward step.** Removing a key that
 listings still reference requires an **explicit reassignment/backfill decision
 first** — a constraint cannot validate while forbidden values remain, and that
