@@ -3,10 +3,24 @@
 The repository-owned migration location that `../migrate.ts` hands to Kysely's
 `FileMigrationProvider` (`ADR-018`, `Accepted` 2026-09-28, issue #155).
 
-**This directory contains no migration, and that is the point.** Issue #157
+~~**This directory contains no migration, and that is the point.** Issue #157
 delivered the mechanism only. **No schema exists**, no table, column,
 constraint, index, type or default is defined anywhere in this repository, no
-database is provisioned, and `C9` persistence is not implemented.
+database is provisioned, and `C9` persistence is not implemented.~~
+
+**It now contains the first schema migration** —
+`001-create-listing-and-revision-tables.ts` (issue #171) — which creates the
+`listing` and `listing_revision` structures, their primary keys, the
+`listing_revision.listing_id` foreign key, eight `CHECK` constraints and the
+partial unique index enforcing `DI-11`. **It implements already accepted
+decisions and creates no new policy.**
+
+**What still does not exist:** **no database is provisioned**, **no PostgreSQL
+version is selected**, **no migration has been executed against any shared,
+hosted, staging or production database**, and **`C9` persistence is not
+implemented** — no repository, no query module, and **no `pg` timestamp parser**
+(`ADR-022` requires one, explicitly and tested, before persistence
+implementation is complete). **Merging the migration is not deploying it.**
 
 ## Adding a migration is separate, later, authorized work
 
@@ -118,4 +132,12 @@ row uses the new key.
   migration, so tests, helpers and shared code live beside `../migrate.ts`
   instead. This README is ignored, because `.md` is not a migration extension.
 
-**Still empty.**
+~~**Still empty.**~~ **One migration: `001-create-listing-and-revision-tables.ts`.**
+
+Its attacking tests live beside `../migrate.ts`, in
+`../first-schema-migration.test.ts`, for the reason stated just above — a test
+placed in this directory would be collected as a migration. They run
+**unconditionally** against a real PostgreSQL server started from the
+`embedded-postgres` development dependency authorized on issue #171, on an
+ephemeral port with a disposable data directory. That server is a **test-harness
+detail with no production-version authority**.
