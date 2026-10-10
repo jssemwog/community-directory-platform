@@ -23,6 +23,7 @@
  * types, keys, indexes, nullability, or storage shape.
  */
 
+import type { CategoryKey } from "./category";
 import type { Instant } from "./instant";
 import type { ListingId } from "./listing-id";
 import type { PublicationState } from "./publication";
@@ -55,8 +56,18 @@ export interface DesignatableValue {
 export interface ListingContent {
   /** `FR-DATA-01` — required at initial submission. */
   readonly name: string;
-  /** `FR-DATA-02` — required at initial submission. Set membership is `DI-9`, a later slice. */
-  readonly category: string;
+  /**
+   * `FR-DATA-02` — required at initial submission.
+   *
+   * Narrowed to the 16 governed machine keys (`DI-9`, `VR-2`; issue #175), on the same
+   * precedent as `status`: a closed, product-decided value set is a type here, not a bare
+   * string. The **stored identity is the key**, never the user-facing label (`ADR-021`).
+   *
+   * **The type is not the enforcement.** It is erased at runtime, so a value arriving from a
+   * boundary, a cast or a rehydrated record must still pass `isCategoryKey`
+   * (`ADR-019`: boundary validation and database constraints both remain mandatory).
+   */
+  readonly category: CategoryKey;
   /** `FR-DATA-03` — required at initial submission. */
   readonly description: string;
   /** `FR-DATA-04` (`OQ-6`) — required at initial submission. */

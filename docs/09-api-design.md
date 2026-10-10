@@ -742,7 +742,7 @@ cannot be undone.
 | `AV-4` | Administrator edits are validated by the **same rules** as public submissions. No bypass. | `FR-VAL-04`, `VR-6` |
 | `AV-5` | A validation failure records **nothing** — no partial record, no public record. | `FR-SUB-06`, `VR-7` |
 | `AV-6` | Validation errors are perceivable by means other than colour alone. | `FR-VAL-06`, `FR-ACC-*` |
-| `AV-7` | Category values are validated against the predefined set — never accepted as free text. The set is the **16 approved categories** (`docs/05` *The approved MVP category vocabulary*). **Unimplemented** — no boundary validation exists, and the domain still accepts any non-blank string (`DI-9`). | `VR-2`, `DI-9` |
+| `AV-7` | Category values are validated against the predefined set — never accepted as free text. The set is the **16 approved categories** (`docs/05` *The approved MVP category vocabulary*). ~~**Unimplemented**~~ **Implemented in the domain validators** (issue #175, 2026-10-10): membership against the governed configuration is enforced at initial submission and before approval, reported as `CATEGORY_NOT_APPROVED` naming the `category` field (`VR-5`). Labels, case variants, padded keys and the former fixture strings are all refused, and nothing is normalized. **No HTTP boundary exists yet** — `OP-11` and the API surface remain unimplemented — so `AV-7` is satisfied wherever listing content is validated today, and will be inherited by that boundary when it is built. | `VR-2`, `DI-9` |
 | `AV-8` | Administrative fields submitted to a public operation make the request **malformed** — they are rejected, not ignored. | **P3**, `VR-3` |
 
 **Pending — the rules whose *content* is not decided** (inherited as slots from `docs/08`,

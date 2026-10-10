@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 
+import type { CategoryKey } from "./category";
 import { instantOf, type Instant } from "./instant";
 import type { Listing, ListingContent } from "./listing";
 import { listingIdEquals, listingIdOf } from "./listing-id";
@@ -26,7 +27,7 @@ import { LISTING_STATUSES } from "./status";
 
 const content: ListingContent = {
   name: "Harbour Bakery",
-  category: "food-and-drink",
+  category: "food-drink",
   description: "A small bakery.",
   locality: "Kinsale",
   country: "IE",
@@ -538,6 +539,48 @@ describe("approving the pending revision (FR-ADM-10, ADR-017 Q-3)", () => {
     expect(revisions).toHaveLength(1);
     expect(revisions[0]).toBe(target);
     expect(published.content.description).toBe("A small bakery.");
+  });
+
+  it("refuses a proposal whose category is not an approved key (DI-9, VR-2; issue #175)", () => {
+    // Item 14 — revision content is validated by the **same** rule through the **existing**
+    // path: `approvePendingRevision` already calls `validateBeforeApproval`, so no new
+    // wiring exists for this, and none should. The invalid value is cast locally, because
+    // the compile-time narrowing is not the enforcement and a proposal can be rehydrated.
+    const target = proposal({
+      proposedContent: { ...content, category: "food-and-drink" as CategoryKey },
+    });
+    const revisions: readonly ListingRevision[] = [target];
+
+    const result = approvePendingRevision(published, revisions, t1);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("REVISION_CONTENT_INVALID");
+      if (result.error.code === "REVISION_CONTENT_INVALID") {
+        expect(result.error.violations).toContainEqual({
+          code: "CATEGORY_NOT_APPROVED",
+          field: "category",
+        });
+      }
+    }
+
+    // Nothing was applied and nothing was repaired: the listing keeps its own category and
+    // the proposal keeps the unapproved one it arrived with.
+    expect(published.content.category).toBe("food-drink");
+    expect(revisions[0]).toBe(target);
+    expect(target.proposedContent.category).toBe("food-and-drink");
+  });
+
+  it("admits that same proposal into moderation — rejection happens at approval", () => {
+    // An unapproved category does not make a proposal unrepresentable; it makes it
+    // unapprovable. `FR-ADM-10` admission is unchanged.
+    const admitted = admitPendingRevision(published, [], {
+      ...proposal({
+        proposedContent: { ...content, category: "food-and-drink" as CategoryKey },
+      }),
+    });
+
+    expect(admitted.ok).toBe(true);
   });
 
   it("refuses content missing a field required at initial submission", () => {

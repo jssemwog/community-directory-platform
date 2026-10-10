@@ -24,11 +24,18 @@
  * `VR-5`/`FR-VAL-02` requires validation to identify the specific field(s) at fault, so
  * results are field-level. Violations are returned as values; nothing is thrown.
  *
- * Not decided here and therefore not implemented: category set membership (`DI-9`,
- * `OQ-5`, `DDM-3`), location normalization (`DDM-5`), duplicate detection (`VR-S6`,
- * `OQ-12`), and every safety/length boundary `VR-S3` leaves to `DD-1`/`DD-2`.
+ * **Category set membership is now implemented** (issue #175). `DDM-3` was open when this
+ * module was written, so `DI-9`/`VR-2` could not be enforced; `Accepted` `ADR-021`
+ * (2026-10-09) decides it, and the approved vocabulary is now an executable configuration
+ * (`category.ts`). A present-and-usable category outside the 16 approved machine keys is
+ * therefore a violation here — `CATEGORY_NOT_APPROVED` — and not a tolerated unknown.
+ *
+ * Still not decided here and therefore still not implemented: location normalization
+ * (`DDM-5`), duplicate detection (`VR-S6`, `OQ-12`), and every safety/length boundary
+ * `VR-S3` leaves to `DD-1`/`DD-2`.
  */
 
+import { isCategoryKey } from "./category";
 import type { ListingContent } from "./listing";
 import { err, ok, type Result } from "./result";
 
@@ -57,6 +64,18 @@ export type ValidationViolation =
   | {
       readonly code: "CONTACT_METHOD_MINIMUM_UNMET";
       readonly fields: readonly ContactMethodField[];
+    }
+  | {
+      /**
+       * `DI-9`/`VR-2`/`AV-7` — the category is present and usable but is **not one of the
+       * 16 approved machine keys** (`ADR-021`; issue #175).
+       *
+       * Distinct from `REQUIRED_VALUE_MISSING`, which still reports an absent or blank
+       * category: a caller that supplied nothing and a caller that supplied an unapproved
+       * value have made different mistakes and are told so separately.
+       */
+      readonly code: "CATEGORY_NOT_APPROVED";
+      readonly field: "category";
     };
 
 /**
@@ -75,6 +94,34 @@ function requiredFieldViolations(
   return REQUIRED_AT_INITIAL_SUBMISSION.filter(
     (field) => !isUsableValue(content[field]),
   ).map((field) => ({ code: "REQUIRED_VALUE_MISSING", field }) as const);
+}
+
+/**
+ * `DI-9`/`VR-2`/`AV-7` — the category must be one of the 16 approved machine keys.
+ *
+ * Reported **only when the value is present and usable**, so that an absent or blank
+ * category keeps reporting `REQUIRED_VALUE_MISSING` and a caller never receives two
+ * violations for one omission. The existing `VR-S1` rule is unchanged.
+ *
+ * The value is widened to `unknown` before the guard deliberately. `ListingContent.category`
+ * is typed `CategoryKey`, but the type is erased at runtime and these validators exist
+ * precisely to judge values arriving from a boundary, a cast or a rehydrated record — so the
+ * check must be a real one, not a tautology the compiler optimises away in the reader's head.
+ * Widening is safe; nothing is asserted about the value.
+ *
+ * **Nothing is normalized.** A padded, mis-cased or label-shaped value is a violation, not
+ * something to repair (`OQ-5` admits no aliases; `VR-S3` leaves format expression undecided).
+ */
+function categoryMembershipViolations(
+  content: ListingContent,
+): readonly ValidationViolation[] {
+  if (!isUsableValue(content.category)) {
+    return [];
+  }
+
+  return isCategoryKey(content.category as unknown)
+    ? []
+    : [{ code: "CATEGORY_NOT_APPROVED", field: "category" } as const];
 }
 
 /**
@@ -99,7 +146,11 @@ export function usableContactMethodsOf(
 export function validateInitialSubmission(
   content: ListingContent,
 ): Result<ListingContent, readonly ValidationViolation[]> {
-  const violations = requiredFieldViolations(content);
+  const violations = [
+    ...requiredFieldViolations(content),
+    ...categoryMembershipViolations(content),
+  ];
+
   return violations.length === 0 ? ok(content) : err(violations);
 }
 
@@ -115,7 +166,10 @@ export function validateInitialSubmission(
 export function validateBeforeApproval(
   content: ListingContent,
 ): Result<ListingContent, readonly ValidationViolation[]> {
-  const violations = [...requiredFieldViolations(content)];
+  const violations = [
+    ...requiredFieldViolations(content),
+    ...categoryMembershipViolations(content),
+  ];
 
   if (usableContactMethodsOf(content).length === 0) {
     violations.push({
