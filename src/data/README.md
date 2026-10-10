@@ -3,11 +3,21 @@
 Holds **`C9`** (Listing Repository) — **the single data-access path**
 (`ADR-002` `O-1`). It depends on nothing else in `src/`.
 
-**`C9` is still unimplemented, and that is load-bearing.** The only code here is
-**migration infrastructure** — `migrate.ts` and the empty `migrations/` folder
-it reads (issue #157). It is **schema-neutral**: a mechanism with nothing to
-migrate. **No `C9` repository, query, transaction or connection-pool code
-exists.**
+~~**`C9` is still unimplemented, and that is load-bearing.**~~ **The first `C9`
+persistence slice exists** (issue #177, 2026-10-10): a connection boundary
+(`connection.ts`), the Kysely schema typing (`listing-table.ts`), the listing
+mapping in both directions (`listing-mapping.ts`), and **exactly two
+operations** — persist one submitted listing (`OP-3`) and retrieve one listing
+by identifier (`listing-repository.ts`). Alongside it sits the **migration
+infrastructure** (`migrate.ts`, issue #157), the **authored migration**
+(issue #171) and the **`timestamptz` boundary parser** (issue #173).
+
+**What `C9` still does not have.** No revision read or write; no moderation
+operation; no listing update or delete; no enumeration, filtering, search,
+public query or projection transport; no retention or purge; and **no
+application composition** — nothing outside the tests constructs the boundary,
+so the product does not yet persist anything end to end. **No credential,
+environment variable, provisioning or production execution** belongs to it.
 
 Seven states are kept apart below, because collapsing them is how a decision
 turns into an implementation nobody authorized:
@@ -16,13 +26,21 @@ turns into an implementation nobody authorized:
   It is the register's own term, and it is **not** a synonym for implemented.
 - **Selected** — a named choice exists within a discharged decision.
 - **Installed** — the package is present as a dependency.
-- **Configured** — settings exist for it. **Nothing is configured for the
-  application.** The migration entry point builds its own dialect at
-  invocation and reads its target from the environment; no committed setting,
-  credential or application pool configuration exists.
+- **Configured** — settings exist for it. ~~**Nothing is configured for the
+  application.**~~ **Two settings are now fixed for the application, and only
+  two** (issue #177): the governed `timestamptz` type overrides and
+  `DateStyle = ISO`, both applied per pool by `connection.ts`. Everything else
+  — connection string, credentials, pool size, timeouts, retry, TLS — is
+  **supplied by the caller** and chosen by nobody here, so `ADR-016`'s
+  deferrals stand. The migration entry point still builds its own dialect at
+  invocation and reads its target from the environment; **no committed
+  setting, credential or connection string exists** anywhere in the
+  repository.
 - **Provisioned** — an external resource exists. **Nothing is provisioned.**
-- **Implemented** — code exists. **Only the migration mechanism exists; no
-  `C9` persistence code does.**
+- **Implemented** — code exists. ~~Only the migration mechanism exists; no
+  `C9` persistence code does.~~ **The migration mechanism, the authored
+  migration, the timestamp parser, the category configuration and the first
+  persistence slice exist** (issues #157, #171, #173, #175, #177).
 - **Deferred / still open** — recorded as unanswered, by ruling or by an open
   question.
 
@@ -198,10 +216,16 @@ refusal applies only to raw values handed directly to it. The database clock rem
 scope as an application time source (`ADR-019`, `ADR-022`): the **application supplies every
 instant**.
 
-**`DateStyle = ISO` on the connection remains a `C9` obligation**, recorded and not
-discharged here: under `DateStyle = SQL` PostgreSQL emits a timezone abbreviation with no
-numeric offset, which the parser refuses loudly. **No schema, migration, DDL, pool,
-credential, provisioning or persistence exists or is authorized here.**
+~~**`DateStyle = ISO` on the connection remains a `C9` obligation**, recorded and not
+discharged here~~ — **that obligation is discharged** (issue #177): `connection.ts` sends
+`-c datestyle=ISO` in the **startup packet** of every pooled connection, so the setting is in
+force **before the first statement** rather than after a query that could itself be misread.
+The reason it mattered is unchanged: under `DateStyle = SQL` PostgreSQL emits a timezone
+abbreviation with no numeric offset, which the parser refuses loudly. **`pg-pool`'s `connect`
+event was rejected as the mechanism** — it is emitted synchronously and the client is handed
+to the acquirer without the handler being awaited, which was measured, so it is a race and not
+a guarantee. **No credential, provisioning or production execution exists or is authorized
+here.**
 
 **`DDM-3` has left this list — it is decided.** The rest remain **open**, and none may be
 resolved by code placed here:
@@ -302,7 +326,8 @@ and only the first two exist:
 |---|---|
 | **Migration infrastructure** — the runner, provider and entry point | **Exists** (issue #157) |
 | **An authored schema migration** — the DDL itself | **Exists** (issue #171) |
-| **The `ADR-022` timestamp boundary** — `parseTimestamptz` and its `pg` type-override value | **Exists** (issue #173). It is a **mechanism, not a wiring**: no pool passes it, so a future `C9` connection must **opt in explicitly** |
+| **The `ADR-022` timestamp boundary** — `parseTimestamptz` and its `pg` type-override value | **Exists** (issue #173), and is now **wired** (issue #177): ~~a mechanism, not a wiring; no pool passes it~~ — `connection.ts` passes it explicitly to every application pool it builds, per pool. `pg`'s **global** parser is still never touched, so the migration runner and any other consumer keep the driver's default `Date` behaviour |
+| **The first `C9` persistence slice** — connection boundary, schema typing, listing mapping, one insert and one read by identifier | **Exists** (issue #177). It is **not an application wiring**: nothing outside the tests constructs it, and it reads no environment variable |
 | **Local/test execution** — the migration applied against a disposable server | **Exists, in tests only.** The attacking tests in `first-schema-migration.test.ts` start a real PostgreSQL server from the `embedded-postgres` development dependency, on an ephemeral port with a disposable data directory. That server is a **test-harness detail with no production-version authority** |
 | **Production provisioning and execution** | **Does not exist.** Nothing is provisioned, **no PostgreSQL version is selected**, no credential exists, and no migration has run against any shared, hosted, staging or production database. CI runs the test suite; it does **not** execute migrations |
 
@@ -317,10 +342,14 @@ authority.** Each of the above was recorded precisely so that the work it
 enables can be scoped, reviewed and authorized as its own unit — which is how
 the first schema migration arrived: `ADR-017` through `ADR-022` decided its
 content, and **issue #171 authorized the unit that wrote it** — and again for the
-`ADR-022` timestamp parser, which **issue #173** authorized. **Persistence
+`ADR-022` timestamp parser, which **issue #173** authorized. ~~Persistence
 code, any connection or pool configuration, the `ADR-021` category
 configuration module and every later migration each still require a separately
-authorized issue of their own.**
+authorized issue of their own.~~ **The category configuration arrived with
+issue #175, and the first persistence slice with issue #177** — each as its own
+authorized unit, which is the point. **Every remaining persistence operation,
+the application's own composition of this boundary, and every later migration
+still require a separately authorized issue of their own.**
 
 ## The two standing obligations
 
@@ -333,4 +362,7 @@ Two obligations bind whatever eventually lands here:
   datastore credential and no public route reaches the store
   (`NFR-SEC-08`; `docs/07` `R-10`).
 
-**Still no `C9`, and still no schema.**
+~~**Still no `C9`, and still no schema.**~~ **There is now a schema (issue #171) and a first
+`C9` slice (issue #177).** There is still **no application wiring, no public read path, no
+revision or moderation persistence, no provisioning and no production execution** — and
+completing a slice is not the same as the product persisting anything.
