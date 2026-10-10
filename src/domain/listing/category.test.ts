@@ -15,12 +15,14 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import * as categoryModule from "./category";
+import type { ListingContent } from "./listing";
 import {
   CATEGORIES,
   CATEGORY_KEYS,
   categoryFor,
   isCategoryKey,
   type Category,
+  type CategoryKey,
 } from "./category";
 
 const MODULE_SOURCE = readFileSync(
@@ -360,5 +362,60 @@ describe("the configuration is frozen at runtime (item 10)", () => {
     expect([...surface].sort()).toEqual(
       ["CATEGORIES", "CATEGORY_KEYS", "categoryFor", "isCategoryKey"].sort(),
     );
+  });
+});
+
+/**
+ * **Compile-time guards on the narrowing itself** (issue #175 ruling item 1).
+ *
+ * The runtime tests above cannot catch a regression that widens `CategoryKey` or
+ * `ListingContent.category` back to `string`: every attacking case in this repository reaches
+ * the validators through a deliberate cast, and a cast still compiles against `string`. So the
+ * narrowing would silently disappear with the whole suite green. These assertions are
+ * **checked by `tsc`**, so `npm run typecheck` is what fails if it ever does.
+ *
+ * They deliberately **name no approved key** — a third executable key list is exactly what
+ * this unit removed. They state only the properties that matter: the type is not `string`, an
+ * arbitrary string is not assignable to it, an unapproved literal is not a member, and the
+ * listing field is that same type.
+ */
+type Equals<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+
+/** Compiles only when `T` is exactly `true`. */
+type Assert<T extends true> = T;
+
+type _CategoryKeyIsNotString = Assert<Equals<Equals<CategoryKey, string>, false>>;
+type _ArbitraryStringIsNotAssignable = Assert<
+  Equals<string extends CategoryKey ? true : false, false>
+>;
+type _UnapprovedLiteralIsNotAMember = Assert<
+  Equals<"food-and-drink" extends CategoryKey ? true : false, false>
+>;
+type _ApprovedLiteralIsAMember = Assert<
+  Equals<"food-drink" extends CategoryKey ? true : false, true>
+>;
+type _ListingFieldIsTheGovernedKey = Assert<
+  Equals<ListingContent["category"], CategoryKey>
+>;
+type _ConfigurationRecordCarriesTheGovernedKey = Assert<Equals<Category["key"], CategoryKey>>;
+
+describe("the narrowing is guarded at compile time (issue #175 ruling item 1)", () => {
+  it("is asserted by tsc, not by this assertion", () => {
+    // The guards are the `type` declarations above: they are compile-time obligations, and
+    // `npm run typecheck` is the test that runs them. This case exists so the suite records
+    // that the obligation is present rather than leaving it invisible in a type alias.
+    // Each slot's type is one of the obligations above, so a widened `CategoryKey` turns that
+    // alias into `false` and the literal `true` below stops compiling.
+    const guards: [
+      _CategoryKeyIsNotString,
+      _ArbitraryStringIsNotAssignable,
+      _UnapprovedLiteralIsNotAMember,
+      _ApprovedLiteralIsAMember,
+      _ListingFieldIsTheGovernedKey,
+      _ConfigurationRecordCarriesTheGovernedKey,
+    ] = [true, true, true, true, true, true];
+
+    expect(guards).toEqual([true, true, true, true, true, true]);
   });
 });

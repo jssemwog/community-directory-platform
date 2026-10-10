@@ -417,7 +417,10 @@ describe("pending-revision invisibility (DI-10)", () => {
     for (const proposed of [
       "NEW NAME",
       "PROPOSED DESCRIPTION",
-      "retail",
+      // The proposal's own category key, as the fixture above now states it (issue #175).
+      // It read "retail" while the proposal said "retail-shopping", which passed only
+      // because one is a substring of the other.
+      "retail-shopping",
       "Cobh",
       "+353 21 999 9999",
     ]) {
