@@ -594,6 +594,49 @@ describe("the store refuses what the application refuses", () => {
   );
 });
 
+describe("a lost idle connection does not crash the process", () => {
+  it(
+    "survives having its backend terminated by the server",
+    async () => {
+      // This is the failure CI found: an idle client killed by the server (`57P01`,
+      // `admin_shutdown`) raises the pool's `error` event, and an unhandled `EventEmitter`
+      // `error` **throws** — which would take down `ADR-005`'s long-running process and, as
+      // the build log showed, print the client object including its password.
+      //
+      // The proof is the absence of an unhandled error: Vitest fails a file whose run emits
+      // one, so this test passing *is* the assertion. The queries below confirm the boundary
+      // is still usable afterwards.
+      const victim = createListingPersistence({
+        pool: { connectionString: connectionStringFor(VERIFIED_DATABASE), max: 1 },
+      });
+
+      try {
+        const pid = await sql<{
+          pid: number;
+        }>`select pg_backend_pid() as pid`.execute(victim.db);
+        const backend = pid.rows[0]?.pid;
+
+        expect(backend).toBeTypeOf("number");
+
+        // Terminated from a different connection, so the victim learns about it while idle.
+        await sql`select pg_terminate_backend(${backend})`.execute(persistence.db);
+
+        // Give the victim's socket time to receive the FATAL and emit on the pool.
+        await sleep(250);
+
+        // The pool recovers by opening a replacement connection, which is the behaviour that
+        // makes a no-op handler the right answer rather than a swallowed defect.
+        const after = await sql<{ one: number }>`select 1 as one`.execute(victim.db);
+
+        expect(after.rows[0]?.one).toBe(1);
+      } finally {
+        await victim.shutdown();
+      }
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+});
+
 describe("a storage failure leaks nothing (issue #177 §11)", () => {
   it(
     "keeps the failing row's values and the credential out of its enumerable surface",

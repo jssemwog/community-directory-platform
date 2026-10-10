@@ -296,6 +296,7 @@ function assertOptionsAreOurs(pool: ListingPoolConfiguration): void {
 interface PgModule {
   readonly Pool: new (config: Record<string, unknown>) => PostgresPool & {
     end(): Promise<void>;
+    on(event: "error", listener: (error: Error) => void): unknown;
   };
 }
 
@@ -345,6 +346,22 @@ export function createListingPersistence(
     // Delivered in the startup packet, so it is in force before the first statement.
     options,
   });
+
+  // An **idle** client can fail without any query waiting on it: the server was shut down
+  // (`57P01`), the connection dropped, a pooler closed it. `pg` reports that on the pool's
+  // `error` event, and an `EventEmitter` `error` with no listener **throws** — which in
+  // `ADR-005`'s long-running single-instance process means the service dies because a database
+  // connection went idle-stale. Worse, the thrown value is the client object, whose fields
+  // include the **password**; this repository's own CI printed one into a build log before this
+  // handler existed.
+  //
+  // So the event is handled, and handled by doing nothing. There is nothing for the
+  // application to do about a lost idle connection — the pool discards the client and opens
+  // another on demand — and **`ADR-016` selects no observability**, so inventing a log line or
+  // a telemetry hook here would be deciding something nobody has ruled on. Query and
+  // connection failures are unaffected: they reject their own promises and reach the caller as
+  // a `StorageFailure` (`listing-repository.ts`).
+  pool.on("error", () => {});
 
   const db = new Kysely<ListingDatabase>({ dialect: new PostgresDialect({ pool }) });
 
