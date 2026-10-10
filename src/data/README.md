@@ -185,9 +185,18 @@ credential, no registration.
 **Two things it deliberately does not do.** It **rejects BC-era text and offsets carrying
 seconds** — an intentional, disclosed narrowing of PostgreSQL's full textual range, ruled
 on issue #173 and acceptable because all four governed data are **system-set operational
-instants**. And it **refuses sub-millisecond precision rather than rounding**, so a later
-query selecting a bare `timestamptz` expression must cast it — `now()::timestamptz(3)` —
-keeping the truncation visible in the SQL.
+instants**. And it **refuses sub-millisecond precision rather than rounding it**, so a later
+query selecting a bare `timestamptz` expression — which carries microseconds — must
+**reduce the precision explicitly in SQL**, for example by casting to `timestamptz(3)`, so
+that the reduction is visible in the statement rather than invisible in the adapter.
+
+**PostgreSQL's own cast rounds, it does not truncate** (`.1235` becomes `.124`, and `.9999`
+rolls to the next second), and the governed columns round on storage for the same reason.
+**No rounding-versus-truncation policy is selected here** — none is governed — and the
+parser makes **no claim that the cast rejects or truncates** excess precision; its strict
+refusal applies only to raw values handed directly to it. The database clock remains out of
+scope as an application time source (`ADR-019`, `ADR-022`): the **application supplies every
+instant**.
 
 **`DateStyle = ISO` on the connection remains a `C9` obligation**, recorded and not
 discharged here: under `DateStyle = SQL` PostgreSQL emits a timezone abbreviation with no

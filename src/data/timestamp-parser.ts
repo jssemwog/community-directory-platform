@@ -54,12 +54,27 @@
  * ## A consequence worth knowing before writing a query
  *
  * The four governed columns are `timestamptz(3)`, so their values always arrive at
- * millisecond resolution. **A bare `timestamptz` expression does not** — `now()` renders as
- * `2026-10-10 11:52:52.613844-04`, with microseconds, and this parser **refuses it** as
- * `SUB_MILLISECOND_PRECISION` rather than rounding, exactly as `ADR-022` decision 15
- * requires. That is the intended behaviour, not a limitation to work around: a later `C9`
- * query that selects such an expression must cast it — `now()::timestamptz(3)` — so the
- * truncation is **deliberate and visible in the SQL** rather than silent in the adapter.
+ * millisecond resolution. **A bare `timestamptz` expression does not** — it carries
+ * microseconds, as in `2026-10-10 11:52:52.613844-04`, and this parser **refuses it** as
+ * `SUB_MILLISECOND_PRECISION`, exactly as `ADR-022` decision 15 requires. That is the
+ * intended behaviour, not a limitation to work around.
+ *
+ * **The consequence for a later `C9` query is simply that SQL must reduce the precision
+ * explicitly** — for example by casting the expression to `timestamptz(3)` — so that the
+ * reduction happens **visibly, in the statement**, rather than invisibly in this adapter.
+ *
+ * **PostgreSQL's cast rounds; it does not truncate**, and nothing here should be read as
+ * saying otherwise: verified against a real server, `(3)` turns `.1234` into `.123`,
+ * `.1235` into `.124` and `.9999` into the next whole second. **This module selects no
+ * rounding-versus-truncation policy** — none is governed — and it makes **no claim that the
+ * cast rejects or truncates** excess precision. The cast reduces precision on the
+ * database side; the strict refusal below applies only to raw values this parser is
+ * handed directly.
+ *
+ * **`now()` is used above purely as an illustrative expression.** It is **not** authorized
+ * as a persistence default or as an authoritative application time source: `ADR-019` and
+ * `ADR-022` put the database clock out of scope and make the **application** the supplier
+ * of every instant, and the first migration deliberately declares no clock default.
  *
  * ## A `C9` obligation this module cannot discharge
  *
@@ -282,6 +297,16 @@ export function parseTimestamptz(value: string | null): number | null {
     (offsetSignText === "-" ? -1 : 1) *
     (offsetHour * SECONDS_PER_HOUR + offsetMinute * SECONDS_PER_MINUTE);
 
+  // Every intermediate above is an exact integer, and the one multiplication that could
+  // exceed 2^53 cannot smuggle an out-of-range value past the check below.
+  //
+  // `localSeconds` is bounded by the largest year the grammar admits: even a six-digit
+  // year keeps it near 1.3e13, far inside the exactly-representable range, and the offset
+  // subtraction cannot change that. Only the final `* 1000` can cross 2^53 — and when the
+  // true product does, the nearest double to it is itself at or above 2^53, which
+  // `Number.isSafeInteger` rejects (`MAX_SAFE_INTEGER` is 2^53 - 1). Rounding can therefore
+  // only push such a value further outside the admissible range, never into it, so no
+  // `BigInt` is needed to make the bound sound.
   const epochMilliseconds =
     (localSeconds - offsetSeconds) * MILLISECONDS_PER_SECOND + milliseconds;
 
