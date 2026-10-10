@@ -215,11 +215,19 @@ resolved by code placed here:
   approved values enter the database as the **constraint's own predicate**, not as data.
   **Labels, inclusion definitions, boundary notes and the approved alphabetical display
   order remain governed documentation and future repository configuration**, never database
-  rows, and the **authoritative 16-key mapping lives in `ADR-021` alone**. **Deciding is not
-  implementing:** **no category configuration module, no equality test, no schema, no
-  migration, no reference data and no seed data exists or is authorized here**, and
-  **`DI-9`/`VR-2`/`AV-7` remain unimplemented**. The detail below records the product model
-  the decision rests on.
+  rows, and the **authoritative 16-key mapping lives in `ADR-021` alone**. ~~**Deciding is not
+  implementing:** no category configuration module, no equality test, no schema, no
+  migration, no reference data and no seed data exists or is authorized here, and
+  `DI-9`/`VR-2`/`AV-7` remain unimplemented.~~ **The configuration module, the equality test
+  and the migration now exist** (issues #171 and #175). The **configuration**
+  (`src/domain/listing/category.ts`) is the single application-owned executable vocabulary;
+  the **immutable migration** keeps its own independent historical `CHECK` predicates; and
+  `category-constraint-equality.test.ts` proves the two enforce **exactly** the same key set,
+  **in both directions**, by reading `pg_get_constraintdef()` from a real server — a missing
+  **or extra** key fails. The migration's own key constant stays **unexported**: it was not
+  widened to make a test convenient (`ADR-018`). **Still absent:** reference data, seed data,
+  row mapping, repositories, provisioning, credentials and production execution. The detail
+  below records the product model the decision rests on.
 - *The product model `ADR-021` rests on, recorded when `DDM-3` was still open* — ~~`OQ-5`.~~ **The product model is decided**
   (`OQ-5`, Product Owner ruling 2026-10-07, issue #163): a listing carries **exactly
   one required** category from a **predefined, finite, platform-owned** vocabulary that

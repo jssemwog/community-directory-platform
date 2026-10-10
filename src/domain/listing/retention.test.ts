@@ -26,7 +26,7 @@ import { LISTING_STATUSES } from "./status";
 
 const content: ListingContent = {
   name: "Harbour Bakery",
-  category: "food-and-drink",
+  category: "food-drink",
   description: "A small bakery.",
   locality: "Kinsale",
   country: "IE",
@@ -196,7 +196,7 @@ describe("one uniform rule covers both record types (OQ-13)", () => {
   it("does not vary the period by category, content or listing identity", () => {
     const other = rejectedListing({
       id: listingIdOf("listing-2"),
-      content: { ...content, category: "retail", name: "Quay Books" },
+      content: { ...content, category: "retail-shopping", name: "Quay Books" },
     });
 
     expect(listingIsPurgeEligible(other, boundary)).toEqual(

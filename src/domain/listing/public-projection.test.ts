@@ -14,6 +14,7 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { CATEGORIES, CATEGORY_KEYS } from "./category";
 import type { Listing, ListingContent } from "./listing";
 import { instantOf, type Instant } from "./instant";
 import { listingIdOf } from "./listing-id";
@@ -31,7 +32,7 @@ const UNAVAILABLE = { code: "LISTING_NOT_PUBLICLY_AVAILABLE" } as const;
 /** Every governed attribute supplied, and every designation set to public. */
 const fullyPublicContent: ListingContent = {
   name: "Harbour Bakery",
-  category: "food-and-drink",
+  category: "food-drink",
   description: "A small bakery.",
   locality: "Kinsale",
   country: "IE",
@@ -352,7 +353,7 @@ describe("field-level exposure (OQ-7, S-2)", () => {
     const result = projectListingPublicly(
       approvedListing({
         name: "Harbour Bakery",
-        category: "food-and-drink",
+        category: "food-drink",
         description: "A small bakery.",
         locality: "Kinsale",
         country: "IE",
@@ -370,6 +371,24 @@ describe("field-level exposure (OQ-7, S-2)", () => {
       "name",
     ]);
   });
+
+  it("carries the category key through unchanged, and maps it to no label (issue #175)", () => {
+    // Item 15 — the projection is a projection. `ADR-021` makes the **key** the stored and
+    // transported identity; rendering a label is a presentation concern this layer does not
+    // own, and resolving one here would make the public contract depend on the display
+    // vocabulary. Every approved key must survive the projection byte-for-byte.
+    for (const category of CATEGORY_KEYS) {
+      const result = projectListingPublicly(
+        approvedListing({ ...fullyPublicContent, category }),
+      );
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      expect(result.value.category).toBe(category);
+      expect(CATEGORIES.map((entry) => entry.label)).not.toContain(result.value.category);
+    }
+  });
 });
 
 describe("pending-revision invisibility (DI-10)", () => {
@@ -379,7 +398,7 @@ describe("pending-revision invisibility (DI-10)", () => {
       state: "pending",
       proposedContent: {
         name: "Harbour Bakery — NEW NAME",
-        category: "retail",
+        category: "retail-shopping",
         description: "PROPOSED DESCRIPTION",
         locality: "Cobh",
         country: "IE",

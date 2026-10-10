@@ -36,6 +36,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
+import { CATEGORY_KEYS } from "../domain/listing/category";
 import {
   CONNECTION_STRING_VARIABLE,
   createMigrationProvider,
@@ -84,25 +85,18 @@ const FOREIGN_KEY_VIOLATION = "23503";
 const UNIQUE_VIOLATION = "23505";
 const CHECK_VIOLATION = "23514";
 
-/** The 16 approved category machine keys (`ADR-021`). */
-const APPROVED_CATEGORY_KEYS = [
-  "arts-culture-entertainment",
-  "automotive-transport",
-  "beauty-personal-care",
-  "community-nonprofit",
-  "education-childcare",
-  "financial-insurance-services",
-  "fitness-recreation",
-  "food-drink",
-  "health-medical",
-  "home-trade-services",
-  "industrial-wholesale",
-  "pets-animal-services",
-  "professional-services",
-  "retail-shopping",
-  "technology-digital-services",
-  "travel-accommodation",
-] as const;
+/**
+ * The approved category machine keys — **imported, never restated** (issue #175).
+ *
+ * This file previously carried its own hardcoded list, a **third** executable copy of the
+ * vocabulary alongside the configuration and the migration's own private constant. A list
+ * maintained in a test is a list that can disagree with the application silently, so it is
+ * gone: the governed configuration (`src/domain/listing/category.ts`) is now the single
+ * application-owned executable vocabulary, and the migration keeps its independent
+ * historical `CHECK` predicate. Those two are compared directly in
+ * `category-constraint-equality.test.ts`.
+ */
+const APPROVED_CATEGORY_KEYS = CATEGORY_KEYS;
 
 const SERVER_USER = "postgres";
 const SERVER_PASSWORD = "verification-only";

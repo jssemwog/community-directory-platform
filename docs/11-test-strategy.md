@@ -443,7 +443,7 @@ this one.
 | `DI-6` | `submitted at` is **written once and never changes**. `last updated at` changes on **every content *or status*** change. |
 | `DI-7` | Stored data reflects the last successful action; no silent loss. |
 | `DI-8` | A record's identity is **stable** across every content edit and status change. |
-| `DI-9` | A category value always references a member of the predefined set — never free text. The set is the **16 approved categories** (`docs/05`). **Specifiable but not satisfied** — unimplemented. |
+| `DI-9` | A category value always references a member of the predefined set — never free text. The set is the **16 approved categories** (`docs/05`). ~~**Specifiable but not satisfied** — unimplemented.~~ **Satisfied and proven** (issue #175): `src/domain/listing/category.test.ts` attacks the configuration itself — including against `docs/05` byte-for-byte — `validation.test.ts` attacks membership at both validation stages, `revision.test.ts` attacks it through the approval path, and `src/data/category-constraint-equality.test.ts` proves the configuration and both database `CHECK` constraints enforce **exactly** the same set, in both directions, against a real PostgreSQL server. |
 
 **`DI-6` hides a test almost everyone forgets.** `NFR-DATA-05` says `last updated at`
 changes when content **or status** changes. Therefore **approving a listing must bump the

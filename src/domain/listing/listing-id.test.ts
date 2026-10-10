@@ -11,7 +11,7 @@ import { transitionListingStatus } from "./status";
 
 const content: ListingContent = {
   name: "Harbour Bakery",
-  category: "food-and-drink",
+  category: "food-drink",
   description: "A small bakery.",
   locality: "Kinsale",
   country: "IE",
