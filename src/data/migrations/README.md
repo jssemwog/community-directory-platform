@@ -18,9 +18,12 @@ decisions and creates no new policy.**
 **What still does not exist:** **no database is provisioned**, **no PostgreSQL
 version is selected**, **no migration has been executed against any shared,
 hosted, staging or production database**, and **`C9` persistence is not
-implemented** — no repository, no query module, and **no `pg` timestamp parser**
-(`ADR-022` requires one, explicitly and tested, before persistence
-implementation is complete). **Merging the migration is not deploying it.**
+implemented** — no repository and no query module. ~~and **no `pg` timestamp
+parser** (`ADR-022` requires one, explicitly and tested, before persistence
+implementation is complete)~~ — **the `ADR-022` timestamp parser now exists**
+(`../timestamp-parser.ts`, issue #173), though **no pool passes it yet**, since
+a future `C9` connection must opt in explicitly. **Merging the migration is not
+deploying it.**
 
 ## Adding a migration is separate, later, authorized work
 
