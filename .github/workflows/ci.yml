@@ -40,5 +40,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Authorized by the issue #171 ruling as exactly one step, placed after `npm ci`
+      # and before the build. It runs the repository's existing Vitest suite, which now
+      # includes the first schema migration's attacking tests. Those start a real
+      # PostgreSQL server from the `embedded-postgres` development dependency, so this
+      # needs no service container, no Docker and no credential — and it executes no
+      # migration against any shared, hosted, staging or production database.
+      #
+      # This step selects nothing beyond itself: `DG-4` testing depth remains
+      # `Unresolved`, and dependency caching stays deliberately omitted (issue #97,
+      # deferred decision 2).
+      - name: Test
+        run: npm run test
+
       - name: Build
         run: npm run build
