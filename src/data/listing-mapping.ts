@@ -81,15 +81,31 @@ export type ListingHydrationFailure =
 /**
  * A `timestamptz` carrying exactly this epoch-millisecond instant.
  *
- * `to_timestamp(0)` is the epoch as `timestamptz`; an `interval` stores whole microseconds as a
- * 64-bit integer, so `bigint * interval '1 millisecond'` is **exact** — no floating-point second
- * count, and therefore no rounding to argue about. Negative values (pre-epoch instants, which
- * `ADR-022` admits) work identically.
+ * `to_timestamp(0)` is the epoch as `timestamptz`, and an `interval` holds whole microseconds in a
+ * 64-bit integer, so adding one is exact. **Building that interval is the part that needs care.**
  *
- * The millisecond count is a **bound parameter**, never interpolated text.
+ * The obvious `bigint * interval '1 millisecond'` is **not** integer arithmetic: PostgreSQL
+ * declares only `interval * double precision` (checked in `pg_operator` — there is no `bigint`
+ * overload), so the count is silently cast to a double and the product is computed in floating
+ * point. Above 2^53 microseconds — roughly year 2255 — that product is no longer exactly
+ * representable, and the error can reach about a millisecond at the top of the range `instantOf`
+ * admits. A sweep of 187 magnitudes across the whole governed range found no value that actually
+ * stored incorrectly, because `timestamptz(3)` rounds to the millisecond and the error stayed
+ * under half of one; but "it happens to round back" is not the same as exact, and this is a
+ * boundary whose whole purpose is exactness.
+ *
+ * So the interval is built by **parsing an integer**: PostgreSQL reads `'<n> milliseconds'`
+ * straight into its 64-bit microsecond field, with no float operator involved at any point. Every
+ * safe-integer millisecond count fits (9.007e18 µs against an int64 limit of 9.22e18), so the
+ * conversion is exact by construction rather than by luck, and a value outside `timestamptz`'s
+ * own range fails loudly with `22008` instead of being quietly rounded.
+ *
+ * The millisecond count is a **bound parameter**; only the cast and the unit are SQL text, so
+ * nothing is interpolated. Negative values (pre-epoch instants, which `ADR-022` admits) parse
+ * identically.
  */
 function timestamptzFromEpochMilliseconds(epochMilliseconds: number): Expression<number> {
-  return sql<number>`to_timestamp(0) + (${epochMilliseconds}::bigint * interval '1 millisecond')`;
+  return sql<number>`to_timestamp(0) + ((${epochMilliseconds}::bigint)::text || ' milliseconds')::interval`;
 }
 
 /** The epoch-millisecond carrier of an `Instant`, read through its own accessor shape. */

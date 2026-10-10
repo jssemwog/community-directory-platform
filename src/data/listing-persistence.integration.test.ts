@@ -50,6 +50,7 @@ import type { ListingDatabase } from "./listing-table";
 interface PgModule {
   readonly Pool: new (config: { connectionString: string; max: number }) => PostgresPool & {
     end(): Promise<void>;
+    on(event: "error", listener: (error: Error) => void): unknown;
   };
   readonly types: { getTypeParser(oid: number, format: string): unknown };
 }
@@ -121,6 +122,12 @@ function connectionStringFor(database: string): string {
 /** Apply the real migration to one database, through the real `Migrator` and provider. */
 async function migrate(database: string): Promise<void> {
   const pool = new pg.Pool({ connectionString: connectionStringFor(database), max: 1 });
+
+  // The same reason `connection.ts` handles this: an idle client killed by the server raises
+  // the pool's `error` event, and an unhandled `EventEmitter` `error` throws. This pool is the
+  // migration runner's, built here rather than by the boundary under test, so it needs its own.
+  pool.on("error", () => {});
+
   const db = new Kysely<unknown>({ dialect: new PostgresDialect({ pool }) });
 
   try {
@@ -229,6 +236,29 @@ afterAll(async () => {
   const removed = await removeWithRetry(dataRoot);
   expect(removed, `the disposable cluster at ${dataRoot} was not removed`).toBe(true);
 }, CLUSTER_TIMEOUT_MS);
+
+/**
+ * Run `body` with the session time zone pinned, restoring whatever it was.
+ *
+ * Extreme dates need this. PostgreSQL renders a `timestamptz` in the **session** zone, and a
+ * geographic zone's historical offset carries **seconds** before standard time was adopted
+ * (`-04:56:02` for New York) — which the governed parser refuses by ruling (issue #173). Without
+ * pinning, a test over distant dates would pass or fail according to the host's time zone.
+ */
+async function withSessionTimeZone(zone: string, body: () => Promise<void>): Promise<void> {
+  const before = await sql<{
+    zone: string;
+  }>`select current_setting('timezone') as zone`.execute(persistence.db);
+  const previous = before.rows[0]?.zone ?? "UTC";
+
+  await sql.raw(`set time zone '${zone}'`).execute(persistence.db);
+
+  try {
+    await body();
+  } finally {
+    await sql.raw(`set time zone '${previous}'`).execute(persistence.db);
+  }
+}
 
 describe("the connection boundary, against a real server", () => {
   it(
@@ -377,6 +407,7 @@ describe("persisting a submitted listing (OP-3)", () => {
   it(
     "preserves the exact millisecond of every governed instant",
     async () => {
+      await withSessionTimeZone("UTC", async () => {
       // Values chosen to catch truncation, rounding and second-level storage alike.
       for (const epochMilliseconds of [
         1_767_323_045_123,
@@ -385,6 +416,15 @@ describe("persisting a submitted listing (OP-3)", () => {
         1_767_323_045_000,
         -2_208_988_800_123,
         0,
+        // Above 2^53 microseconds, where `interval * double precision` — the only such
+        // operator PostgreSQL declares — stops being exactly representable. These are the
+        // values the first version of this suite never tried, and they are the reason the
+        // interval is now parsed from an integer instead of multiplied.
+        9_007_199_254_740,
+        9_007_199_254_741,
+        99_999_999_999_999,
+        253_402_300_799_999,
+        -62_135_596_800_000,
       ]) {
         const listing = submission({
           timestamps: {
@@ -403,6 +443,7 @@ describe("persisting a submitted listing (OP-3)", () => {
         expect(found.value.timestamps.submittedAt).toEqual(instant(epochMilliseconds));
         expect(found.value.timestamps.lastUpdatedAt).toEqual(instant(epochMilliseconds + 1));
       }
+      });
     },
     CLUSTER_TIMEOUT_MS,
   );
@@ -537,6 +578,170 @@ describe("persisting a submitted listing (OP-3)", () => {
   );
 });
 
+describe("the stored instant is exact, by PostgreSQL's own accounting", () => {
+  it(
+    "agrees with extract(epoch) to the millisecond, independently of the parser",
+    async () => {
+      // A second oracle on purpose: the round-trip test above reads values back through the
+      // governed parser, so if the write and the read shared a rounding mistake they could
+      // agree with each other and both be wrong. `extract(epoch …)` is PostgreSQL's own exact
+      // numeric accounting of what it stored.
+      // Includes a BC-era instant: the **write** must be exact even where the governed parser
+      // will later refuse to read it back, which is why this oracle is PostgreSQL's own.
+      for (const epochMilliseconds of [
+        0, 1, -1, 1_767_323_045_123, -2_208_988_800_123,
+        9_007_199_254_741, 99_999_999_999_999, -99_999_999_999_999,
+        253_402_300_799_999, -62_135_596_800_000,
+      ]) {
+        const listing = submission({
+          timestamps: {
+            submittedAt: instant(epochMilliseconds),
+            lastUpdatedAt: instant(epochMilliseconds),
+          },
+        });
+
+        expect(
+          (await insertSubmittedListing(persistence.db, listing)).ok,
+          String(epochMilliseconds),
+        ).toBe(true);
+
+        const stored = await sql<{
+          exact: string;
+        }>`select (extract(epoch from submitted_at) * 1000)::numeric::text as exact
+             from listing
+            where id = ${(listing.id as unknown as { supplied: string }).supplied}::uuid`.execute(
+          persistence.db,
+        );
+
+        // Rendered as numeric text, so a fractional microsecond remainder would show rather
+        // than being hidden by an integer cast.
+        expect(Number(stored.rows[0]?.exact), String(epochMilliseconds)).toBe(epochMilliseconds);
+      }
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "is unaffected by the session time zone",
+    async () => {
+      const epochMilliseconds = 1_767_323_045_123;
+      const listing = submission({
+        timestamps: {
+          submittedAt: instant(epochMilliseconds),
+          lastUpdatedAt: instant(epochMilliseconds),
+        },
+      });
+
+      expect((await insertSubmittedListing(persistence.db, listing)).ok).toBe(true);
+
+      const readings: number[] = [];
+
+      for (const zone of ["UTC", "Asia/Kolkata", "America/Los_Angeles"]) {
+        await withSessionTimeZone(zone, async () => {
+          const found = await findListingById(persistence.db, listing.id);
+
+          expect(found.ok, zone).toBe(true);
+          if (!found.ok) return;
+
+          readings.push(
+            (found.value.timestamps.submittedAt as unknown as { epochMilliseconds: number })
+              .epochMilliseconds,
+          );
+        });
+      }
+
+      expect(readings).toEqual([epochMilliseconds, epochMilliseconds, epochMilliseconds]);
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "refuses to read back a BC-era instant, and says why",
+    async () => {
+      // `instantOf` admits any safe integer, so an instant before 1 AD is storable — and
+      // issue #173 ruled that BC-era text must be **refused loudly**, never silently misread.
+      // The write is exact (the oracle above proves it); only the read refuses.
+      const listing = submission({
+        timestamps: {
+          submittedAt: instant(-99_999_999_999_999),
+          lastUpdatedAt: instant(-99_999_999_999_999),
+        },
+      });
+
+      expect((await insertSubmittedListing(persistence.db, listing)).ok).toBe(true);
+
+      await withSessionTimeZone("UTC", async () => {
+        const found = await findListingById(persistence.db, listing.id);
+
+        expect(found.ok).toBe(false);
+        if (found.ok) return;
+
+        // Its own outcome: the database is healthy and the row is present, so this is neither
+        // an infrastructure failure nor "not found".
+        expect(found.error).toEqual({ code: "STORED_INSTANT_UNREADABLE", reason: "BC_ERA" });
+      });
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "refuses a stored instant whose rendered offset carries seconds, and says why",
+    async () => {
+      // Under a geographic zone, a pre-standard-time date renders with an offset like
+      // `-04:56:02`, which issue #173 also ruled must be refused rather than approximated.
+      // 1800-01-01 UTC: safely AD, so the BC refusal cannot pre-empt this one — a nearby
+      // value was tried first and rendered as 1 BC once shifted west, which is why the two
+      // refusals are tested on deliberately separated dates.
+      const listing = submission({
+        timestamps: {
+          submittedAt: instant(-5_364_662_400_000),
+          lastUpdatedAt: instant(-5_364_662_400_000),
+        },
+      });
+
+      expect((await insertSubmittedListing(persistence.db, listing)).ok).toBe(true);
+
+      await withSessionTimeZone("America/New_York", async () => {
+        const found = await findListingById(persistence.db, listing.id);
+
+        expect(found.ok).toBe(false);
+        if (found.ok) return;
+
+        expect(found.error).toEqual({
+          code: "STORED_INSTANT_UNREADABLE",
+          reason: "OFFSET_HAS_SECONDS",
+        });
+      });
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "refuses an instant outside PostgreSQL's own range, loudly",
+    async () => {
+      // `instantOf` admits any safe integer, which reaches past `timestamptz`'s lower bound.
+      // That must fail explicitly rather than be rounded into range.
+      const listing = submission({
+        timestamps: {
+          submittedAt: instant(-9_007_199_254_740_991),
+          lastUpdatedAt: instant(-9_007_199_254_740_991),
+        },
+      });
+
+      const result = await insertSubmittedListing(persistence.db, listing);
+
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+
+      expect(result.error.code).toBe("STORAGE_FAILURE");
+      if (result.error.code !== "STORAGE_FAILURE") return;
+
+      expect(result.error.sqlState).toBe("22008");
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+});
+
 describe("the store refuses what the application refuses", () => {
   it(
     "reports a duplicate identifier and leaves the stored row untouched",
@@ -563,6 +768,94 @@ describe("the store refuses what the application refuses", () => {
       if (!found.ok) return;
 
       expect(found.value.content.name).toBe("Harbour Bakery");
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "recognises a duplicate only from the identity constraint, not from any unique violation",
+    async () => {
+      const listing = submission();
+
+      expect((await insertSubmittedListing(persistence.db, listing)).ok).toBe(true);
+
+      const duplicate = await insertSubmittedListing(persistence.db, listing);
+
+      expect(duplicate.ok).toBe(false);
+      if (duplicate.ok) return;
+
+      expect(duplicate.error).toEqual({ code: "LISTING_ALREADY_EXISTS" });
+
+      // And the classification is gated on the constraint, not on `23505` alone. A second
+      // unique index on `listing` is a plausible future addition (duplicate detection is an
+      // open question under `VR-S6`/`OQ-12`), and a name collision reported as "this listing
+      // already exists" would be a confidently wrong answer. Proved by adding one here.
+      // Partial, and over a name only this test uses: other tests have already stored several
+      // listings sharing a name, so an unconditional unique index could not be created and the
+      // probe would prove nothing.
+      const probeName = "UNIQUE-INDEX-PROBE-NAME";
+
+      // `create index` is a utility statement and accepts no bind parameters, so the value is
+      // emitted as a SQL literal rather than a placeholder.
+      await sql`
+        create unique index listing_probe_unique_name
+          on listing (name) where name = ${sql.lit(probeName)}
+      `.execute(persistence.db);
+
+      try {
+        const first = submission({ content: { ...submission().content, name: probeName } });
+
+        expect((await insertSubmittedListing(persistence.db, first)).ok).toBe(true);
+
+        const sameName = submission({
+          content: { ...submission().content, name: probeName },
+        });
+        const result = await insertSubmittedListing(persistence.db, sameName);
+
+        expect(result.ok).toBe(false);
+        if (result.ok) return;
+
+        expect(result.error.code).toBe("STORAGE_FAILURE");
+        if (result.error.code !== "STORAGE_FAILURE") return;
+
+        expect(result.error.sqlState).toBe("23505");
+        expect(result.error.constraint).toBe("listing_probe_unique_name");
+      } finally {
+        await sql`drop index listing_probe_unique_name`.execute(persistence.db);
+      }
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "is deterministic when the same identifier is inserted concurrently",
+    async () => {
+      const listing = submission();
+
+      const outcomes = await Promise.all([
+        insertSubmittedListing(persistence.db, listing),
+        insertSubmittedListing(persistence.db, listing),
+        insertSubmittedListing(persistence.db, listing),
+      ]);
+
+      // Exactly one winner, and every loser gets the same explicit answer — no partial write,
+      // no retry, no upsert.
+      expect(outcomes.filter((outcome) => outcome.ok)).toHaveLength(1);
+
+      for (const outcome of outcomes.filter((o) => !o.ok)) {
+        expect(outcome.ok).toBe(false);
+        if (outcome.ok) continue;
+        expect(outcome.error).toEqual({ code: "LISTING_ALREADY_EXISTS" });
+      }
+
+      const stored = await sql<{
+        count: string;
+      }>`select count(*)::text as count from listing
+           where id = ${(listing.id as unknown as { supplied: string }).supplied}::uuid`.execute(
+        persistence.db,
+      );
+
+      expect(stored.rows[0]?.count).toBe("1");
     },
     CLUSTER_TIMEOUT_MS,
   );

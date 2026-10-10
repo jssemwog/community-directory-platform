@@ -42,6 +42,9 @@
  * - **A duplicate identifier is its own outcome**, neither retried nor treated as success. No
  *   UUID-collision retry policy is selected — `ADR-017` `PS-1` and `ADR-019` make a collision a
  *   defect to surface, not a condition to paper over.
+ * - **A refused stored instant is its own outcome.** The governed parser can reject a stored
+ *   value (BC era, an offset carrying seconds — issue #173), and that is a readable-data problem,
+ *   not an infrastructure one.
  * - **Everything unexpected stays unexpected.** A connection failure, a `CHECK` violation, a
  *   not-null violation or any other driver error becomes `STORAGE_FAILURE` — never not found,
  *   and never a domain validation result.
@@ -55,9 +58,31 @@ import { err, ok, type Result } from "../domain/listing/result";
 import { hydrateListing, serializeSubmittedListing } from "./listing-mapping";
 import type { ListingHydrationFailure } from "./listing-mapping";
 import type { ListingDatabase } from "./listing-table";
+import { TimestamptzParseError, type TimestamptzParseFailure } from "./timestamp-parser";
 
 /** PostgreSQL's unique-violation class. Named, because a bare code is a riddle. */
 const UNIQUE_VIOLATION = "23505";
+
+/**
+ * The constraint whose violation means *this identifier is already stored*.
+ *
+ * Classifying on `23505` alone would be right only by accident of the current schema. `listing`
+ * carries exactly one unique constraint today — its primary key — but a later authorized unit
+ * could add another (duplicate detection under `VR-S6`/`OQ-12` is an open question), and a name
+ * collision reported as `LISTING_ALREADY_EXISTS` would be a confidently wrong answer. Requiring
+ * the constraint as well means any other unique violation falls through to `STORAGE_FAILURE`,
+ * where an unrecognised failure belongs.
+ */
+const LISTING_IDENTITY_CONSTRAINT = "listing_pkey";
+
+/**
+ * A conservative SQL identifier, used to decide whether a constraint name may be exposed.
+ *
+ * The name is **server-supplied**, and this repository authored only lower-case identifiers. A
+ * value outside that shape is not echoed: it would be unrecognised text of unknown provenance
+ * appearing in an error that callers may log.
+ */
+const SAFE_CONSTRAINT_NAME = /^[a-z_][a-z0-9_]*$/;
 
 /**
  * A failure the store reported.
@@ -97,6 +122,19 @@ export type FindListingFailure =
   | { readonly code: "LISTING_NOT_FOUND" }
   /** The row exists but cannot be represented as a listing. Never reported as not found. */
   | { readonly code: "LISTING_UNREADABLE"; readonly failure: ListingHydrationFailure }
+  /**
+   * A stored instant was refused by the governed parser (`ADR-022`, issue #173).
+   *
+   * Its own outcome rather than a `STORAGE_FAILURE`, because the database is perfectly healthy:
+   * the row exists and a *stored value* is unreadable. It is distinguished from
+   * `LISTING_UNREADABLE` because the refusal happens inside the driver while the row is being
+   * read, before hydration can name a column — so the parser's own `reason` is carried instead.
+   *
+   * It is reachable: `instantOf` admits any safe integer, so a stored instant can sit in the
+   * **BC era** or carry a historical offset with **seconds**, both of which issue #173 ruled must
+   * be refused loudly rather than silently misread.
+   */
+  | { readonly code: "STORED_INSTANT_UNREADABLE"; readonly reason: TimestamptzParseFailure }
   | StorageFailure;
 
 /** PostgreSQL's `SQLSTATE` for an error, if the driver attached one. */
@@ -105,10 +143,16 @@ function sqlStateOf(cause: unknown): string | undefined {
   return typeof code === "string" ? code : undefined;
 }
 
-/** The violated constraint's name, if the driver named one. */
+/**
+ * The violated constraint's name, if the driver named one **and** it looks like an identifier
+ * this repository could have written. Anything else is dropped rather than echoed.
+ */
 function constraintOf(cause: unknown): string | undefined {
   const constraint = (cause as { readonly constraint?: unknown } | null)?.constraint;
-  return typeof constraint === "string" ? constraint : undefined;
+
+  return typeof constraint === "string" && SAFE_CONSTRAINT_NAME.test(constraint)
+    ? constraint
+    : undefined;
 }
 
 function storageFailure(cause: unknown): StorageFailure {
@@ -171,7 +215,10 @@ export async function insertSubmittedListing(
     await db.insertInto("listing").values(serializeSubmittedListing(listing)).execute();
     return ok(undefined);
   } catch (cause) {
-    if (sqlStateOf(cause) === UNIQUE_VIOLATION) {
+    if (
+      sqlStateOf(cause) === UNIQUE_VIOLATION &&
+      constraintOf(cause) === LISTING_IDENTITY_CONSTRAINT
+    ) {
       return err({ code: "LISTING_ALREADY_EXISTS" } as const);
     }
 
@@ -204,6 +251,13 @@ export async function findListingById(
       .where("id", "=", identifierTextOf(id))
       .executeTakeFirst();
   } catch (cause) {
+    // A governed instant the parser refused is not an infrastructure failure: the query ran and
+    // the row is there. Classified separately so "the database is unreachable" and "a stored
+    // value is unreadable" never look alike (and neither ever looks like "not found").
+    if (cause instanceof TimestamptzParseError) {
+      return err({ code: "STORED_INSTANT_UNREADABLE", reason: cause.reason } as const);
+    }
+
     // Outside the try below on purpose: a query that failed is not a listing that is absent.
     return err(storageFailure(cause));
   }

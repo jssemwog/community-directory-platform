@@ -23,9 +23,13 @@
  * - They insert as a **SQL expression**, never a bare number: PostgreSQL cannot cast a number to
  *   `timestamptz`, and the conversion must stay exact to the millisecond. `listing-mapping.ts`
  *   builds that expression.
- * - **Every update type is `never`.** This slice authorizes exactly one insert and one read
- *   (issue #177 §5/§6); no update or delete path exists, and the type system is where that is
- *   cheapest to enforce.
+ * - **Every update type is `never` — a restriction of *this unit*, not an architectural rule.**
+ *   Issue #177 authorizes exactly one insert and one read (§5/§6), so an unauthorized write
+ *   should not compile, and the type system is the cheapest place to say so. It is **not** a
+ *   claim that listings are immutable: `OP-6`–`OP-10` moderation and revision writes are
+ *   expected, and `ADR-017` `PS-9`'s write-once columns are the only genuinely permanent
+ *   restriction here. The unit that implements those paths is expected to widen these types,
+ *   and changing a `never` is the tripwire that makes it say so deliberately.
  * - The `*_designated_public` flags carry a database `DEFAULT false`, so their insert type admits
  *   `undefined`. Serialization still supplies every one of them explicitly — the default is the
  *   store's fail-closed backstop (`ADR-017` `PS-2`), not this layer's way of omitting a value.

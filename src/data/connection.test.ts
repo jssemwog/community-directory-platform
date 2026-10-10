@@ -10,7 +10,9 @@
  * gives each test file its own module registry, so "has `pg` been loaded yet?" is a meaningful
  * question here and would be meaningless in a file that also opens connections.
  */
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -256,6 +258,43 @@ describe("a refused configuration never reaches the network (issue #177 §8)", (
     ).toThrow(PersistenceConfigurationError);
 
     expect(pgIsLoaded()).toBe(false);
+  });
+});
+
+// Placed after every assertion about the CommonJS module cache: constructing a persistence
+// loads `pg`, so a block that does so must not run before the tests that prove it was not
+// loaded. Order is load-bearing in this file.
+describe("the caller's configuration is read, never written (issue #177 §7)", () => {
+  it("does not mutate the object it was given", () => {
+    const pool: ListingPoolConfiguration = { ...unreachable, max: 7 };
+    const startupParameters = { application_name: "directory" };
+    const poolSnapshot = JSON.stringify(pool);
+    const parameterSnapshot = JSON.stringify(startupParameters);
+
+    const persistence = createListingPersistence({ pool, startupParameters });
+
+    try {
+      expect(JSON.stringify(pool)).toBe(poolSnapshot);
+      expect(JSON.stringify(startupParameters)).toBe(parameterSnapshot);
+      // In particular, neither `types` nor `options` was written back onto the caller's object.
+      expect("types" in (pool as Record<string, unknown>)).toBe(false);
+      expect("options" in (pool as Record<string, unknown>)).toBe(false);
+    } finally {
+      void persistence.shutdown();
+    }
+  });
+
+  it("cannot have its own two settings displaced by the caller's keys", () => {
+    // The governed settings are applied **after** the caller's configuration is spread, so no
+    // key ordering in the caller's object can leave the pool without the type overrides.
+    const source = readFileSync(fileURLToPath(new URL("./connection.ts", import.meta.url)), "utf8");
+    const spreadAt = source.indexOf("...configuration.pool");
+    const typesAt = source.indexOf("types: createTimestamptzTypeOverrides()");
+    const optionsAt = source.indexOf("options,");
+
+    expect(spreadAt).toBeGreaterThan(-1);
+    expect(typesAt).toBeGreaterThan(spreadAt);
+    expect(optionsAt).toBeGreaterThan(spreadAt);
   });
 });
 
