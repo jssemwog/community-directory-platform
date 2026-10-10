@@ -249,11 +249,28 @@ none of it.**
 
 ## What does not exist, and what is not authorized
 
-**No schema, no migration, no application connection or pool configuration, and
-no repository or persistence implementation exists in this repository.** A
-placeholder repository or a stub client would encode assumptions about every
-outstanding item above — issue #95 therefore added none, and the application
-remains **datastore-independent at runtime**.
+~~**No schema, no migration**, no application connection or pool configuration, and
+no repository or persistence implementation exists in this repository.~~
+
+**The first schema migration now exists** —
+`migrations/001-create-listing-and-revision-tables.ts` (issue #171), creating the
+`listing` and `listing_revision` structures with their keys, constraints and the
+`DI-11` partial unique index. **Nothing else here changed.** There is still **no
+application connection or pool configuration, and no repository or persistence
+implementation**, and the application remains **datastore-independent at
+runtime**: a placeholder repository or a stub client would encode assumptions
+about every outstanding item above, so issue #95 added none and this unit added
+none either.
+
+**Four things are worth keeping apart**, because each was authorized separately
+and only the first two exist:
+
+| | State |
+|---|---|
+| **Migration infrastructure** — the runner, provider and entry point | **Exists** (issue #157) |
+| **An authored schema migration** — the DDL itself | **Exists** (issue #171) |
+| **Local/test execution** — the migration applied against a disposable server | **Exists, in tests only.** The attacking tests in `first-schema-migration.test.ts` start a real PostgreSQL server from the `embedded-postgres` development dependency, on an ephemeral port with a disposable data directory. That server is a **test-harness detail with no production-version authority** |
+| **Production provisioning and execution** | **Does not exist.** Nothing is provisioned, **no PostgreSQL version is selected**, no credential exists, and no migration has run against any shared, hosted, staging or production database. CI runs the test suite; it does **not** execute migrations |
 
 The migration entry point is the one exception, and it is a narrow one: it
 obtains its target **explicitly** from `MIGRATION_DATABASE_URL` at invocation
@@ -263,9 +280,12 @@ it against a target nobody has provisioned simply fails.
 
 **Neither an `Accepted` ADR nor an installed dependency is implementation
 authority.** Each of the above was recorded precisely so that the work it
-enables can be scoped, reviewed and authorized as its own unit. Persistence
-code, a schema, a migration, or any connection or pool configuration requires
-a **separately authorized future issue**.
+enables can be scoped, reviewed and authorized as its own unit — which is how
+the first schema migration arrived: `ADR-017` through `ADR-022` decided its
+content, and **issue #171 authorized the unit that wrote it**. **Persistence
+code, any connection or pool configuration, the `ADR-022` `pg` timestamp
+parser, the `ADR-021` category configuration module and every later migration
+each still require a separately authorized issue of their own.**
 
 ## The two standing obligations
 

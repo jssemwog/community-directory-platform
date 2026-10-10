@@ -1,9 +1,14 @@
 # MVP CI pipeline — issue #97 (P0b).
 #
-# Validates that a pull request still installs and builds. It deliberately runs
-# no tests: test-tooling selection is ADR-012's tooling half and testing depth
-# is DG-4, both separately governed. A placeholder suite would claim testing
-# that does not exist, so none is added here.
+# Validates that a pull request still installs, passes its tests and builds.
+#
+# It originally ran no tests deliberately — test-tooling selection is ADR-012's
+# tooling half and testing depth is DG-4, both separately governed, and a
+# placeholder suite would have claimed testing that did not exist. A real suite
+# now exists, so the test step below was authorized as exactly one step by the
+# issue #171 ruling. That authorization is narrow: it runs the existing Vitest
+# suite and settles nothing else. **Testing depth remains DG-4, Unresolved**,
+# and no broader database-testing policy, environment or tooling is selected.
 #
 # Type validation is not a separate step. `next build` runs TypeScript as an
 # explicit build phase and fails on a type error, so the build below *is* the
