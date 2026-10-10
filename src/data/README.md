@@ -171,12 +171,37 @@ boundary converts both ways with an **exact epoch-millisecond round trip**, **`D
 never crosses into the domain** (and stays confined here if a driver adapter uses it),
 parsing **honours the explicit offset** and depends on **no** host timezone, DST rule,
 locale or ambient clock, and invalid, out-of-range or non-millisecond-representable
-values **fail explicitly** rather than being rounded or normalised. **An explicit,
+values **fail explicitly** rather than being rounded or normalised. ~~**An explicit,
 repository-owned and tested `pg` timestamp parser is required before persistence
 implementation is complete — the default `Date` conversion must not be relied on — and
-none exists here yet.** `ADR-022` names the required parser test cases and leaves the
-registration mechanism an implementation decision. **No parser configuration, schema,
-migration, DDL, provisioning or persistence exists or is authorized here.**
+none exists here yet.**~~ **That parser now exists** — `timestamp-parser.ts` (issue #173):
+a pure `parseTimestamptz` returning a **plain epoch-millisecond safe integer**, and
+`createTimestamptzTypeOverrides` returning a `pg` registry that installs it for **OID
+1184 only**. It **constructs no `Date`**, converting arithmetically instead; it **mutates
+no process-global `pg` registry**, so a future pool must **opt in explicitly** by passing
+the value as its `types` option; and **importing it does nothing** — no connection, no
+credential, no registration.
+
+**Two things it deliberately does not do.** It **rejects BC-era text and offsets carrying
+seconds** — an intentional, disclosed narrowing of PostgreSQL's full textual range, ruled
+on issue #173 and acceptable because all four governed data are **system-set operational
+instants**. And it **refuses sub-millisecond precision rather than rounding it**, so a later
+query selecting a bare `timestamptz` expression — which carries microseconds — must
+**reduce the precision explicitly in SQL**, for example by casting to `timestamptz(3)`, so
+that the reduction is visible in the statement rather than invisible in the adapter.
+
+**PostgreSQL's own cast rounds, it does not truncate** (`.1235` becomes `.124`, and `.9999`
+rolls to the next second), and the governed columns round on storage for the same reason.
+**No rounding-versus-truncation policy is selected here** — none is governed — and the
+parser makes **no claim that the cast rejects or truncates** excess precision; its strict
+refusal applies only to raw values handed directly to it. The database clock remains out of
+scope as an application time source (`ADR-019`, `ADR-022`): the **application supplies every
+instant**.
+
+**`DateStyle = ISO` on the connection remains a `C9` obligation**, recorded and not
+discharged here: under `DateStyle = SQL` PostgreSQL emits a timezone abbreviation with no
+numeric offset, which the parser refuses loudly. **No schema, migration, DDL, pool,
+credential, provisioning or persistence exists or is authorized here.**
 
 **`DDM-3` has left this list — it is decided.** The rest remain **open**, and none may be
 resolved by code placed here:
@@ -269,6 +294,7 @@ and only the first two exist:
 |---|---|
 | **Migration infrastructure** — the runner, provider and entry point | **Exists** (issue #157) |
 | **An authored schema migration** — the DDL itself | **Exists** (issue #171) |
+| **The `ADR-022` timestamp boundary** — `parseTimestamptz` and its `pg` type-override value | **Exists** (issue #173). It is a **mechanism, not a wiring**: no pool passes it, so a future `C9` connection must **opt in explicitly** |
 | **Local/test execution** — the migration applied against a disposable server | **Exists, in tests only.** The attacking tests in `first-schema-migration.test.ts` start a real PostgreSQL server from the `embedded-postgres` development dependency, on an ephemeral port with a disposable data directory. That server is a **test-harness detail with no production-version authority** |
 | **Production provisioning and execution** | **Does not exist.** Nothing is provisioned, **no PostgreSQL version is selected**, no credential exists, and no migration has run against any shared, hosted, staging or production database. CI runs the test suite; it does **not** execute migrations |
 
@@ -282,10 +308,11 @@ it against a target nobody has provisioned simply fails.
 authority.** Each of the above was recorded precisely so that the work it
 enables can be scoped, reviewed and authorized as its own unit — which is how
 the first schema migration arrived: `ADR-017` through `ADR-022` decided its
-content, and **issue #171 authorized the unit that wrote it**. **Persistence
-code, any connection or pool configuration, the `ADR-022` `pg` timestamp
-parser, the `ADR-021` category configuration module and every later migration
-each still require a separately authorized issue of their own.**
+content, and **issue #171 authorized the unit that wrote it** — and again for the
+`ADR-022` timestamp parser, which **issue #173** authorized. **Persistence
+code, any connection or pool configuration, the `ADR-021` category
+configuration module and every later migration each still require a separately
+authorized issue of their own.**
 
 ## The two standing obligations
 
