@@ -18,23 +18,24 @@
  * Catalogue inspection establishes exact set equality; the behavioural attacks that follow
  * confirm the constraint behaves as the catalogue says it does.
  *
- * Isolation and cleanup follow the pattern established by `first-schema-migration.test.ts`:
- * one server on an **ephemeral port** with a **disposable data directory**, torn down on every
- * path — success, assertion failure and setup failure alike — with removal asserted rather
- * than hoped for. The tests are **unconditional**: the binaries ship with the
- * `embedded-postgres` development dependency, so there is no environment to probe and nothing
- * to skip.
+ * Isolation and cleanup are owned by `testing/embedded-cluster.ts` (issue #179): one isolated
+ * cluster for this file on an **ephemeral port** with a **disposable data directory**, torn down
+ * on every path — success, assertion failure and setup failure alike. The helper closes this
+ * file's clients first, requests shutdown once, **waits for the owned postmaster to exit**, and
+ * only then removes the directory, under a bounded retry for Windows' transient file-handle
+ * release. Cleanup is verified, and a cleanup that cannot prove the cluster is gone fails this
+ * file rather than leaving one behind.
+ *
+ * The tests are **unconditional**: the binaries ship with the `embedded-postgres` development
+ * dependency, so there is no environment to probe and nothing to skip.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import EmbeddedPostgres from "embedded-postgres";
+import { beforeAll, describe, expect, it } from "vitest";
 import { Kysely, PostgresDialect, type PostgresPool } from "kysely";
 import { Migrator } from "kysely/migration";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
-import net from "node:net";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+
+import { CLUSTER_TIMEOUT_MS, useEmbeddedPostgres } from "./testing/embedded-cluster";
 
 import { CATEGORIES, CATEGORY_KEYS } from "../domain/listing/category";
 import {
@@ -87,63 +88,26 @@ const CATEGORY_CONSTRAINTS = [
   { constraint: "listing_revision_category_check", table: "listing_revision" },
 ] as const;
 
-const SERVER_USER = "postgres";
-const SERVER_PASSWORD = "verification-only";
 const VERIFIED_DATABASE = "category_equality_verification";
 
-const CLUSTER_TIMEOUT_MS = 300_000;
+/**
+ * One isolated cluster for this file, owned by the shared helper (issue #179).
+ *
+ * The lifecycle this file used to carry itself — the disposable directory, the ephemeral port,
+ * the server construction, the shutdown and the retried removal — lives in
+ * `testing/embedded-cluster.ts` now, which also *waits for the owned postmaster to exit* before
+ * removing anything. That wait is what this file was missing: its teardown could report a
+ * cluster unremoved while the postmaster's children were still letting go of the directory.
+ */
+const cluster = useEmbeddedPostgres({
+  slug: "category",
+  databases: [VERIFIED_DATABASE],
+});
 
-let server: EmbeddedPostgres;
-let serverPort: number;
-let dataRoot: string;
 let client: PgClient;
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** An ephemeral port the operating system confirms is free. */
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
-
-      if (address === null || typeof address === "string") {
-        probe.close(() => reject(new Error("No ephemeral port was assigned.")));
-        return;
-      }
-
-      const { port } = address;
-      probe.close((closeError) => (closeError ? reject(closeError) : resolve(port)));
-    });
-  });
-}
-
-/**
- * Remove the disposable directory, retrying briefly: Windows releases the cluster's file
- * handles a moment after the server exits. The verdict is returned and asserted by the
- * caller, because a cleanup that quietly failed would leave a cluster behind on every run.
- */
-async function removeWithRetry(directory: string): Promise<boolean> {
-  for (let attempt = 0; attempt < 15; attempt += 1) {
-    try {
-      rmSync(directory, { recursive: true, force: true });
-    } catch {
-      // Retried below; the final `existsSync` is the verdict.
-    }
-
-    if (!existsSync(directory)) {
-      return true;
-    }
-
-    await sleep(200);
-  }
-
-  return !existsSync(directory);
-}
-
 function connectionStringFor(database: string): string {
-  return `postgresql://${SERVER_USER}:${SERVER_PASSWORD}@127.0.0.1:${serverPort}/${database}`;
+  return cluster.connectionStringFor(database);
 }
 
 /** The governed runner over the real provider, pointed at the disposable database. */
@@ -231,50 +195,18 @@ async function enforcedKeysOf(constraint: string, table: string): Promise<readon
 const sorted = (keys: readonly string[]): readonly string[] => [...keys].sort();
 
 beforeAll(async () => {
-  dataRoot = mkdtempSync(join(tmpdir(), "cdp-category-"));
-  serverPort = await freePort();
-
-  server = new EmbeddedPostgres({
-    databaseDir: join(dataRoot, "cluster"),
-    port: serverPort,
-    user: SERVER_USER,
-    password: SERVER_PASSWORD,
-    persistent: false,
-    initdbFlags: ["--locale=C", "--encoding=UTF8"],
-    onLog: () => {},
-    onError: () => {},
-  });
-
-  await server.initialise();
-  await server.start();
-  await server.createDatabase(VERIFIED_DATABASE);
-
   client = new Client({ connectionString: connectionStringFor(VERIFIED_DATABASE) });
   await client.connect();
+
+  // Handed to the helper rather than closed by a local `afterAll`: the helper closes every
+  // registered resource *before* it asks the server to stop, so the ordering is a property of
+  // the lifecycle instead of a property of hook-registration order.
+  cluster.closeBeforeShutdown("category verification client", () => client.end());
 
   // The real migration, through the real runner — the constraints under test must be the
   // ones the governed migration actually creates, not ones this file wrote.
   const status = await runMigration("latest", dependenciesFor(VERIFIED_DATABASE));
   expect(status).toBe(SUCCESS);
-}, CLUSTER_TIMEOUT_MS);
-
-afterAll(async () => {
-  // Every step is attempted even if an earlier one throws: a half-released cluster is worse
-  // than a noisy teardown.
-  try {
-    await client?.end();
-  } catch {
-    // The server is going away regardless.
-  }
-
-  try {
-    await server?.stop();
-  } catch {
-    // Fall through to directory removal, which is the guarantee that matters.
-  }
-
-  const removed = await removeWithRetry(dataRoot);
-  expect(removed, `the disposable cluster at ${dataRoot} was not removed`).toBe(true);
 }, CLUSTER_TIMEOUT_MS);
 
 describe("exact set equality, catalogue against configuration", () => {

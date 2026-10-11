@@ -9,9 +9,15 @@
  * through `insertSubmittedListing` comes back through `findListingById` as the same aggregate.
  *
  * They are **unconditional**: the binaries ship with the `embedded-postgres` development
- * dependency, so there is nothing to probe and nothing to skip. One server for this file on an
- * **ephemeral port** with a **disposable data directory**, torn down on success, assertion failure
- * and setup failure alike, with the removal **asserted**.
+ * dependency, so there is nothing to probe and nothing to skip.
+ *
+ * Isolation and cleanup are owned by `testing/embedded-cluster.ts` (issue #179): one isolated
+ * cluster for this file on an **ephemeral port** with a **disposable data directory**, torn down
+ * on every path — success, assertion failure and setup failure alike. The helper closes this
+ * file's clients first, requests shutdown once, **waits for the owned postmaster to exit**, and
+ * only then removes the directory, under a bounded retry for Windows' transient file-handle
+ * release. Cleanup is verified, and a cleanup that cannot prove the cluster is gone fails this
+ * file rather than leaving one behind.
  *
  * **The server version is harness detail with no production authority.** No PostgreSQL version is
  * selected (`ADR-013` names only the provider), and nothing here asserts version-specific
@@ -19,23 +25,22 @@
  * configuration is handed to the boundary by this file, which is exactly the posture issue #177
  * requires of its callers.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import EmbeddedPostgres from "embedded-postgres";
-import { Kysely, PostgresDialect, sql, type PostgresPool } from "kysely";
-import { Migrator } from "kysely/migration";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { beforeAll, describe, expect, it } from "vitest";
+import { Kysely, sql } from "kysely";
 import { createRequire } from "node:module";
-import net from "node:net";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+
+import {
+  CLUSTER_PASSWORD,
+  CLUSTER_TIMEOUT_MS,
+  useEmbeddedPostgres,
+} from "./testing/embedded-cluster";
 
 import { CATEGORY_KEYS } from "../domain/listing/category";
 import { instantOf, type Instant } from "../domain/listing/instant";
 import { listingIdOf } from "../domain/listing/listing-id";
 import type { Listing } from "../domain/listing/listing";
 import { createListingPersistence, type ListingPersistence } from "./connection";
-import { createMigrationProvider } from "./migrate";
 import { findListingById, insertSubmittedListing } from "./listing-repository";
 import type { ListingDatabase } from "./listing-table";
 
@@ -48,99 +53,38 @@ import type { ListingDatabase } from "./listing-table";
  * boundary under test.
  */
 interface PgModule {
-  readonly Pool: new (config: { connectionString: string; max: number }) => PostgresPool & {
-    end(): Promise<void>;
-    on(event: "error", listener: (error: Error) => void): unknown;
-  };
   readonly types: { getTypeParser(oid: number, format: string): unknown };
 }
 
 const pg = createRequire(import.meta.url)("pg") as PgModule;
 
-const SERVER_USER = "postgres";
-const SERVER_PASSWORD = "verification-only";
 const VERIFIED_DATABASE = "listing_persistence_verification";
 /** A second database whose category `CHECK`s are dropped, so hostile rows can be stored. */
 const HOSTILE_DATABASE = "listing_hostile_verification";
 
-const CLUSTER_TIMEOUT_MS = 300_000;
+/**
+ * One isolated cluster for this file, owned by the shared helper (issue #179), with the governed
+ * migration already applied to both databases through the same real provider and `Migrator` this
+ * file used to drive itself.
+ *
+ * The helper waits for the owned postmaster to exit before removing the disposable directory,
+ * which is what this file's own teardown never did: `EmbeddedPostgres.stop()` returns while the
+ * postmaster's children may still hold handles on it.
+ */
+const cluster = useEmbeddedPostgres({
+  slug: "persistence",
+  databases: [VERIFIED_DATABASE, HOSTILE_DATABASE],
+  migrate: [VERIFIED_DATABASE, HOSTILE_DATABASE],
+});
 
-let server: EmbeddedPostgres;
-let serverPort: number;
-let dataRoot: string;
+/** Test timing, not lifecycle: one place a pool needs a moment to notice a dead socket. */
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 let persistence: ListingPersistence;
 let hostile: ListingPersistence;
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** An ephemeral port the operating system confirms is free. */
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
-
-      if (address === null || typeof address === "string") {
-        probe.close(() => reject(new Error("No ephemeral port was assigned.")));
-        return;
-      }
-
-      const { port } = address;
-      probe.close((closeError) => (closeError ? reject(closeError) : resolve(port)));
-    });
-  });
-}
-
-/**
- * Remove the disposable directory, retrying briefly: Windows releases the cluster's file handles
- * a moment after the server exits. The verdict is asserted by the caller, because a cleanup that
- * quietly failed would leave a cluster behind on every run.
- */
-async function removeWithRetry(directory: string): Promise<boolean> {
-  for (let attempt = 0; attempt < 15; attempt += 1) {
-    try {
-      rmSync(directory, { recursive: true, force: true });
-    } catch {
-      // Retried below; the final `existsSync` is the verdict.
-    }
-
-    if (!existsSync(directory)) {
-      return true;
-    }
-
-    await sleep(200);
-  }
-
-  return !existsSync(directory);
-}
-
 function connectionStringFor(database: string): string {
-  return `postgresql://${SERVER_USER}:${SERVER_PASSWORD}@127.0.0.1:${serverPort}/${database}`;
-}
-
-/** Apply the real migration to one database, through the real `Migrator` and provider. */
-async function migrate(database: string): Promise<void> {
-  const pool = new pg.Pool({ connectionString: connectionStringFor(database), max: 1 });
-
-  // The same reason `connection.ts` handles this: an idle client killed by the server raises
-  // the pool's `error` event, and an unhandled `EventEmitter` `error` throws. This pool is the
-  // migration runner's, built here rather than by the boundary under test, so it needs its own.
-  pool.on("error", () => {});
-
-  const db = new Kysely<unknown>({ dialect: new PostgresDialect({ pool }) });
-
-  try {
-    const { error, results } = await new Migrator({
-      db,
-      provider: createMigrationProvider(),
-    }).migrateToLatest();
-
-    expect(error).toBeUndefined();
-    expect(results?.every((result) => result.status === "Success")).toBe(true);
-  } finally {
-    await db.destroy();
-  }
+  return cluster.connectionStringFor(database);
 }
 
 const SUBMITTED_AT = 1_767_323_045_123;
@@ -176,28 +120,6 @@ function submission(overrides: Partial<Listing> = {}): Listing {
 }
 
 beforeAll(async () => {
-  dataRoot = mkdtempSync(join(tmpdir(), "cdp-persistence-"));
-  serverPort = await freePort();
-
-  server = new EmbeddedPostgres({
-    databaseDir: join(dataRoot, "cluster"),
-    port: serverPort,
-    user: SERVER_USER,
-    password: SERVER_PASSWORD,
-    persistent: false,
-    initdbFlags: ["--locale=C", "--encoding=UTF8"],
-    onLog: () => {},
-    onError: () => {},
-  });
-
-  await server.initialise();
-  await server.start();
-  await server.createDatabase(VERIFIED_DATABASE);
-  await server.createDatabase(HOSTILE_DATABASE);
-
-  await migrate(VERIFIED_DATABASE);
-  await migrate(HOSTILE_DATABASE);
-
   // The boundary under test, configured entirely by this caller.
   persistence = createListingPersistence({
     pool: { connectionString: connectionStringFor(VERIFIED_DATABASE), max: 4 },
@@ -208,33 +130,18 @@ beforeAll(async () => {
     pool: { connectionString: connectionStringFor(HOSTILE_DATABASE), max: 1 },
   });
 
+  // Registered rather than closed by a local `afterAll`: the helper closes every registered
+  // resource before it asks the server to stop, so that ordering is the lifecycle's property
+  // and not a consequence of hook-registration order.
+  cluster.closeBeforeShutdown("verified persistence", () => persistence.shutdown());
+  cluster.closeBeforeShutdown("hostile persistence", () => hostile.shutdown());
+
   // Dropping a constraint needs no key list, so the governed vocabulary is still stated in
   // exactly two executable places (`ADR-021` decision 10, issue #175). This database exists so
   // that a row the domain cannot represent can be *stored* and the read path's classification
   // of it proved end to end.
   await sql`alter table listing drop constraint listing_category_check`.execute(hostile.db);
   await sql`alter table listing drop constraint listing_status_check`.execute(hostile.db);
-}, CLUSTER_TIMEOUT_MS);
-
-afterAll(async () => {
-  // Every step is attempted even if an earlier one throws: a half-released cluster is worse than
-  // a noisy teardown.
-  for (const closing of [persistence, hostile]) {
-    try {
-      await closing?.shutdown();
-    } catch {
-      // The server is going away regardless.
-    }
-  }
-
-  try {
-    await server?.stop();
-  } catch {
-    // Fall through to directory removal, which is the guarantee that matters.
-  }
-
-  const removed = await removeWithRetry(dataRoot);
-  expect(removed, `the disposable cluster at ${dataRoot} was not removed`).toBe(true);
 }, CLUSTER_TIMEOUT_MS);
 
 /**
@@ -962,7 +869,7 @@ describe("a storage failure leaks nothing (issue #177 §11)", () => {
       expect(JSON.stringify({ ...failure })).not.toContain(sensitive);
       expect(Object.keys(failure)).not.toContain("cause");
       expect(Object.keys(failure).sort()).toEqual(["code", "constraint", "sqlState"]);
-      expect(JSON.stringify(failure)).not.toContain(SERVER_PASSWORD);
+      expect(JSON.stringify(failure)).not.toContain(CLUSTER_PASSWORD);
 
       // What is exposed is schema metadata, which is the part worth reading.
       if (failure.code !== "STORAGE_FAILURE") return;
@@ -980,7 +887,7 @@ describe("a storage failure leaks nothing (issue #177 §11)", () => {
     async () => {
       const wrong = createListingPersistence({
         pool: {
-          connectionString: `postgresql://${SERVER_USER}:${SERVER_PASSWORD}@127.0.0.1:${serverPort}/database_that_does_not_exist`,
+          connectionString: connectionStringFor("database_that_does_not_exist"),
           max: 1,
           connectionTimeoutMillis: 5_000,
         },
@@ -994,8 +901,8 @@ describe("a storage failure leaks nothing (issue #177 §11)", () => {
 
         // Not "not found": the query never ran.
         expect(result.error.code).toBe("STORAGE_FAILURE");
-        expect(JSON.stringify(result.error)).not.toContain(SERVER_PASSWORD);
-        expect(JSON.stringify({ ...result.error })).not.toContain(SERVER_PASSWORD);
+        expect(JSON.stringify(result.error)).not.toContain(CLUSTER_PASSWORD);
+        expect(JSON.stringify({ ...result.error })).not.toContain(CLUSTER_PASSWORD);
       } finally {
         await wrong.shutdown();
       }

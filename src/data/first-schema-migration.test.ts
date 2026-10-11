@@ -21,20 +21,21 @@
  * implemented or registered** — `ADR-022` leaves it to the persistence unit, so the
  * round-trip assertion below converts explicitly in SQL instead.
  *
- * Isolation and cleanup: one server per file on an **ephemeral port** with a **disposable
- * data directory**, torn down in `afterAll` on every path — success, assertion failure and
- * setup failure alike — with the directory removal asserted rather than hoped for.
+ * Isolation and cleanup are owned by `testing/embedded-cluster.ts` (issue #179): one isolated
+ * cluster for this file on an **ephemeral port** with a **disposable data directory**, torn down
+ * on every path — success, assertion failure and setup failure alike. The helper closes this
+ * file's clients first, requests shutdown once, **waits for the owned postmaster to exit**, and
+ * only then removes the directory, under a bounded retry for Windows' transient file-handle
+ * release. Cleanup is verified, and a cleanup that cannot prove the cluster is gone fails this
+ * file rather than leaving one behind.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import EmbeddedPostgres from "embedded-postgres";
+import { beforeAll, describe, expect, it } from "vitest";
 import { Kysely, PostgresDialect, type PostgresPool } from "kysely";
 import { Migrator } from "kysely/migration";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
-import net from "node:net";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+
+import { CLUSTER_TIMEOUT_MS, useEmbeddedPostgres } from "./testing/embedded-cluster";
 
 import { CATEGORY_KEYS } from "../domain/listing/category";
 import {
@@ -98,67 +99,29 @@ const CHECK_VIOLATION = "23514";
  */
 const APPROVED_CATEGORY_KEYS = CATEGORY_KEYS;
 
-const SERVER_USER = "postgres";
-const SERVER_PASSWORD = "verification-only";
 const VERIFIED_DATABASE = "migration_verification";
 const DOWN_DATABASE = "down_verification";
 
-/** Generous, because initialising a cluster is slow and flakiness is worse than waiting. */
-const CLUSTER_TIMEOUT_MS = 300_000;
-
-let server: EmbeddedPostgres;
-let serverPort: number;
-let dataRoot: string;
-let client: PgClient;
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** An ephemeral port the operating system confirms is free. */
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
-
-      if (address === null || typeof address === "string") {
-        probe.close(() => reject(new Error("No ephemeral port was assigned.")));
-        return;
-      }
-
-      const { port } = address;
-      probe.close(() => resolve(port));
-    });
-  });
-}
-
 /**
- * Remove the disposable directory, retrying briefly.
+ * One isolated cluster for this file, owned by the shared helper (issue #179).
  *
- * Windows releases the cluster's file handles a moment after the server exits, so a single
- * attempt can lose a race it would win 200ms later. The return value is asserted by the
- * caller: a cleanup that quietly failed would leave a cluster behind on every run.
+ * The directory, the ephemeral port, the server, the single shutdown request, the wait for the
+ * owned postmaster to exit and the bounded removal all live in `testing/embedded-cluster.ts`.
+ * The wait is the part this file never had: `EmbeddedPostgres.stop()` returns before the
+ * postmaster's children have released the data directory, so a teardown that removed it
+ * immediately was racing them.
  */
-async function removeWithRetry(directory: string): Promise<boolean> {
-  for (let attempt = 0; attempt < 15; attempt += 1) {
-    try {
-      rmSync(directory, { recursive: true, force: true });
-    } catch {
-      // Retried below; the final `existsSync` is the verdict.
-    }
+const cluster = useEmbeddedPostgres({
+  slug: "migration",
+  databases: [VERIFIED_DATABASE, DOWN_DATABASE],
+});
 
-    if (!existsSync(directory)) {
-      return true;
-    }
-
-    await sleep(200);
-  }
-
-  return !existsSync(directory);
-}
+let client: PgClient;
+/** The session time zone the cluster starts with — established, not assumed. */
+let baselineTimeZone: string;
 
 function connectionStringFor(database: string): string {
-  return `postgresql://${SERVER_USER}:${SERVER_PASSWORD}@127.0.0.1:${serverPort}/${database}`;
+  return cluster.connectionStringFor(database);
 }
 
 /**
@@ -184,6 +147,59 @@ function dependenciesFor(database: string): MigrationDependencies {
     info: () => {},
     error: () => {},
   };
+}
+
+/**
+ * Run `body` with the session time zone pinned, restoring whatever was actually in force.
+ *
+ * `client` is this file's one client, shared by every test in it, so a mutation left in place is
+ * a mutation every later test inherits. Restoring in `finally` — and restoring the **captured**
+ * setting rather than an assumed `UTC` — is what keeps that from depending on execution order.
+ * If the body fails, its failure is the one reported; if restoration also fails, both are kept,
+ * because a teardown error that swallowed the assertion would hide the reason the test ran.
+ */
+async function currentTimeZone(): Promise<string> {
+  const { rows } = await client.query<{ zone: string }>(
+    "select current_setting('timezone') as zone",
+  );
+  const zone = rows[0]?.zone;
+
+  if (zone === undefined) {
+    throw new Error("the session time zone could not be read");
+  }
+
+  return zone;
+}
+
+async function withSessionTimeZone(zone: string, body: () => Promise<void>): Promise<void> {
+  const original = await currentTimeZone();
+
+  await client.query(`set time zone '${zone}'`);
+
+  let bodyError: unknown;
+  let threw = false;
+
+  try {
+    await body();
+  } catch (error) {
+    threw = true;
+    bodyError = error;
+    throw error;
+  } finally {
+    try {
+      await client.query(`set time zone '${original}'`);
+    } catch (restoreError) {
+      if (!threw) {
+        throw restoreError;
+      }
+
+      throw new AggregateError(
+        [bodyError, restoreError],
+        "the assertion failed and restoring the session time zone also failed; the first error " +
+          "is the original failure",
+      );
+    }
+  }
 }
 
 /** Run a statement and return the PostgreSQL error code it raised, or `null` if it did not. */
@@ -284,47 +300,16 @@ async function insertRevision(
 }
 
 beforeAll(async () => {
-  dataRoot = mkdtempSync(join(tmpdir(), "cdp-migration-"));
-  serverPort = await freePort();
-
-  server = new EmbeddedPostgres({
-    databaseDir: join(dataRoot, "cluster"),
-    port: serverPort,
-    user: SERVER_USER,
-    password: SERVER_PASSWORD,
-    persistent: false,
-    // `C` keeps collation behaviour out of the comparison; the migration depends on none.
-    initdbFlags: ["--locale=C", "--encoding=UTF8"],
-    onLog: () => {},
-    onError: () => {},
-  });
-
-  await server.initialise();
-  await server.start();
-  await server.createDatabase(VERIFIED_DATABASE);
-  await server.createDatabase(DOWN_DATABASE);
-
   client = new Client({ connectionString: connectionStringFor(VERIFIED_DATABASE) });
   await client.connect();
-}, CLUSTER_TIMEOUT_MS);
 
-afterAll(async () => {
-  // Every step is attempted even if an earlier one throws: a half-released cluster is
-  // worse than a noisy teardown.
-  try {
-    await client?.end();
-  } catch {
-    // The server is going away regardless.
-  }
+  // The cluster's own default, captured once: the guard below restores *this*, and the leak
+  // test asserts against it. Hardcoding `UTC` would assert a value this file never established.
+  baselineTimeZone = await currentTimeZone();
 
-  try {
-    await server?.stop();
-  } catch {
-    // Fall through to directory removal, which is the guarantee that matters.
-  }
-
-  const removed = await removeWithRetry(dataRoot);
-  expect(removed, `the disposable cluster at ${dataRoot} was not removed`).toBe(true);
+  // Registered rather than closed by a local `afterAll`: the helper closes every registered
+  // resource before it asks the server to stop, so that ordering cannot be got wrong here.
+  cluster.closeBeforeShutdown("migration verification client", () => client.end());
 }, CLUSTER_TIMEOUT_MS);
 
 describe("up migration", () => {
@@ -1024,11 +1009,10 @@ describe("governed millisecond timestamp round trip", () => {
     const readings: number[] = [];
 
     for (const zone of ["UTC", "Asia/Kolkata", "America/Los_Angeles"]) {
-      await client.query(`set time zone '${zone}'`);
-      readings.push(await readEpochMilliseconds(id, "submitted_at"));
+      await withSessionTimeZone(zone, async () => {
+        readings.push(await readEpochMilliseconds(id, "submitted_at"));
+      });
     }
-
-    await client.query("set time zone 'UTC'");
 
     expect(readings).toEqual([epochMilliseconds, epochMilliseconds, epochMilliseconds]);
   });
@@ -1090,6 +1074,47 @@ describe("down migration against an empty schema", () => {
       } finally {
         await downClient.end();
       }
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+});
+
+/**
+ * The session-setting guard itself, attacked (issue #179).
+ *
+ * The time-zone test above shares this file's one client with every other test in it, so a zone
+ * left in place is a zone they all inherit. These two prove the guard restores on the failure
+ * path — which is the only path where it matters — and that nothing leaks out of it.
+ */
+describe("the session time zone guard", () => {
+  it(
+    "restores the captured setting even when the guarded assertion throws",
+    async () => {
+      const before = await currentTimeZone();
+
+      await expect(
+        withSessionTimeZone("Asia/Kolkata", async () => {
+          expect(await currentTimeZone()).toBe("Asia/Kolkata");
+
+          throw new Error("a deliberate assertion failure");
+        }),
+      ).rejects.toThrow("a deliberate assertion failure");
+
+      expect(await currentTimeZone()).toBe(before);
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "leaves no session state behind for a later test to inherit",
+    async () => {
+      expect(await currentTimeZone()).toBe(baselineTimeZone);
+
+      await withSessionTimeZone("Pacific/Kiritimati", async () => {
+        expect(await currentTimeZone()).toBe("Pacific/Kiritimati");
+      });
+
+      expect(await currentTimeZone()).toBe(baselineTimeZone);
     },
     CLUSTER_TIMEOUT_MS,
   );
