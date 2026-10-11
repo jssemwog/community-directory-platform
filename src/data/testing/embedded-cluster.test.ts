@@ -19,9 +19,16 @@
  * manufacture a real file lock — which on Windows would mean risking exactly the uncontrolled
  * process this helper exists to prevent. No test here crashes a real PostgreSQL server.
  *
- * One test is structural: it reads this module's own source and asserts that no process-killing
- * or process-enumerating mechanism appears in it. That is a property worth pinning in a test
- * rather than in a comment, because it is the single rule that makes observing a PID safe.
+ * The last describe is structural: it reads this module's own source and asserts that no
+ * process-killing, process-enumerating or unscoped-removal mechanism appears in it. That is a
+ * property worth pinning in a test rather than in a comment, because it is the single rule that
+ * makes observing a PID safe.
+ *
+ * A structural test is only as good as its reading of the source, so two of its assertions exist
+ * to keep it honest: one proves the comment stripper still exposes the declarations being
+ * constrained, and one proves each prohibition actually matches the thing it prohibits. Without
+ * those, a stripper that ate the file or a pattern that matched nothing would read as a
+ * guarantee while asserting a tautology.
  */
 
 import { describe, expect, it, onTestFinished } from "vitest";
@@ -706,25 +713,133 @@ describe("the safety rule this module rests on", () => {
    * The module's executable text, with its prose removed.
    *
    * The documentation deliberately *names* the mechanisms this module refuses to use, so a scan
-   * of the whole file would fail on its own explanation. Block comments and comment-only lines
-   * go; everything that actually runs stays.
+   * of the whole file would fail on its own explanation. Comments therefore go — but they must
+   * go precisely. Deleting everything between the first comment-open and the next comment-close
+   * with one regular expression also deletes whatever sits between two *string literals* that
+   * happen to contain those delimiters, silently removing executable text and turning this suite
+   * into a test that passes because it can no longer see the code.
+   *
+   * So the stripper below is a scanner that knows what a string and a template literal are and
+   * leaves their contents alone, and `exposes the executable text it is asserting against`
+   * proves it did. Trailing line comments are stripped too, so prose at the end of a line of
+   * real code is no longer a failure: the assertions judge code, and the comments stay free to
+   * name what the code refuses to do.
    */
-  const code = source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split(/\r?\n/)
-    .filter((line) => {
-      const trimmed = line.trim();
+  const stripComments = (text: string): string => {
+    type Mode = "code" | "line" | "block" | "'" | '"' | "`";
 
-      return !trimmed.startsWith("//") && !trimmed.startsWith("*");
-    })
-    .join("\n");
+    let out = "";
+    let index = 0;
+    let mode: Mode = "code";
 
-  it.each(["taskkill", "pg_ctl", "wmic", "tasklist", "powershell", "execSync", "spawnSync"])(
-    "contains no reference to %s",
-    (forbidden) => {
-      expect(code.toLowerCase()).not.toContain(forbidden.toLowerCase());
-    },
-  );
+    while (index < text.length) {
+      const here = text[index] as string;
+      const next = text[index + 1];
+
+      if (mode === "code") {
+        if (here === "/" && next === "/") {
+          mode = "line";
+          index += 2;
+          continue;
+        }
+
+        if (here === "/" && next === "*") {
+          mode = "block";
+          index += 2;
+          continue;
+        }
+
+        if (here === "'" || here === '"' || here === "`") {
+          mode = here;
+        }
+
+        out += here;
+        index += 1;
+        continue;
+      }
+
+      if (mode === "line") {
+        if (here === "\n") {
+          mode = "code";
+          out += here;
+        }
+
+        index += 1;
+        continue;
+      }
+
+      if (mode === "block") {
+        if (here === "*" && next === "/") {
+          mode = "code";
+          index += 2;
+          continue;
+        }
+
+        // Newlines survive, so a line-numbered diagnostic still points somewhere real.
+        if (here === "\n") out += here;
+
+        index += 1;
+        continue;
+      }
+
+      // Inside a string or template literal: the contents are code, and an escape takes a pair.
+      if (here === "\\") {
+        out += here + (next ?? "");
+        index += 2;
+        continue;
+      }
+
+      out += here;
+
+      if (here === mode) mode = "code";
+
+      index += 1;
+    }
+
+    return out;
+  };
+
+  const code = stripComments(source);
+
+  /**
+   * The guard on every other assertion here.
+   *
+   * A stripper that ate the module would make all of the prohibitions below vacuously true, so
+   * the stripped text is required to still contain the declarations that carry the behaviour
+   * being constrained. If this fails, nothing else in this describe means anything.
+   */
+  it("exposes the executable text it is asserting against", () => {
+    for (const anchor of [
+      "export function observePresence",
+      "export function proveOwnedPostmaster",
+      "export async function waitForOwnedExit",
+      "export async function removeOwnedRoot",
+      "export async function cleanupCluster",
+      "process.kill(pid, 0)",
+      "rmSync(",
+    ]) {
+      expect(code, `the comment stripper removed ${anchor}`).toContain(anchor);
+    }
+
+    // And it really did remove the prose, rather than leaving the file untouched.
+    expect(code.length).toBeLessThan(source.length);
+    expect(code).not.toContain("No process is ever signalled");
+  });
+
+  it.each([
+    "taskkill",
+    "pg_ctl",
+    "wmic",
+    "tasklist",
+    "powershell",
+    "execSync",
+    "spawnSync",
+    "execFile",
+    "child_process",
+    "worker_threads",
+  ])("contains no reference to %s", (forbidden) => {
+    expect(code.toLowerCase()).not.toContain(forbidden.toLowerCase());
+  });
 
   it("sends no signal: the only process.kill is the existence check", () => {
     const calls = code.match(/process\.kill\([^)]*\)/g) ?? [];
@@ -732,13 +847,60 @@ describe("the safety rule this module rests on", () => {
     expect(calls).toEqual(["process.kill(pid, 0)"]);
   });
 
-  it("spawns no child process and runs no shell", () => {
-    expect(code).not.toContain("child_process");
-    expect(code).not.toContain("node:child_process");
+  it("names no signal it could send", () => {
+    expect(code).not.toMatch(/SIG[A-Z]+/);
   });
 
-  it("removes only a path it was handed, never a pattern or a parent", () => {
-    // Every removal in the module goes through the one seam, applied to the owned root.
-    expect(code.match(/rmSync\(/g) ?? []).toHaveLength(1);
+  /**
+   * Every removal this module is forbidden to perform, each with a sample that must match it.
+   *
+   * Counting one `rmSync(` proved less than it appeared to: a second removal through any *other*
+   * filesystem API left that count at one and the assertion satisfied. The prohibition is on
+   * removing anything but the owned root, so the other APIs are named here — and each pattern
+   * carries a hostile sample, because a prohibition that matches nothing is worse than no
+   * prohibition at all: it reads as a guarantee while asserting a tautology.
+   *
+   * Matching is on identifier boundaries, since a bare substring is both too weak and too
+   * strong: `rm(` would miss `rmdirSync`, and would hit the `rm(` inside `platform()`.
+   */
+  const prohibitedRemovals: readonly { pattern: RegExp; sample: string }[] = [
+    { pattern: /\brmdirSync\b/, sample: "rmdirSync(parent, { recursive: true });" },
+    { pattern: /\bunlinkSync\b/, sample: "unlinkSync(someFile);" },
+    { pattern: /\brimraf\b/, sample: 'import rimraf from "rimraf";' },
+    { pattern: /\bfsPromises\b/, sample: "await fsPromises.rm(parent);" },
+    {
+      pattern: /(^|[^.\w])(fs|fsp|promises)\s*\.\s*(rm|rmdir|unlink)\b/m,
+      sample: "await fs.rm(parent, { recursive: true });",
+    },
+    { pattern: /(^|[^.\w])(rm|rmdir|unlink)\s*\(/m, sample: "await rm(parent);" },
+  ];
+
+  it("states removal prohibitions that actually match what they prohibit", () => {
+    for (const { pattern, sample } of prohibitedRemovals) {
+      expect(sample, `${String(pattern)} matches nothing, so it prohibits nothing`).toMatch(
+        pattern,
+      );
+    }
+
+    // And none of them catches the one permitted call, so passing them is a real result.
+    for (const { pattern } of prohibitedRemovals) {
+      expect("rmSync(path, { recursive: true, force: true })").not.toMatch(pattern);
+    }
+  });
+
+  it("removes only through the one seam, and only a path it was handed", () => {
+    for (const { pattern } of prohibitedRemovals) {
+      expect(code, `${String(pattern)} is a removal this module may not perform`).not.toMatch(
+        pattern,
+      );
+    }
+
+    const removals = code.match(/rmSync\([^)]*\)/g) ?? [];
+
+    expect(removals).toEqual(["rmSync(path, { recursive: true, force: true })"]);
+  });
+
+  it("removes no pattern: the removal takes a path, never a glob", () => {
+    expect(code).not.toMatch(/rmSync\([^)]*[*?][^)]*\)/);
   });
 });
