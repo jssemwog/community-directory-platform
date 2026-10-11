@@ -8,9 +8,15 @@
  * actually delivers.
  *
  * They are **unconditional**: the server binaries ship with the `embedded-postgres`
- * development dependency, so there is nothing to probe and nothing to skip. One server per
- * file on an **ephemeral port** with a **disposable data directory**, torn down on success,
- * assertion failure and setup failure alike, with the removal **asserted**.
+ * development dependency, so there is nothing to probe and nothing to skip.
+ *
+ * Isolation and cleanup are owned by `testing/embedded-cluster.ts` (issue #179): one isolated
+ * cluster for this file on an **ephemeral port** with a **disposable data directory**, torn down
+ * on every path — success, assertion failure and setup failure alike. The helper closes this
+ * file's clients first, requests shutdown once, **waits for the owned postmaster to exit**, and
+ * only then removes the directory, under a bounded retry for Windows' transient file-handle
+ * release. Cleanup is verified, and a cleanup that cannot prove the cluster is gone fails this
+ * file rather than leaving one behind.
  *
  * **The server version is a test-harness detail with no production authority.** No
  * PostgreSQL version is selected (`ADR-013` names only the provider), and nothing here
@@ -21,18 +27,12 @@
  * for the application, and `DateStyle = ISO` remains a recorded `C9` obligation rather than
  * something this unit sets.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import EmbeddedPostgres from "embedded-postgres";
-import { Kysely, PostgresDialect, type PostgresPool } from "kysely";
-import { Migrator } from "kysely/migration";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { beforeAll, describe, expect, it } from "vitest";
+import { type PostgresPool } from "kysely";
 import { createRequire } from "node:module";
-import net from "node:net";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { createMigrationProvider } from "./migrate";
+import { CLUSTER_TIMEOUT_MS, useEmbeddedPostgres } from "./testing/embedded-cluster";
 import {
   createTimestamptzTypeOverrides,
   TIMESTAMPTZ_OID,
@@ -68,62 +68,84 @@ const { Pool, Client } = createRequire(import.meta.url)("pg") as PgModule;
 
 type PgClient = InstanceType<PgModule["Client"]>;
 
-const SERVER_USER = "postgres";
-const SERVER_PASSWORD = "verification-only";
 const DATABASE = "parser_verification";
-const CLUSTER_TIMEOUT_MS = 300_000;
+
+/**
+ * One isolated cluster for this file, owned by the shared helper (issue #179), with the governed
+ * migration already applied — these tests read the real migration's columns rather than an
+ * ad-hoc table, and the helper applies it through the same real provider and `Migrator` this
+ * file used to drive itself.
+ *
+ * The helper also waits for the owned postmaster to exit before removing anything, which is what
+ * this file's own teardown never did.
+ */
+const cluster = useEmbeddedPostgres({
+  slug: "parser",
+  databases: [DATABASE],
+  migrate: [DATABASE],
+});
 
 /** 2026-01-01T21:34:05.123Z — one instant, used throughout. */
 const REFERENCE_MILLISECONDS = 1_767_303_245_123;
 
-let server: EmbeddedPostgres;
-let serverPort: number;
-let dataRoot: string;
 /** A client carrying the governed override: every timestamptz arrives as a number. */
 let parsing: PgClient;
 /** A client with pg's defaults, proving the override did not leak globally. */
 let defaulting: PgClient;
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
-
-      if (address === null || typeof address === "string") {
-        probe.close(() => reject(new Error("No ephemeral port was assigned.")));
-        return;
-      }
-
-      const { port } = address;
-      probe.close(() => resolve(port));
-    });
-  });
+function connectionString(): string {
+  return cluster.connectionStringFor(DATABASE);
 }
 
-async function removeWithRetry(directory: string): Promise<boolean> {
-  for (let attempt = 0; attempt < 15; attempt += 1) {
-    try {
-      rmSync(directory, { recursive: true, force: true });
-    } catch {
-      // Retried; the final `existsSync` is the verdict.
-    }
+/**
+ * Run `body` with one session setting changed, restoring whatever was actually in force.
+ *
+ * Both clients below are file-level and shared by every test, so a setting left behind is a
+ * setting every later test inherits. The **captured** value is restored rather than an assumed
+ * one, the restoration happens in `finally`, and if the body and the restoration both fail both
+ * are kept — the body's failure first, because that is the one worth reading.
+ */
+async function withSessionSetting(
+  client: PgClient,
+  setting: "timezone" | "datestyle",
+  value: string,
+  body: () => Promise<void>,
+): Promise<void> {
+  const { rows } = await client.query<{ value: string }>(
+    `select current_setting('${setting}') as value`,
+  );
+  const original = rows[0]?.value;
 
-    if (!existsSync(directory)) {
-      return true;
-    }
-
-    await sleep(200);
+  if (original === undefined) {
+    throw new Error(`the session ${setting} could not be read, so it cannot be restored`);
   }
 
-  return !existsSync(directory);
-}
+  await client.query(`set ${setting} to '${value}'`);
 
-function connectionString(): string {
-  return `postgresql://${SERVER_USER}:${SERVER_PASSWORD}@127.0.0.1:${serverPort}/${DATABASE}`;
+  let bodyError: unknown;
+  let threw = false;
+
+  try {
+    await body();
+  } catch (error) {
+    threw = true;
+    bodyError = error;
+    throw error;
+  } finally {
+    try {
+      await client.query(`set ${setting} to '${original}'`);
+    } catch (restoreError) {
+      if (!threw) {
+        throw restoreError;
+      }
+
+      throw new AggregateError(
+        [bodyError, restoreError],
+        `the assertion failed and restoring the session ${setting} also failed; the first ` +
+          "error is the original failure",
+      );
+    }
+  }
 }
 
 /** Insert one listing whose four governed instants are all the reference instant. */
@@ -147,40 +169,6 @@ async function insertListingAt(epochMilliseconds: number): Promise<string> {
 }
 
 beforeAll(async () => {
-  dataRoot = mkdtempSync(join(tmpdir(), "cdp-parser-"));
-  serverPort = await freePort();
-
-  server = new EmbeddedPostgres({
-    databaseDir: join(dataRoot, "cluster"),
-    port: serverPort,
-    user: SERVER_USER,
-    password: SERVER_PASSWORD,
-    persistent: false,
-    initdbFlags: ["--locale=C", "--encoding=UTF8"],
-    onLog: () => {},
-    onError: () => {},
-  });
-
-  await server.initialise();
-  await server.start();
-  await server.createDatabase(DATABASE);
-
-  // The governed schema, applied through the governed runner — these tests read the real
-  // migration's columns rather than an ad-hoc table.
-  const pool = new Pool({ connectionString: connectionString(), max: 1 });
-  const db = new Kysely<unknown>({ dialect: new PostgresDialect({ pool }) });
-
-  try {
-    const migrated = await new Migrator({
-      db,
-      provider: createMigrationProvider(),
-    }).migrateToLatest();
-
-    expect(migrated.error, "the governed migration must apply").toBeUndefined();
-  } finally {
-    await db.destroy();
-  }
-
   parsing = new Client({
     connectionString: connectionString(),
     types: createTimestamptzTypeOverrides(),
@@ -189,25 +177,11 @@ beforeAll(async () => {
 
   await parsing.connect();
   await defaulting.connect();
-}, CLUSTER_TIMEOUT_MS);
 
-afterAll(async () => {
-  for (const client of [parsing, defaulting]) {
-    try {
-      await client?.end();
-    } catch {
-      // The server is going away regardless.
-    }
-  }
-
-  try {
-    await server?.stop();
-  } catch {
-    // Fall through to removal, which is the guarantee that matters.
-  }
-
-  const removed = await removeWithRetry(dataRoot);
-  expect(removed, `the disposable cluster at ${dataRoot} was not removed`).toBe(true);
+  // Registered rather than closed by a local `afterAll`: the helper closes every registered
+  // resource before it asks the server to stop.
+  cluster.closeBeforeShutdown("parsing client", () => parsing.end());
+  cluster.closeBeforeShutdown("defaulting client", () => defaulting.end());
 }, CLUSTER_TIMEOUT_MS);
 
 describe("the override on a live connection", () => {
@@ -346,19 +320,15 @@ describe("session independence against the live server", () => {
     const listingId = await insertListingAt(REFERENCE_MILLISECONDS);
     const readings: unknown[] = [];
 
-    try {
-      for (const zone of ["UTC", "Asia/Kolkata", "America/Los_Angeles", "Pacific/Kiritimati"]) {
-        await parsing.query(`set time zone '${zone}'`);
-
+    for (const zone of ["UTC", "Asia/Kolkata", "America/Los_Angeles", "Pacific/Kiritimati"]) {
+      await withSessionSetting(parsing, "timezone", zone, async () => {
         const { rows } = await parsing.query(
           "select submitted_at from listing where id = $1",
           [listingId],
         );
 
         readings.push(rows[0]?.submitted_at);
-      }
-    } finally {
-      await parsing.query("set time zone 'UTC'");
+      });
     }
 
     expect(readings).toEqual([
@@ -372,19 +342,15 @@ describe("session independence against the live server", () => {
   it("shows the rendered text differing while the instant does not", async () => {
     const renderings = new Set<string>();
 
-    try {
-      for (const zone of ["UTC", "Asia/Kolkata", "America/Los_Angeles"]) {
-        await parsing.query(`set time zone '${zone}'`);
-
+    for (const zone of ["UTC", "Asia/Kolkata", "America/Los_Angeles"]) {
+      await withSessionSetting(parsing, "timezone", zone, async () => {
         const { rows } = await parsing.query(
           "select to_timestamp($1::bigint / 1000.0)::timestamptz(3)::text as rendered",
           [String(REFERENCE_MILLISECONDS)],
         );
 
         renderings.add(String(rows[0]?.rendered));
-      }
-    } finally {
-      await parsing.query("set time zone 'UTC'");
+      });
     }
 
     // Three different strings, one instant — which is why the offset must be honoured.
@@ -394,15 +360,11 @@ describe("session independence against the live server", () => {
 
 describe("incompatible DateStyle fails loudly", () => {
   it("refuses the SQL,MDY rendering rather than misparsing it", async () => {
-    try {
-      await parsing.query("set datestyle to 'SQL, MDY'");
-
+    await withSessionSetting(parsing, "datestyle", "SQL, MDY", async () => {
       await expect(parsing.query("select now()::timestamptz(3) as moment")).rejects.toThrow(
         TimestamptzParseError,
       );
-    } finally {
-      await parsing.query("set datestyle to 'ISO, MDY'");
-    }
+    });
 
     // And the connection is usable again once the governed DateStyle is restored, which is
     // why pinning `DateStyle = ISO` is recorded as a `C9` connection obligation.
