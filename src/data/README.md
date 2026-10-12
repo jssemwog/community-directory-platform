@@ -172,9 +172,13 @@ implementation**:
   view or a single `C9` query module), replacement-value semantics, and
   restriction-only enforcement on the write paths.
 - **`DDM-8`** revision storage and the representation of the effective public
-  version. *Outstanding:* stale-edit detection and resolution policy (and any
-  version token), the isolation level for revision transactions, and
-  replacement-value semantics.
+  version. *Outstanding:* the isolation level for revision transactions, and
+  replacement-value semantics. **Stale-edit detection and resolution policy —
+  and its supporting token — are decided** (`ADR-023`, `Accepted` 2026-10-12,
+  issue #181): see *Stale-edit detection is decided* below. **That policy is
+  not a `DDM` item and carries no `DDM` number** — it is an `ADR-017`
+  implementation-time deferral, noted here only because it governs the write
+  paths this item's revision storage serves.
 - **`DDM-9`** soft-delete versus hard-delete, publication state, and purge.
 
 **Timestamp physical representation is decided** (`ADR-022`, `Accepted` 2026-10-09,
@@ -303,6 +307,41 @@ issue #165), **nor accepting `ADR-021`** (2026-10-09, issue #167) **authorizes a
 this directory** — no configuration, no reference data, no seed data, no schema and no
 migration. **`ADR-021` fixes what the first schema migration must declare; it creates
 none of it.**
+
+**Stale-edit detection is decided** (`ADR-023`, `Accepted` 2026-10-12, issue #181),
+filling the deferral `ADR-017` recorded as *"product policy not yet ruled"* together
+with *"any supporting version token"*. **Stale changes must be detected**; a stale
+write is **rejected** — never automatically refreshed, merged or overwritten — with
+**nothing saved or partially applied** and the **listing and pending revision left
+unchanged**; **no role may override**, because **staleness is a concurrency-safety
+rule, not an ordinary validation rule or a discretionary moderation outcome**. A
+revision **is stale at `OP-10` whenever the listing's current version differs from its
+captured base**, so the **base token is captured at revision creation and persisted
+with the revision**. The **MVP token is `listing.lastUpdatedAt`**, captured when work
+begins, its **exact epoch-millisecond value preserved**, compared by **exact
+equality**, with a **missing or unequal token refusing the write**, **never exposed
+publicly**, and **no dedicated counter or fingerprint** for the MVP.
+
+**This directory is where three of those obligations land**, and none of them is
+implemented. **`PS-11`'s lock is not enough on its own** — `ADR-017` says so, and
+`ADR-023` carries it forward: **locking or transaction serialization alone does not
+satisfy stale-input detection**, because content read into an editing screen before the
+transaction begins is outside the lock. **The exact-equality comparison is sound here
+only because of two rules already in force:** `ADR-022`'s **exact epoch-millisecond
+round trip**, which this directory owns, and **`DI-6`'s strictly-later requirement**,
+which guarantees that two accepted versions of one listing can never share a
+`lastUpdatedAt`. **`lastUpdatedAt` is therefore load-bearing for concurrency while
+`DI-6` is in force**, and **relaxing `DI-6` requires a separately governed
+reassessment**. A **same-millisecond `DI-6` failure remains a distinct
+timestamp-advancement failure** and must **not** be reported as stale input.
+
+**Accepting `ADR-023` authorizes nothing here.** The **physical column name and its
+nullability**, the **migration shape**, the **legacy/backfill posture**, the
+**`ListingRevision` field representation**, the **API transport mechanics**, the
+**`PS-11` isolation level**, the **retry policy**, the **transaction implementation**,
+and **revision and moderation persistence** are all **separately reviewed downstream
+steps**. **No token column, comparison logic, migration or revision write path exists
+in this directory**, and `listing_revision` carries **no base-version column** today.
 
 ## What does not exist, and what is not authorized
 
