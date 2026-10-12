@@ -15,10 +15,18 @@ database is provisioned, and `C9` persistence is not implemented.~~
 partial unique index enforcing `DI-11`. **It implements already accepted
 decisions and creates no new policy.**
 
+**It also contains the second schema migration** —
+`002-add-revision-base-version.ts` (issue #183) — which adds the single
+base-version column `ADR-023` requires. **It likewise implements an already
+accepted decision and creates no new policy.**
+
 **What still does not exist:** **no database is provisioned**, **no PostgreSQL
 version is selected**, **no migration has been executed against any shared,
 hosted, staging or production database**, and **`C9` persistence is not
-implemented** — no repository and no query module. ~~and **no `pg` timestamp
+implemented** — no repository and no query module. **Storage for the base token
+now exists, but nothing reads or writes it**: there is no domain field, no
+mapper, no API transport, no staleness comparison and no administrator message,
+and the **`PS-11` isolation level and retry policy remain undecided**. ~~and **no `pg` timestamp
 parser** (`ADR-022` requires one, explicitly and tested, before persistence
 implementation is complete)~~ — **the `ADR-022` timestamp parser now exists**
 (`../timestamp-parser.ts`, issue #173), though **no pool passes it yet**, since
@@ -135,11 +143,33 @@ row uses the new key.
   migration, so tests, helpers and shared code live beside `../migrate.ts`
   instead. This README is ignored, because `.md` is not a migration extension.
 
-~~**Still empty.**~~ **One migration: `001-create-listing-and-revision-tables.ts`.**
+~~**Still empty.**~~ ~~**One migration: `001-create-listing-and-revision-tables.ts`.**~~
+**Two migrations**, in the order their ordinals impose:
 
-Its attacking tests live beside `../migrate.ts`, in
-`../first-schema-migration.test.ts`, for the reason stated just above — a test
-placed in this directory would be collected as a migration. They run
+1. `001-create-listing-and-revision-tables.ts` (issue #171) — the `listing` and
+   `listing_revision` structures.
+2. `002-add-revision-base-version.ts` (issue #183) — **one column**,
+   `listing_revision.base_listing_last_updated_at timestamptz(3) not null`, with
+   **no default, no `CHECK`, no index and no trigger**. It stores the listing
+   version a revision was prepared against, which `ADR-023` requires
+   (`Accepted` 2026-10-12, issue #181) and nothing stored before. **`listing` is
+   not touched**, and the base-version instant is **`ADR-023`'s**, not one of
+   `ADR-022`'s four.
+
+**`ADR-023` obliges a migration placed here to leave three things alone.** Its
+`NOT NULL` is honest only because no revision row exists, so **adding a default
+is not a shortcut for it** — a default would fabricate a base version nobody
+captured, and a clock default would make every comparison pass. **Do not add a
+`CHECK`**: the rule *"must equal the listing's current value"* is a **cross-row**
+condition a `CHECK` cannot see, and writing one would misrepresent a write-path
+predicate as a store guarantee. **Do not add a trigger** for the token's
+immutability, which is a write-path rule on `ADR-017` `PS-9`'s precedent. **Do
+not add an index**: indexing is `DDM-4`, unresolved with `OQ-4`.
+
+Their attacking tests live beside `../migrate.ts`, in
+`../first-schema-migration.test.ts` and `../second-schema-migration.test.ts`, for
+the reason stated just above — a test placed in this directory would be collected
+as a migration. They run
 **unconditionally** against a real PostgreSQL server started from the
 `embedded-postgres` development dependency authorized on issue #171, on an
 ephemeral port with a disposable data directory. That server is a **test-harness

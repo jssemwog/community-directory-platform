@@ -21,6 +21,13 @@
  * implemented or registered** — `ADR-022` leaves it to the persistence unit, so the
  * round-trip assertion below converts explicitly in SQL instead.
  *
+ * **The governed runner applies every migration in the folder, so the state under test is the
+ * whole applied chain** - `001` and, since issue #183, `002`. This file's subject is still
+ * `001`: its tables, columns, constraints and indexes. What `002` changes is accounted for
+ * where it lands - the applied-migration list, `listing_revision`'s column count, the revision
+ * fixture's `not null` obligation, and the step-by-step reversal at the end - and `002`'s own
+ * attacking tests live in `second-schema-migration.test.ts`, not here.
+ *
  * Isolation and cleanup are owned by `testing/embedded-cluster.ts` (issue #179): one isolated
  * cluster for this file on an **ephemeral port** with a **disposable data directory**, torn down
  * on every path — success, assertion failure and setup failure alike. The helper closes this
@@ -79,6 +86,25 @@ type PgClient = InstanceType<PgModule["Client"]>;
 
 /** The migration under test, as `FileMigrationProvider` names it. */
 const MIGRATION_NAME = "001-create-listing-and-revision-tables";
+
+/**
+ * The second migration, as the provider names it (issue #183).
+ *
+ * This file's subject is still `001`, but the governed runner applies **every** migration in
+ * the folder, so `002` is part of the state every assertion below observes. It is named here
+ * so that the discovery and history assertions can state the real, ordered set rather than
+ * pretend `001` arrives alone. `002`'s own attacking tests live in
+ * `second-schema-migration.test.ts`.
+ */
+const SECOND_MIGRATION_NAME = "002-add-revision-base-version";
+
+/**
+ * The base-version column `002` adds (`ADR-023` items 9-12).
+ *
+ * `001` does not create it, and this file does not attack it — but it is `not null`, so every
+ * revision fixture here must supply it, and the revision shape assertion must count it.
+ */
+const BASE_VERSION_COLUMN = "base_listing_last_updated_at";
 
 /** PostgreSQL error codes this file attacks for. Named, because a bare code is a riddle. */
 const NOT_NULL_VIOLATION = "23502";
@@ -287,6 +313,11 @@ async function insertRevision(
     email: null,
     website: null,
     rejected_at: null,
+    // `002` made this `not null` (`ADR-023` item 12: a missing token refuses). Every revision
+    // fixture must therefore carry it, including the ones attacking something else - a row
+    // that omits it fails on 23502 before reaching the constraint under attack. The value is
+    // the listing fixture's own `last_updated_at`, which is what a captured base token is.
+    [BASE_VERSION_COLUMN]: "2026-01-02T03:04:05.123+00:00",
     ...overrides,
   };
 
@@ -328,7 +359,10 @@ describe("up migration", () => {
       "select name from kysely_migration order by name",
     );
 
-    expect(rows.map((row) => row.name)).toEqual([MIGRATION_NAME]);
+    // Exactly the two governed migrations, in the order the ordinal prefixes impose. Stated
+    // exhaustively rather than as a subset: a third file appearing in the folder, or either of
+    // these failing to apply, must fail here rather than pass unnoticed.
+    expect(rows.map((row) => row.name)).toEqual([MIGRATION_NAME, SECOND_MIGRATION_NAME]);
   });
 
   it("creates exactly the two governed tables, and no other", async () => {
@@ -393,10 +427,13 @@ describe("schema shape", () => {
     ]);
   });
 
-  it("gives listing_revision exactly its 18 governed columns, in order", async () => {
+  it("gives listing_revision exactly its 19 governed columns, in order", async () => {
     const rows = await columnsOf("listing_revision");
 
-    expect(rows).toHaveLength(18);
+    // Eighteen from `001`, then the base-version column `002` appends (issue #183). `ALTER
+    // TABLE ... ADD COLUMN` takes the next ordinal position, so the deterministic order is
+    // `001`'s eighteen followed by it — asserted exhaustively and in order, not as a subset.
+    expect(rows).toHaveLength(19);
     expect(rows.map((row) => row.column_name)).toEqual([
       "id",
       "listing_id",
@@ -416,6 +453,7 @@ describe("schema shape", () => {
       "website",
       "website_designated_public",
       "rejected_at",
+      BASE_VERSION_COLUMN,
     ]);
   });
 
@@ -500,7 +538,12 @@ describe("schema shape", () => {
     }
   });
 
-  it("types all four governed instants as timestamptz(3)", async () => {
+  it("types ADR-022's four lifecycle and rejection instants as timestamptz(3)", async () => {
+    // These four are `ADR-022`'s inventory, created by `001`, and they are the whole of it:
+    // two write-once/forward-moving listing instants and the two presence-iff-rejected
+    // retention anchors. The base-version instant `002` adds is **not** one of them - it
+    // belongs to `ADR-023` and is asserted separately below - so this list stays at four and
+    // must not be grown into "all the timestamps".
     const expectations: ReadonlyArray<readonly [string, string, string]> = [
       ["listing", "submitted_at", "NO"],
       ["listing", "last_updated_at", "NO"],
@@ -515,6 +558,29 @@ describe("schema shape", () => {
       expect(found?.datetime_precision, `${table}.${column}`).toBe(3);
       expect(found?.is_nullable, `${table}.${column}`).toBe(nullable);
     }
+  });
+
+  it("carries exactly five timestamptz columns: ADR-022's four plus ADR-023's base version", async () => {
+    // The inventory assertion the two ADRs jointly imply. Counting them here is what stops a
+    // sixth instant arriving unnoticed, and naming the fifth separately is what keeps
+    // `ADR-022`'s four from being quietly redefined as five.
+    const instants: string[] = [];
+
+    for (const table of ["listing", "listing_revision"] as const) {
+      for (const row of await columnsOf(table)) {
+        if (row.data_type === "timestamp with time zone") {
+          instants.push(`${table}.${row.column_name}`);
+        }
+      }
+    }
+
+    expect(instants.sort()).toEqual([
+      `listing_revision.${BASE_VERSION_COLUMN}`,
+      "listing.last_updated_at",
+      "listing.rejected_at",
+      "listing.submitted_at",
+      "listing_revision.rejected_at",
+    ].sort());
   });
 
   it("defaults false on exactly the four designation columns, and nowhere else", async () => {
@@ -1039,8 +1105,20 @@ describe("governed millisecond timestamp round trip", () => {
 });
 
 describe("down migration against an empty schema", () => {
+  /**
+   * **One `down` is one step, and there are now two migrations** (issue #183).
+   *
+   * `runMigration("down")` calls Kysely's `migrateDown`, which reverses **the most recently
+   * applied migration only**. While `001` stood alone, a single `down` emptied the schema, and
+   * this test asserted exactly that. With `002` applied on top, the first `down` reverses
+   * `002` and **both tables remain** - so reaching `001`'s reversal now takes a second `down`.
+   *
+   * That is asserted step by step rather than collapsed, because the intermediate state is the
+   * one a real rollback would land in, and a test that only checked the end state would pass
+   * even if the first `down` had dropped a table it must not touch.
+   */
   it(
-    "applies and then reverses completely, leaving neither governed table behind",
+    "reverses one migration per step, reaching an empty schema only after both",
     async () => {
       const dependencies = dependenciesFor(DOWN_DATABASE);
       const downClient = new Client({
@@ -1049,28 +1127,57 @@ describe("down migration against an empty schema", () => {
 
       await downClient.connect();
 
-      try {
-        expect(await runMigration("latest", dependencies)).toBe(SUCCESS);
-
-        const { rows: created } = await downClient.query<{ table_name: string }>(
+      const tablesNow = async (): Promise<string[]> => {
+        const { rows } = await downClient.query<{ table_name: string }>(
           `select table_name from information_schema.tables
             where table_schema = 'public' and table_name in ('listing','listing_revision')
             order by table_name`,
         );
 
-        expect(created.map((row) => row.table_name)).toEqual([
-          "listing",
-          "listing_revision",
-        ]);
+        return rows.map((row) => row.table_name);
+      };
 
-        expect(await runMigration("down", dependencies)).toBe(SUCCESS);
-
-        const { rows: remaining } = await downClient.query(
-          `select table_name from information_schema.tables
-            where table_schema = 'public' and table_name in ('listing','listing_revision')`,
+      const appliedNow = async (): Promise<string[]> => {
+        const { rows } = await downClient.query<{ name: string }>(
+          "select name from kysely_migration order by name",
         );
 
-        expect(remaining).toEqual([]);
+        return rows.map((row) => row.name);
+      };
+
+      const revisionColumnsNow = async (): Promise<string[]> => {
+        const { rows } = await downClient.query<{ column_name: string }>(
+          `select column_name from information_schema.columns
+            where table_schema = 'public' and table_name = 'listing_revision'
+            order by ordinal_position`,
+        );
+
+        return rows.map((row) => row.column_name);
+      };
+
+      try {
+        expect(await runMigration("latest", dependencies)).toBe(SUCCESS);
+
+        expect(await tablesNow()).toEqual(["listing", "listing_revision"]);
+        expect(await appliedNow()).toEqual([MIGRATION_NAME, SECOND_MIGRATION_NAME]);
+        expect(await revisionColumnsNow()).toContain(BASE_VERSION_COLUMN);
+
+        // First step: `002` only. The column goes; everything `001` created stays.
+        expect(await runMigration("down", dependencies)).toBe(SUCCESS);
+
+        expect(await appliedNow()).toEqual([MIGRATION_NAME]);
+        expect(await tablesNow()).toEqual(["listing", "listing_revision"]);
+
+        const afterFirstDown = await revisionColumnsNow();
+
+        expect(afterFirstDown).not.toContain(BASE_VERSION_COLUMN);
+        expect(afterFirstDown).toHaveLength(18);
+
+        // Second step: `001`. Only now is the schema empty.
+        expect(await runMigration("down", dependencies)).toBe(SUCCESS);
+
+        expect(await appliedNow()).toEqual([]);
+        expect(await tablesNow()).toEqual([]);
       } finally {
         await downClient.end();
       }

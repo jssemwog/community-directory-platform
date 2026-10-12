@@ -335,23 +335,45 @@ which guarantees that two accepted versions of one listing can never share a
 reassessment**. A **same-millisecond `DI-6` failure remains a distinct
 timestamp-advancement failure** and must **not** be reported as stale input.
 
-**Accepting `ADR-023` authorizes nothing here.** The **physical column name and its
+~~**Accepting `ADR-023` authorizes nothing here.** The **physical column name and its
 nullability**, the **migration shape**, the **legacy/backfill posture**, the
 **`ListingRevision` field representation**, the **API transport mechanics**, the
 **`PS-11` isolation level**, the **retry policy**, the **transaction implementation**,
 and **revision and moderation persistence** are all **separately reviewed downstream
 steps**. **No token column, comparison logic, migration or revision write path exists
-in this directory**, and `listing_revision` carries **no base-version column** today.
+in this directory**, and `listing_revision` carries **no base-version column** today.~~
+
+**The storage now exists, and only the storage** (issue #183). The **physical column
+name, its nullability and the migration shape** were the three questions `ADR-023`
+delegated, and `migrations/002-add-revision-base-version.ts` settles them:
+**`listing_revision.base_listing_last_updated_at timestamptz(3) not null`**, with
+**no default, no `CHECK`, no index and no trigger**. `NOT NULL` is honest because
+**no revision row exists** — `listing_revision` is written by nothing here — so **no
+backfill was owed**; and because every revision that will ever exist must carry the
+token (`ADR-023` item 9), while a row missing it could never be approved (item 12).
+`listing.last_updated_at` is **unchanged**: already `timestamptz(3) not null` and
+already strictly forward-moving, it is the comparison's other side as it stands.
+
+**Nothing reads or writes that column.** There is **no domain field** on
+`ListingRevision`, **no mapper**, **no API transport**, **no staleness comparison**
+and **no administrator message**; the **`PS-11` isolation level and retry policy
+remain undecided**; and **no revision or moderation persistence exists** — no
+revision read, no revision write, no moderation operation. The **token's
+immutability** is a write-path rule (`ADR-017` `PS-9`'s precedent) that no write path
+yet exists to enforce. Each remains a **separately reviewed downstream step**, and
+**no provisioning or production execution has occurred**.
 
 ## What does not exist, and what is not authorized
 
 ~~**No schema, no migration**, no application connection or pool configuration, and
 no repository or persistence implementation exists in this repository.~~
 
-**The first schema migration now exists** —
+**Two schema migrations now exist** —
 `migrations/001-create-listing-and-revision-tables.ts` (issue #171), creating the
 `listing` and `listing_revision` structures with their keys, constraints and the
-`DI-11` partial unique index. **Nothing else here changed.** There is still **no
+`DI-11` partial unique index, and
+`migrations/002-add-revision-base-version.ts` (issue #183), adding the single
+base-version column described above. **Nothing else here changed.** There is still **no
 application connection or pool configuration, and no repository or persistence
 implementation**, and the application remains **datastore-independent at
 runtime**: a placeholder repository or a stub client would encode assumptions

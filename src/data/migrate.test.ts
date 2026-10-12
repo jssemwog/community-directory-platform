@@ -141,24 +141,35 @@ describe("migration discovery (ADR-018 FileMigrationProvider)", () => {
     );
   });
 
-  it("discovers exactly the first schema migration, and only it", async () => {
+  it("discovers exactly the two schema migrations, in governed order", async () => {
     // This assertion previously read "discovers no migration today, because none
-    // exists". The first schema migration landed with issue #171, so the empty
-    // expectation became false — and the honest replacement is the exact set, which
-    // also guards against a second migration arriving unnoticed.
+    // exists", then "exactly the first schema migration, and only it". The second
+    // migration landed with issue #183, so the single-element expectation became false
+    // in turn — and the honest replacement is still the exact set, in the order the
+    // ordinal prefixes impose, which guards against a third arriving unnoticed.
     const discovered = await createMigrationProvider().getMigrations();
 
-    expect(Object.keys(discovered)).toEqual(["001-create-listing-and-revision-tables"]);
+    expect(Object.keys(discovered)).toEqual([
+      "001-create-listing-and-revision-tables",
+      "002-add-revision-base-version",
+    ]);
   });
 
-  it("exposes an up and a down for the first schema migration", async () => {
+  it("exposes an up and a down for both schema migrations", async () => {
     const discovered = await createMigrationProvider().getMigrations();
     const first = discovered["001-create-listing-and-revision-tables"];
+    const second = discovered["002-add-revision-base-version"];
 
     expect(typeof first?.up).toBe("function");
     // `ADR-018` permits a `down` only where reversal is genuinely safe, complete and
     // honest. The first migration qualifies while the schema is empty, and says so.
     expect(typeof first?.down).toBe("function");
+
+    expect(typeof second?.up).toBe("function");
+    // The second qualifies on the same ground and for as long as it holds: no revision
+    // row exists, so the column it drops has never carried a value. Its own
+    // documentation records that this becomes destructive once captured tokens exist.
+    expect(typeof second?.down).toBe("function");
   });
 
   it("discovers migration files in ascending name order and ignores non-migrations", async () => {

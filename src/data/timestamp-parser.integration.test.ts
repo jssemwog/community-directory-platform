@@ -226,10 +226,17 @@ describe("the four governed columns", () => {
 
     const revisionId = randomUUID();
     await parsing.query(
+      // `base_listing_last_updated_at` is supplied because migration `002` made it
+      // `not null` (issue #183), not because it is under test here: this file's subject is
+      // `ADR-022`'s **four** governed instants, and the base-version instant belongs to
+      // `ADR-023`. It is given the same reference value so the row is valid, and it is
+      // deliberately left out of the `governed` list below.
       `insert into listing_revision (
-         id, listing_id, state, name, category, description, locality, country, rejected_at
+         id, listing_id, state, name, category, description, locality, country, rejected_at,
+         base_listing_last_updated_at
        ) values ($1, $2, 'rejected', 'A Business', 'food-drink', 'A description.',
-                 'A Locality', 'A Country', to_timestamp($3::bigint / 1000.0))`,
+                 'A Locality', 'A Country', to_timestamp($3::bigint / 1000.0),
+                 to_timestamp($3::bigint / 1000.0))`,
       [revisionId, listingId, String(REFERENCE_MILLISECONDS)],
     );
 
