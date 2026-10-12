@@ -355,7 +355,21 @@ export interface ShutdownOutcome {
  * reaches this function.
  */
 async function resolveBundledPgCtl(): Promise<string> {
-  const platformPackage: unknown = await import("@embedded-postgres/windows-x64");
+  // The failure messages below are **fixed text**. The underlying resolution error carries the
+  // importing module's absolute path, and a diagnostic is not the place for one: this module's
+  // standing rule is that diagnostics name the stage, the owned PID, the owned path and the
+  // elapsed time, and nothing else. The cause is deliberately not interpolated.
+  let platformPackage: unknown;
+
+  try {
+    platformPackage = await import("@embedded-postgres/windows-x64");
+  } catch {
+    throw new Error(
+      "the platform package that ships the bundled PostgreSQL control executable could not be " +
+        "loaded; it installs only on win32",
+    );
+  }
+
   const candidate = (platformPackage as { pg_ctl?: unknown }).pg_ctl;
 
   if (typeof candidate !== "string" || candidate === "") {

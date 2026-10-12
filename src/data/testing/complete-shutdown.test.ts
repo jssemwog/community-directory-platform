@@ -61,7 +61,7 @@ describe("the bounded shutdown contract", () => {
   });
 });
 
-describe("the request refuses what it cannot prove", () => {
+describe.runIf(onWindows)("the request refuses what it cannot prove", () => {
   it(
     "reports failure, loudly and without a credential, for a directory that is not a cluster",
     async () => {
@@ -80,8 +80,11 @@ describe("the request refuses what it cannot prove", () => {
 
         // No credential can reach a diagnostic, because none is used: shutdown authority comes
         // from the data directory, not a database login.
+        //
+        // Only the password is asserted. The user name is not a secret, and "postgres" is far
+        // too generic a string to assert the absence of — it occurs in package names and
+        // paths, so asserting it would fail on honest text and prove nothing about leakage.
         expect(outcome.detail).not.toContain(CLUSTER_PASSWORD);
-        expect(outcome.detail).not.toContain(CLUSTER_USER);
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
