@@ -27,7 +27,7 @@
  * process names, names no PID and terminates nothing — its own constraint tests enforce that,
  * and this file never relaxes them.
  */
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
@@ -209,8 +209,34 @@ interface StartedCluster {
   readonly claimedDirectory: string;
 }
 
+/**
+ * Every root this file creates, so that **no path can leak one**.
+ *
+ * The per-test `finally` blocks below remove their own root on the normal paths. This registry
+ * is the backstop for the two paths they cannot cover: a cluster that fails to start, and a
+ * test that aborts before reaching its cleanup. Both were observed in practice - when an
+ * unrelated stale directory made a sibling test fail, the aborted runs left roots behind - and
+ * a test file that leaks disposable clusters is the exact defect this unit exists to remove, so
+ * it must not be one itself. Removal is idempotent, so an already-cleaned root costs nothing.
+ */
+const createdRoots: string[] = [];
+
+afterAll(() => {
+  for (const root of createdRoots.splice(0)) {
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch {
+      // A root that cannot be removed is surfaced by the suite's own residue checks rather than
+      // by throwing here, which would mask the failure that actually matters.
+    }
+  }
+});
+
 async function startCluster(): Promise<StartedCluster> {
   const root = mkdtempSync(join(tmpdir(), "cdp-shutdown-"));
+
+  createdRoots.push(root);
+
   const clusterDirectory = join(root, "cluster");
   const server = new EmbeddedPostgres({
     databaseDir: clusterDirectory,
@@ -223,18 +249,32 @@ async function startCluster(): Promise<StartedCluster> {
     onError: () => {},
   });
 
-  await server.initialise();
-  await server.start();
+  try {
+    await server.initialise();
+    await server.start();
 
-  const lines = readFileSync(join(clusterDirectory, "postmaster.pid"), "utf8").split(/\r?\n/);
+    const lines = readFileSync(join(clusterDirectory, "postmaster.pid"), "utf8").split(/\r?\n/);
 
-  return {
-    server,
-    root,
-    clusterDirectory,
-    postmaster: Number((lines[0] ?? "").trim()),
-    claimedDirectory: (lines[1] ?? "").trim(),
-  };
+    return {
+      server,
+      root,
+      clusterDirectory,
+      postmaster: Number((lines[0] ?? "").trim()),
+      claimedDirectory: (lines[1] ?? "").trim(),
+    };
+  } catch (error) {
+    // A half-built cluster is torn down here rather than left to the registry, so what gets
+    // reported is the start failure itself and not a later removal complaint.
+    try {
+      await requestCompleteShutdown(clusterDirectory);
+    } catch {
+      // Best effort: there may be nothing to stop, which is not what this path reports.
+    }
+
+    rmSync(root, { recursive: true, force: true });
+
+    throw error;
+  }
 }
 
 describe.runIf(onWindows)("complete shutdown, against a real cluster", () => {
