@@ -21,22 +21,58 @@
  *
  * ## What this module guarantees instead
  *
- * Shutdown is requested **once** through the package's public API. The postmaster's identity is
- * then taken from PostgreSQL's own `postmaster.pid` — whose second line records the data
- * directory that process claims — and accepted **only** when that claim matches the directory
- * this helper created. Exit is then *observed*, never caused: `process.kill(pid, 0)` asks
- * whether the process exists and nothing else. Only once the owned postmaster is gone is the
- * owned temporary root removed, under a bounded retry over the transient Windows lock codes.
+ * Shutdown is requested **once**. The postmaster's identity is taken from PostgreSQL's own
+ * `postmaster.pid` — whose second line records the data directory that process claims — and
+ * accepted **only** when that claim matches the directory this helper created. Exit is then
+ * *observed*, never caused: `process.kill(pid, 0)` asks whether the process exists and nothing
+ * else. Only once the owned postmaster is gone is the owned temporary root removed, under a
+ * bounded retry over the transient Windows lock codes.
  *
- * **No process is ever signalled, killed or enumerated.** There is no `taskkill`, no `pg_ctl`,
- * no `wmic`, no `tasklist`, no shell, no process-name matching and no elevation anywhere in
- * this file. The PID is observational evidence; it is never a target. A PID that cannot be
- * proven to own this helper's directory is refused, and refusal authorizes no action at all.
+ * ## Windows takes PostgreSQL's own complete shutdown (issue #185)
+ *
+ * The account above was **necessary but not sufficient**, and the gap was measured rather than
+ * argued. Because the postmaster's identity is all `postmaster.pid` records, this module knew
+ * **one** PID — and a single-PID existence probe is silent about every other PID. An owned
+ * `--forkchild=startup` process was observed **outliving its postmaster by 69.2 seconds**,
+ * created in the very window the unawaited `taskkill /f /t` was snapshotting the process tree,
+ * while **every assertion here passed**. It happened roughly once in ninety-five postmasters,
+ * so it surfaced either as silent residue after a green run or as an intermittent
+ * directory-removal failure when the survivor still held a handle.
+ *
+ * On Windows this module therefore asks **PostgreSQL** to shut the cluster down, through the
+ * bundled `pg_ctl` reached by the platform package's public export:
+ * `stop -D <owned directory> -m fast -w -t <bounded>`. `-m fast` is *"quit directly, with
+ * proper shutdown"*, under which the postmaster terminates its children and waits for them;
+ * `-w` waits for that to finish. A zero exit therefore means the **whole server** is gone, on
+ * PostgreSQL's authority rather than on an inference of ours — and `EmbeddedPostgres.stop()` is
+ * **not** called afterwards, which also stops the package racing this module by deleting the
+ * data directory while children may still hold handles inside it.
+ *
+ * **Every other platform keeps the package's public API, and is already correct there:**
+ * `stop()` sends `SIGINT`, which is fast shutdown, and the postmaster reaps its children
+ * *before* exiting — so awaiting the postmaster's exit already implies the children are gone.
+ * The defect is Windows-specific and so is the divergence.
+ *
+ * ## What is still never done
+ *
+ * **No process is ever signalled, killed or enumerated by this module.** There is no
+ * `taskkill`, no `wmic`, no `tasklist`, no shell, no command string, no process-name matching
+ * and no elevation anywhere in this file. The one permitted child process is the bundled
+ * `pg_ctl`, invoked with an **argument array** under `shell: false`, pointed at the
+ * **canonicalized owned data directory** and nothing else — it **names no PID**, so PID reuse
+ * is structurally irrelevant and no unrelated PostgreSQL process can be reached. It needs no
+ * credential, because shutdown authority comes from the data directory rather than a database
+ * login. The PID this module holds remains observational evidence; it is never a target. A PID
+ * that cannot be proven to own this helper's directory is refused, and refusal authorizes no
+ * action at all.
  *
  * Cleanup never reports success while a known process or the owned directory remains, and a
- * cleanup failure fails the test file rather than being logged and forgiven. Diagnostics name
- * the stage, the owned PID, the owned path and the elapsed time — never a password and never a
- * connection string.
+ * cleanup failure fails the test file rather than being logged and forgiven. A `pg_ctl` spawn
+ * failure, non-zero exit, signal or timeout is such a failure, and there is **no fallback** to
+ * a forced kill, to a fixed sleep, or to treating directory removal as proof — removal has been
+ * observed to succeed while an owned child was still alive, so it never was proof. Diagnostics
+ * name the stage, the owned PID, the owned path and the elapsed time — never a password and
+ * never a connection string.
  *
  * `DG-4` testing depth remains Unresolved; this module settles no testing policy.
  */
@@ -45,6 +81,7 @@ import { afterAll, beforeAll } from "vitest";
 import EmbeddedPostgres from "embedded-postgres";
 import { Kysely, PostgresDialect, type PostgresPool } from "kysely";
 import { Migrator } from "kysely/migration";
+import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import net from "node:net";
@@ -94,6 +131,17 @@ export const REMOVE_RETRY_INTERVAL_MS = 200;
 export const REMOVE_CEILING_MS = 30_000;
 
 /**
+ * The bound on the Windows complete-shutdown request (issue #185).
+ *
+ * `pg_ctl`'s own `-t` takes seconds, so the authority is expressed in seconds and the
+ * millisecond form is derived rather than maintained separately. A healthy complete shutdown
+ * measures in hundreds of milliseconds; this is a diagnostic ceiling, not a routine cost, and
+ * exhausting it is a failure rather than a reason to proceed.
+ */
+export const SHUTDOWN_TIMEOUT_SECONDS = 30;
+export const SHUTDOWN_TIMEOUT_MS = SHUTDOWN_TIMEOUT_SECONDS * 1_000;
+
+/**
  * Filesystem error codes that mean "Windows has not released a handle yet", and nothing more.
  *
  * Retrying anything else would retry a real error — a permissions mistake, a path bug — until a
@@ -105,6 +153,7 @@ export const TRANSIENT_REMOVAL_CODES: readonly string[] = ["EBUSY", "EPERM", "EN
 export type CleanupStage =
   | "resource-close"
   | "ownership-proof"
+  | "complete-shutdown"
   | "stop-request"
   | "exit-wait"
   | "directory-removal"
@@ -275,6 +324,179 @@ function resolveSeams(seams: LifecycleSeams = {}): ResolvedSeams {
     remove: seams.remove ?? ((path) => rmSync(path, { recursive: true, force: true })),
     exists: seams.exists ?? ((path) => existsSync(path)),
   };
+}
+
+/**
+ * The outcome of one complete-shutdown request. Never a credential, never a PID.
+ */
+export interface ShutdownOutcome {
+  readonly ok: boolean;
+  readonly code: number | null;
+  readonly signal: string | null;
+  readonly elapsedMs: number;
+  readonly timedOut: boolean;
+  readonly detail: string;
+}
+
+/**
+ * Resolve the bundled `pg_ctl` through the platform package's **public export** (issue #185).
+ *
+ * `@embedded-postgres/windows-x64` exports the resolved absolute paths of the binaries it
+ * ships — `export declare const pg_ctl: string` in its own `index.d.ts` — so this is supported
+ * API use and not a reach into package internals. It is deliberately **not** reached through a
+ * `PATH` lookup, which could resolve some other PostgreSQL installation on the machine.
+ *
+ * **Why a gated dynamic import, and why it is not in `package.json`.** The package declares
+ * `os: ["win32"], cpu: ["x64"]`, so npm installs it only on Windows x64 and `embedded-postgres`
+ * lists it among its `optionalDependencies`. Declaring it as a direct dependency would make a
+ * Linux or macOS install attempt a Windows-only package; importing it statically would make a
+ * Linux process load one. The import therefore happens **only on win32, and only during
+ * cleanup** — so no dependency or lockfile change is required, and CI, which is Linux, never
+ * reaches this function.
+ */
+async function resolveBundledPgCtl(): Promise<string> {
+  const platformPackage: unknown = await import("@embedded-postgres/windows-x64");
+  const candidate = (platformPackage as { pg_ctl?: unknown }).pg_ctl;
+
+  if (typeof candidate !== "string" || candidate === "") {
+    throw new Error(
+      "the bundled PostgreSQL control executable was not exported by the platform package",
+    );
+  }
+
+  if (!existsSync(candidate)) {
+    throw new Error("the bundled PostgreSQL control executable does not exist at its exported path");
+  }
+
+  return candidate;
+}
+
+/**
+ * Ask PostgreSQL to shut the owned cluster down **completely**, and wait for it (issue #185).
+ *
+ * This replaces the package's Windows shutdown, which force-kills the postmaster through an
+ * **unawaited** `taskkill` and therefore proves nothing about the postmaster's children. An
+ * owned `--forkchild=startup` process was measured outliving its postmaster by **69.2 seconds**
+ * while every assertion in this module passed, because this module only ever knew the
+ * postmaster's PID — `postmaster.pid` records no child PIDs, and a single-PID existence probe
+ * is silent about every other PID.
+ *
+ * The mechanism is PostgreSQL's own: `-m fast` is *"quit directly, with proper shutdown"*, under
+ * which the postmaster terminates its children and waits for them, and `-w` waits for that to
+ * finish. A zero exit therefore means the **whole server is gone**, on PostgreSQL's authority —
+ * not on an inference of ours.
+ *
+ * **What this deliberately does not do.** It names no PID, so PID reuse is structurally
+ * irrelevant and no unrelated PostgreSQL process can be reached: the **owned data directory is
+ * the only selector**, and `pg_ctl` acts on that directory's own `postmaster.pid`. It sends no
+ * signal, scans no process list, enumerates nothing, and terminates nothing itself. It uses an
+ * **argument array with `shell: false`**, so there is no command string, no quoting and no
+ * interpolation. It needs **no credential** — shutdown authority comes from the data directory,
+ * not a database login — so no password can reach a command line or an error message.
+ *
+ * Failure is loud by design (ruling 4, issue #185): a spawn failure, a non-zero exit, a signal
+ * or the timeout all return `ok: false`, and the caller turns that into a cleanup failure. There
+ * is **no fallback** to the package's `stop()`, to a forced kill, or to treating directory
+ * removal as proof — a silent fallback would reinstate exactly the behaviour being removed.
+ */
+export async function requestCompleteShutdown(
+  clusterDirectory: string,
+  seams: LifecycleSeams = {},
+): Promise<ShutdownOutcome> {
+  const resolved = resolveSeams(seams);
+  const started = resolved.now();
+  const elapsed = (): number => resolved.now() - started;
+
+  let executable: string;
+
+  try {
+    executable = await resolveBundledPgCtl();
+  } catch (error) {
+    return {
+      ok: false,
+      code: null,
+      signal: null,
+      elapsedMs: elapsed(),
+      timedOut: false,
+      detail: (error as Error).message,
+    };
+  }
+
+  // The owned directory, canonicalized by the same rule the ownership proof uses, is the only
+  // thing this request is ever pointed at.
+  const target = canonicalize(clusterDirectory);
+
+  return new Promise<ShutdownOutcome>((settle) => {
+    let done = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const finish = (outcome: ShutdownOutcome): void => {
+      if (done) return;
+      done = true;
+      if (timer !== undefined) clearTimeout(timer);
+      settle(outcome);
+    };
+
+    const control = spawn(
+      executable,
+      ["stop", "-D", target, "-m", "fast", "-w", "-t", String(SHUTDOWN_TIMEOUT_SECONDS)],
+      { shell: false, stdio: ["ignore", "pipe", "pipe"] },
+    );
+
+    let diagnostics = "";
+
+    control.stdout?.on("data", (chunk: unknown) => {
+      diagnostics += String(chunk);
+    });
+    control.stderr?.on("data", (chunk: unknown) => {
+      diagnostics += String(chunk);
+    });
+
+    control.on("error", (error: Error) => {
+      finish({
+        ok: false,
+        code: null,
+        signal: null,
+        elapsedMs: elapsed(),
+        timedOut: false,
+        detail: `the shutdown request could not be started: ${error.message}`,
+      });
+    });
+
+    control.on("close", (code: number | null, signal: NodeJS.Signals | null) => {
+      finish({
+        ok: code === 0 && signal === null,
+        code,
+        signal: signal ?? null,
+        elapsedMs: elapsed(),
+        timedOut: false,
+        detail:
+          code === 0 && signal === null
+            ? "PostgreSQL reported a complete shutdown of the owned cluster"
+            : `the shutdown request exited with code ${String(code)}${
+                signal === null ? "" : ` on ${signal}`
+              }${diagnostics.trim() === "" ? "" : `: ${diagnostics.trim()}`}`,
+      });
+    });
+
+    // An outer bound on top of `-t`, so that a control process which never exits at all cannot
+    // hang the suite. Nothing is killed here; the outcome is reported and the caller fails.
+    timer = setTimeout(() => {
+      finish({
+        ok: false,
+        code: null,
+        signal: null,
+        elapsedMs: elapsed(),
+        timedOut: true,
+        detail:
+          `the shutdown request did not complete within ${SHUTDOWN_TIMEOUT_MS}ms; complete ` +
+          "shutdown is unproven",
+      });
+    }, SHUTDOWN_TIMEOUT_MS);
+
+    // The timer must not be the only reason the event loop stays alive.
+    timer.unref?.();
+  });
 }
 
 /**
@@ -623,36 +845,61 @@ export async function cleanupCluster(
     }
   }
 
-  // 3. One shutdown request, through the package's public API.
+  // 3. One shutdown request.
+  //
+  // **Windows takes PostgreSQL's own complete shutdown** (issue #185, ruling 1): the package's
+  // `stop()` force-kills the postmaster through an unawaited `taskkill` and so proves nothing
+  // about its children. `pg_ctl stop -m fast -w` makes the postmaster terminate its children
+  // and waits for it, and `stop()` is **not** called afterwards (ruling 3) — which also means
+  // the package no longer races this module by deleting the data directory itself while
+  // children may still hold handles inside it.
+  //
+  // **Every other platform keeps the package's public API** (ruling 3), and is already correct
+  // there: `stop()` sends `SIGINT`, which is fast shutdown, and the postmaster reaps its
+  // children *before* exiting — so awaiting the postmaster's exit genuinely implies the
+  // children are gone. The defect is Windows-specific, and so is the divergence.
   if (state.server !== undefined && state.started && !state.stopRequested) {
     state.stopRequested = true;
 
-    try {
-      await (request.requestStop ?? ((server: EmbeddedPostgres) => server.stop()))(state.server);
-    } catch (error) {
-      // `stop()` removes the data directory itself, immediately, while the postmaster's
-      // children may still hold handles on it. That specific failure — a transient lock on a
-      // path inside the owned root — is the upstream defect this module compensates for, so it
-      // is retained and reconsidered at the end rather than treated as fatal here. Any *other*
-      // stop failure is a different fact and is never suppressed.
-      const code = (error as { code?: string }).code;
-      const path = (error as { path?: string }).path;
-      const inOwnedRoot =
-        typeof path === "string" && canonicalize(path).startsWith(canonicalize(state.root));
+    if (request.requestStop === undefined && platform() === "win32") {
+      // Ownership is proven above, and the proven directory is the only thing pointed at.
+      const outcome = await requestCompleteShutdown(state.clusterDirectory, request.seams);
 
-      if (isTransientRemovalError(error) && inOwnedRoot) {
-        transientStopFailure = new ClusterCleanupError({
-          stage: "stop-request",
-          ownedPid: state.owned?.pid,
-          ownedRoot: state.root,
-          elapsedMs: seams.now() - started,
-          detail:
-            `the shutdown request's own directory removal reported ${code ?? "a lock"}; ` +
-            "awaiting owned-process exit and removing the root here instead",
-          cause: error,
-        });
-      } else {
-        fail("stop-request", "the shutdown request failed", error);
+      if (!outcome.ok) {
+        // Loud, with no fallback of any kind (ruling 4).
+        fail("complete-shutdown", outcome.detail, undefined);
+      }
+    } else {
+      try {
+        await (request.requestStop ?? ((server: EmbeddedPostgres) => server.stop()))(state.server);
+      } catch (error) {
+        // `stop()` removes the data directory itself, immediately, while the postmaster's
+        // children may still hold handles on it. That specific failure — a transient lock on a
+        // path inside the owned root — is the upstream defect this module compensates for, so
+        // it is retained and reconsidered at the end rather than treated as fatal here. Any
+        // *other* stop failure is a different fact and is never suppressed.
+        //
+        // On Windows this path is now reached only through a substituted `requestStop` seam,
+        // because the complete-shutdown request above never removes the directory.
+        const code = (error as { code?: string }).code;
+        const path = (error as { path?: string }).path;
+        const inOwnedRoot =
+          typeof path === "string" && canonicalize(path).startsWith(canonicalize(state.root));
+
+        if (isTransientRemovalError(error) && inOwnedRoot) {
+          transientStopFailure = new ClusterCleanupError({
+            stage: "stop-request",
+            ownedPid: state.owned?.pid,
+            ownedRoot: state.root,
+            elapsedMs: seams.now() - started,
+            detail:
+              `the shutdown request's own directory removal reported ${code ?? "a lock"}; ` +
+              "awaiting owned-process exit and removing the root here instead",
+            cause: error,
+          });
+        } else {
+          fail("stop-request", "the shutdown request failed", error);
+        }
       }
     }
   }
