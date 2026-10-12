@@ -826,16 +826,24 @@ describe("the safety rule this module rests on", () => {
     expect(code).not.toContain("No process is ever signalled");
   });
 
+  /**
+   * The prohibitions, as narrowed by the issue #185 ruling.
+   *
+   * This list previously included `pg_ctl` and `child_process`. The Product Owner's ruling of
+   * 2026-10-12 **permits exactly two things and nothing more**: the **bundled `pg_ctl`
+   * executable**, and an **argument-array child-process invocation**, with the **owned data
+   * directory** as the exact `-D` target. Everything else named here stays forbidden, and the
+   * permissions are themselves constrained by the assertions that follow — so the amendment
+   * narrows the rule rather than loosening it.
+   */
   it.each([
     "taskkill",
-    "pg_ctl",
     "wmic",
     "tasklist",
     "powershell",
     "execSync",
     "spawnSync",
     "execFile",
-    "child_process",
     "worker_threads",
   ])("contains no reference to %s", (forbidden) => {
     expect(code.toLowerCase()).not.toContain(forbidden.toLowerCase());
@@ -845,6 +853,75 @@ describe("the safety rule this module rests on", () => {
     const calls = code.match(/process\.kill\([^)]*\)/g) ?? [];
 
     expect(calls).toEqual(["process.kill(pid, 0)"]);
+  });
+
+  /**
+   * The permitted child-process invocation, constrained (issue #185).
+   *
+   * A permission that is not itself bounded is a hole. These assertions are what keep the
+   * ruling's two permissions from becoming "the helper may now run processes".
+   */
+  it("spawns through exactly one argument-array invocation, and nothing else", () => {
+    // `spawn` is the only child-process API imported, and it is imported by name.
+    expect(code).toContain('import { spawn } from "node:child_process"');
+
+    const invocations = code.match(/(?<![$\w])spawn\s*\(/g) ?? [];
+
+    expect(invocations).toHaveLength(1);
+
+    // No other child-process entry point appears, under any spelling.
+    for (const forbidden of ["exec(", "fork(", "execFileSync", "spawnSync"]) {
+      expect(code).not.toContain(forbidden);
+    }
+  });
+
+  it("never invokes a shell, and builds no command string", () => {
+    expect(code).toContain("shell: false");
+    expect(code).not.toMatch(/shell:\s*true/);
+
+    // The arguments are a literal array of discrete values. A template literal or a `+` inside
+    // the argument list would mean a command string was being assembled.
+    expect(code).toContain('["stop", "-D", target, "-m", "fast", "-w", "-t", String(SHUTDOWN_TIMEOUT_SECONDS)]');
+  });
+
+  it("points the shutdown request only at the canonicalized owned directory", () => {
+    // `-D` takes `target`, and `target` is the canonicalized owned cluster directory. No PID,
+    // no name, no pattern and no other path can be the selector.
+    expect(code).toContain("const target = canonicalize(clusterDirectory);");
+    expect(code).toContain('"-D", target,');
+  });
+
+  it("reaches pg_ctl only through the platform package's public export", () => {
+    // The path comes from the package that ships the binary, never from a PATH lookup — which
+    // could resolve an unrelated PostgreSQL installation on the machine.
+    expect(code).toContain('await import("@embedded-postgres/windows-x64")');
+    expect(code).not.toContain("process.env.PATH");
+    expect(code).not.toContain('"pg_ctl.exe"');
+    expect(code).not.toContain("'pg_ctl.exe'");
+  });
+
+  it("requests a graceful, waited, bounded shutdown and terminates nothing itself", () => {
+    expect(code).toContain('"-m", "fast"');
+    expect(code).toContain('"-w"');
+    expect(code).toContain('"-t", String(SHUTDOWN_TIMEOUT_SECONDS)');
+
+    // Forced and recovery-inducing modes are never requested.
+    expect(code).not.toContain('"immediate"');
+    expect(code).not.toContain('"-m", "smart"');
+
+    // The control process is observed, never killed — `.kill(` would be termination.
+    expect(code).not.toMatch(/control\s*\.\s*kill\s*\(/);
+  });
+
+  it("confines the permitted invocation to Windows", () => {
+    expect(code).toContain('platform() === "win32"');
+  });
+
+  it("offers no fallback when complete shutdown is unproven", () => {
+    // Ruling 4: a spawn failure, non-zero exit, signal or timeout fails the file. There must be
+    // no path that recovers by force-killing, sleeping, or treating removal as proof.
+    expect(code).toContain('fail("complete-shutdown"');
+    expect(code).not.toMatch(/catch[\s\S]{0,200}server\.stop\(\)/);
   });
 
   it("names no signal it could send", () => {
