@@ -175,7 +175,10 @@ implementation**:
   version. *Outstanding:* the isolation level for revision transactions, and
   replacement-value semantics. **Stale-edit detection and resolution policy —
   and its supporting token — are decided** (`ADR-023`, `Accepted` 2026-10-12,
-  issue #181): see *Stale-edit detection is decided* below.
+  issue #181): see *Stale-edit detection is decided* below. **That policy is
+  not a `DDM` item and carries no `DDM` number** — it is an `ADR-017`
+  implementation-time deferral, noted here only because it governs the write
+  paths this item's revision storage serves.
 - **`DDM-9`** soft-delete versus hard-delete, publication state, and purge.
 
 **Timestamp physical representation is decided** (`ADR-022`, `Accepted` 2026-10-09,
