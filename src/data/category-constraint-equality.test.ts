@@ -407,6 +407,11 @@ async function insertRevision(
     email: null,
     website: null,
     rejected_at: null,
+    // Migration `002` made the base-version column `not null` (`ADR-023` item 12: a
+    // missing token refuses the write), so every revision fixture must supply it —
+    // including this one, which attacks the category constraint and would otherwise
+    // fail on 23502 before reaching it. The value stands for a captured base token.
+    base_listing_last_updated_at: "2026-01-02T03:04:05.123+00:00",
     ...overrides,
   };
 
