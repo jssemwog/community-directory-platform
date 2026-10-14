@@ -373,11 +373,21 @@ live catalogue on name, carrier and nullability.
 
 **Nothing still reads or writes that column.** There is **no mapper**, **no
 serializer or hydrator for revisions**, **no API transport**, **no staleness
-comparison** and **no administrator message**; the **`PS-11` isolation level and retry
-policy remain undecided**; and **no revision or moderation persistence exists** — no
+comparison** and **no administrator message**; and **no revision or moderation
+persistence exists** — no
 revision read, no revision write, no moderation operation. `listing_revision` remains
 **unwritable by construction**: every column is typed read-only, so an insert does not
-compile. The **token's immutability** is enforced in the domain as far as the
+compile.
+
+**The `PS-11` isolation and retry policy is now decided** (`ADR-024`, `Accepted`
+2026-10-14, issue #189), and **deciding it implements nothing**. The governed writes
+will run at **`READ COMMITTED`**, set explicitly per transaction, under `ADR-017`'s
+`PS-11` listing-row lock taken **first** and held to commit, with the **captured token
+compared before any mutation** and **carried again in the guarded listing-write
+predicate**; **no automatic application-level retry** is selected, and only **`40001`
+and `40P01`** are classified retryable. **No transaction, repository, SQL, comparison
+or retry code exists**, and the four governed paths — `OP-6`, `OP-10`, `FR-ADM-04`,
+`FR-ADM-10b` — remain **unimplemented**. The **token's immutability** is enforced in the domain as far as the
 transitions that exist allow — rejection preserves it and approval consumes the
 proposal whole, both asserted by test — while the **write-path** rule (`ADR-017`
 `PS-9`'s precedent) still has no write path to enforce it. Each remains a
