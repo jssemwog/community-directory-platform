@@ -39,9 +39,14 @@ import {
   CLUSTER_PASSWORD,
   CLUSTER_TIMEOUT_MS,
   CLUSTER_USER,
+  EXIT_POLL_INTERVAL_MS,
+  EXIT_WAIT_CEILING_MS,
   SHUTDOWN_TIMEOUT_MS,
   SHUTDOWN_TIMEOUT_SECONDS,
   requestCompleteShutdown,
+  waitForOwnedExit,
+  type LifecycleSeams,
+  type Presence,
 } from "./embedded-cluster";
 
 const onWindows = platform() === "win32";
@@ -386,17 +391,67 @@ describe.runIf(onWindows)("complete shutdown, against a real cluster", () => {
   );
 
   it(
-    "reports a graceful shutdown quickly, not after the bounded ceiling",
+    "completes because PostgreSQL finished, not because the ceiling fired (issue #190)",
     async () => {
-      // `-m fast` is a proper shutdown, so the healthy case is fast. If this ever approached
-      // the ceiling, the mechanism would be waiting rather than shutting down.
+      // The claim worth asserting is **why** the request settled, not how many milliseconds
+      // the host took to do it.
+      //
+      // This replaces `elapsedMs < SHUTDOWN_TIMEOUT_MS / 2`, which measured wall-clock
+      // duration and failed intermittently — roughly one run in five locally — whenever the
+      // machine was busy, at ~11s against a 15s bound, while the mechanism had behaved
+      // correctly. A healthy `-m fast` shutdown that takes 12s on a loaded machine violates
+      // none of the guarantees this module exists to make, so failing it taught readers to
+      // re-run rather than investigate. Raising the constant would only have made the flake
+      // rarer and the test weaker at its stated job.
+      //
+      // The mechanism has exactly two ways to settle, and they are distinguishable without a
+      // clock: `pg_ctl … -w` exits (`close`), or the outer ceiling fires (`timedOut`). The
+      // original "quickly" assertion was a proxy for the first. `timedOut` states it exactly.
+      //
+      // The clock is injected and virtual, so nothing here depends on host speed. Because the
+      // seam is the *only* clock the mechanism can read, counting its reads also proves the
+      // request did not poll: a healthy settle reads it twice — once at entry, once when the
+      // outcome is built — and `elapsedMs` is therefore one virtual tick, not a wall-clock
+      // measurement. A polling implementation, or one that waited toward the ceiling, would
+      // read it many more times and report a far larger elapsed figure.
       const cluster = await startCluster();
 
-      try {
-        const outcome = await requestCompleteShutdown(cluster.clusterDirectory);
+      let ticks = 0;
+      const readings: number[] = [];
+      const virtualNow = (): number => {
+        const reading = ticks;
+        readings.push(reading);
+        ticks += 1;
+        return reading;
+      };
 
+      try {
+        const outcome = await requestCompleteShutdown(cluster.clusterDirectory, {
+          now: virtualNow,
+        });
+
+        // It succeeded, and PostgreSQL is the reason.
         expect(outcome.ok, outcome.detail).toBe(true);
-        expect(outcome.elapsedMs).toBeLessThan(SHUTDOWN_TIMEOUT_MS / 2);
+        expect(outcome.code).toBe(0);
+        expect(outcome.signal).toBeNull();
+        expect(outcome.detail).toBe(
+          "PostgreSQL reported a complete shutdown of the owned cluster",
+        );
+
+        // It did not reach the ceiling. This is the real content of the old assertion.
+        expect(outcome.timedOut).toBe(false);
+
+        // It did not wait: the only clock available was read exactly twice, so no polling or
+        // bounded wait occurred, and virtual time never advanced toward the ceiling.
+        expect(readings).toEqual([0, 1]);
+        expect(outcome.elapsedMs).toBe(1);
+        expect(outcome.elapsedMs).toBeLessThan(SHUTDOWN_TIMEOUT_MS);
+
+        // The real cleanup guarantees, unchanged and still asserted here: no owned PostgreSQL
+        // process survives, and the released directory is removable with no retry.
+        expect(descendantsOf(await postgresProcesses(), cluster.postmaster)).toEqual([]);
+        rmSync(cluster.root, { recursive: true, force: true });
+        expect(existsSync(cluster.root)).toBe(false);
       } finally {
         rmSync(cluster.root, { recursive: true, force: true });
       }
@@ -433,5 +488,121 @@ describe.runIf(!onWindows)("on platforms where the package API is already correc
     // implies the children are gone. The Windows mechanism is a correction, not a default.
     expect(platform()).not.toBe("win32");
     expect(SHUTDOWN_TIMEOUT_SECONDS).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * The bounded wait, proved deterministically (issue #190).
+ *
+ * `requestCompleteShutdown` settles one of two ways — `pg_ctl … -w` exits, or its outer
+ * ceiling fires — and the case above proves a healthy shutdown took the first. The
+ * *waiting* this module does lives in `waitForOwnedExit`, whose ceiling, poll interval and
+ * clock are all injected, so the four faults the old wall-clock assertion was guarding
+ * against can be driven exactly rather than approximated by a stopwatch.
+ *
+ * These use a **virtual clock**: `sleep` advances time instead of consuming it, so each
+ * case is instant, deterministic, and identical on a fast machine and a loaded one. There
+ * are no fixed sleeps, no real-time thresholds, no skips and no retries — those are the
+ * mechanisms this issue exists to remove, not to relocate.
+ *
+ * `requestCompleteShutdown`'s own ceiling is a real `setTimeout` that the seams do not
+ * reach, so a hang of *that* function cannot be simulated without changing production
+ * code — which this unit is not authorized to do. Its loudness on failure is proved
+ * instead by the existing cases above, each of which asserts `ok: false` with a detail and
+ * no credential.
+ */
+function virtualWaitSeams(observe: () => Presence): LifecycleSeams & {
+  readonly polls: () => number;
+  readonly elapsed: () => number;
+} {
+  let current = 0;
+  let polls = 0;
+
+  return {
+    now: () => current,
+    sleep: async (ms: number) => {
+      current += ms;
+    },
+    observe: () => {
+      polls += 1;
+      return observe();
+    },
+    polls: () => polls,
+    elapsed: () => current,
+  };
+}
+
+describe("the bounded wait cannot hang, spin or exhaust silently (issue #190)", () => {
+  it("fault 1 — a process that never exits reaches the ceiling and fails", async () => {
+    // The hang. The observer never reports exit, so the wait must end at the ceiling and
+    // report failure. If the bound were removed this case would never return.
+    const seams = virtualWaitSeams(() => "present");
+
+    const result = await waitForOwnedExit(999_999, seams);
+
+    expect(result.exited).toBe(false);
+    expect(result.last).toBe("present");
+    expect(result.elapsedMs).toBeGreaterThanOrEqual(EXIT_WAIT_CEILING_MS);
+  });
+
+  it("fault 2 — the wait is bounded, so an unbounded one is detectable", async () => {
+    // Boundedness stated as an exact count rather than a duration: with a fixed poll
+    // interval, a ceiling admits a known maximum number of observations. A wait that had
+    // lost its bound would exceed this, or never terminate at all.
+    const seams = virtualWaitSeams(() => "present");
+
+    const result = await waitForOwnedExit(999_999, seams);
+    const admissible = Math.ceil(EXIT_WAIT_CEILING_MS / EXIT_POLL_INTERVAL_MS) + 1;
+
+    expect(result.exited).toBe(false);
+    expect(seams.polls()).toBeGreaterThan(1);
+    expect(seams.polls()).toBeLessThanOrEqual(admissible);
+    // Virtual time advanced to the ceiling and stopped there, rather than running on.
+    expect(seams.elapsed()).toBeGreaterThanOrEqual(EXIT_WAIT_CEILING_MS);
+    expect(seams.elapsed()).toBeLessThan(EXIT_WAIT_CEILING_MS + EXIT_POLL_INTERVAL_MS * 2);
+  });
+
+  it("fault 3 — a healthy exit does not spin toward the ceiling", async () => {
+    // The replacement for "it was quick", stated as behaviour: an already-exited process is
+    // observed once, slept on never, and costs no virtual time at all. An implementation
+    // that polled to the ceiling before noticing would fail here instead of passing
+    // vacuously — which a wall-clock threshold on a fast machine would not catch.
+    const seams = virtualWaitSeams(() => "exited");
+
+    const result = await waitForOwnedExit(999_999, seams);
+
+    expect(result.exited).toBe(true);
+    expect(seams.polls()).toBe(1);
+    expect(seams.elapsed()).toBe(0);
+    expect(result.elapsedMs).toBe(0);
+  });
+
+  it("fault 3b — it stops at the moment of exit, not at the ceiling", async () => {
+    // The same guarantee once waiting genuinely happens: three observations, two sleeps, and
+    // it stops. Not one poll more, and nowhere near the ceiling.
+    let calls = 0;
+    const seams = virtualWaitSeams(() => (calls++ < 2 ? "present" : "exited"));
+
+    const result = await waitForOwnedExit(999_999, seams);
+
+    expect(result.exited).toBe(true);
+    expect(seams.polls()).toBe(3);
+    expect(seams.elapsed()).toBe(EXIT_POLL_INTERVAL_MS * 2);
+    expect(result.elapsedMs).toBeLessThan(EXIT_WAIT_CEILING_MS);
+  });
+
+  it("fault 4 — an exhausted wait can never report success", async () => {
+    // Loud failure. Every way of exhausting the ceiling must leave `exited` false: a silent
+    // success here is the defect the whole module exists to remove, and it is exactly what a
+    // "quick enough" assertion could never have detected.
+    for (const stuck of ["present", "indeterminate"] as const) {
+      const seams = virtualWaitSeams(() => stuck);
+
+      const result = await waitForOwnedExit(999_999, seams);
+
+      expect(result.exited, `a stuck '${stuck}' observation claimed success`).toBe(false);
+      expect(result.last).toBe(stuck);
+      expect(result.elapsedMs).toBeGreaterThanOrEqual(EXIT_WAIT_CEILING_MS);
+    }
   });
 });
