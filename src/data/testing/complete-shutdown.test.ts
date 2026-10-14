@@ -511,16 +511,58 @@ describe.runIf(!onWindows)("on platforms where the package API is already correc
  * instead by the existing cases above, each of which asserts `ok: false` with a detail and
  * no credential.
  */
-function virtualWaitSeams(observe: () => Presence): LifecycleSeams & {
+const UNBOUNDED_WAIT_SENTINEL = "unbounded wait detected";
+
+/**
+ * The legitimate maximum number of waits a bounded poll loop can perform: one per poll
+ * interval until the ceiling. Derived from the module's own constants, never hard-coded,
+ * so it cannot drift away from the mechanism it bounds.
+ */
+const LEGITIMATE_WAITS = Math.ceil(EXIT_WAIT_CEILING_MS / EXIT_POLL_INTERVAL_MS);
+
+/** A small allowance above the legitimate maximum, so an honest loop is never tripped. */
+const WAIT_ALLOWANCE = 8;
+
+/**
+ * A virtual clock whose `sleep` is instrumented and **self-limiting**.
+ *
+ * `sleep` advances virtual time normally and counts iterations, and throws a stable
+ * test-only sentinel once the count passes a small allowance above `LEGITIMATE_WAITS`.
+ *
+ * That limit is what makes the "bound removed entirely" mutation **detectable**. Without
+ * it, a loop that had lost its ceiling would spin on resolved promises forever: virtual
+ * time never reaches a ceiling that no longer exists, no real time passes, so vitest's own
+ * timeout cannot fire and the run hangs rather than failing. Counting the iterations turns
+ * that hang into an immediate, explicit failure — and the sentinel is thrown from the test
+ * seam, so **no production code and no new production seam is involved**, and no
+ * wall-clock timing or fixed sleeping is introduced.
+ */
+function virtualWaitSeams(
+  observe: () => Presence,
+  options: { readonly cap?: number } = {},
+): LifecycleSeams & {
   readonly polls: () => number;
+  readonly waits: () => number;
+  readonly cap: number;
   readonly elapsed: () => number;
 } {
+  const cap = options.cap ?? LEGITIMATE_WAITS + WAIT_ALLOWANCE;
   let current = 0;
   let polls = 0;
+  let waits = 0;
 
   return {
     now: () => current,
     sleep: async (ms: number) => {
+      waits += 1;
+
+      if (waits > cap) {
+        throw new Error(
+          `${UNBOUNDED_WAIT_SENTINEL}: ${waits} waits exceeded the ${cap} admissible for a ` +
+            `${EXIT_WAIT_CEILING_MS}ms ceiling polled every ${EXIT_POLL_INTERVAL_MS}ms`,
+        );
+      }
+
       current += ms;
     },
     observe: () => {
@@ -528,6 +570,8 @@ function virtualWaitSeams(observe: () => Presence): LifecycleSeams & {
       return observe();
     },
     polls: () => polls,
+    waits: () => waits,
+    cap,
     elapsed: () => current,
   };
 }
@@ -545,21 +589,41 @@ describe("the bounded wait cannot hang, spin or exhaust silently (issue #190)", 
     expect(result.elapsedMs).toBeGreaterThanOrEqual(EXIT_WAIT_CEILING_MS);
   });
 
-  it("fault 2 — the wait is bounded, so an unbounded one is detectable", async () => {
+  it("fault 2 — the wait is bounded, and an unbounded one is detected, not survived", async () => {
     // Boundedness stated as an exact count rather than a duration: with a fixed poll
-    // interval, a ceiling admits a known maximum number of observations. A wait that had
-    // lost its bound would exceed this, or never terminate at all.
+    // interval, a ceiling admits a known maximum number of waits.
+    //
+    // The seam's `sleep` enforces that count, so a loop which had lost its ceiling fails
+    // here **immediately and explicitly** instead of spinning on resolved promises until
+    // someone kills the process. An honest loop never comes near the cap, so this must
+    // resolve rather than reject.
     const seams = virtualWaitSeams(() => "present");
 
     const result = await waitForOwnedExit(999_999, seams);
-    const admissible = Math.ceil(EXIT_WAIT_CEILING_MS / EXIT_POLL_INTERVAL_MS) + 1;
 
     expect(result.exited).toBe(false);
     expect(seams.polls()).toBeGreaterThan(1);
-    expect(seams.polls()).toBeLessThanOrEqual(admissible);
+    expect(seams.waits()).toBeLessThanOrEqual(LEGITIMATE_WAITS);
+    expect(seams.waits()).toBeLessThan(seams.cap);
     // Virtual time advanced to the ceiling and stopped there, rather than running on.
     expect(seams.elapsed()).toBeGreaterThanOrEqual(EXIT_WAIT_CEILING_MS);
     expect(seams.elapsed()).toBeLessThan(EXIT_WAIT_CEILING_MS + EXIT_POLL_INTERVAL_MS * 2);
+  });
+
+  it("fault 2b — the unbounded-wait detector is live, not decorative", async () => {
+    // A guard nothing can trip is no guard at all. Driving the same bounded loop against a
+    // deliberately tiny cap proves the sentinel really fires, and names the reason — which
+    // is exactly what the bound-removal mutation now produces, in milliseconds and with no
+    // hang, no vitest timeout and no process to terminate by hand.
+    const seams = virtualWaitSeams(() => "present", { cap: 3 });
+
+    await expect(waitForOwnedExit(999_999, seams)).rejects.toThrow(
+      UNBOUNDED_WAIT_SENTINEL,
+    );
+
+    // It stopped at the cap rather than running on, and no real time was consumed.
+    expect(seams.waits()).toBe(4);
+    expect(seams.elapsed()).toBe(EXIT_POLL_INTERVAL_MS * 3);
   });
 
   it("fault 3 — a healthy exit does not spin toward the ceiling", async () => {
