@@ -206,6 +206,9 @@ describe("criterion 13 — the unavailable outcome discloses nothing", () => {
       listingId,
       state: "pending",
       proposedContent: { ...fullyPublicContent, description: "PROPOSED DESCRIPTION" },
+      // `ADR-023` item 13 — the captured base is **never public**. Supplied here precisely
+      // so this test proves the projection discloses nothing derived from it.
+      baseListingLastUpdatedAt: t0,
     };
 
     const result = projectListingPublicly(unpublishedListing(fullyPublicContent), [
@@ -404,6 +407,10 @@ describe("pending-revision invisibility (DI-10)", () => {
         country: "IE",
         phone: { value: "+353 21 999 9999", designatedPublic: true },
       },
+      // A deliberately distinctive captured base (issue #187), so the serialized
+      // assertion below can prove `ADR-023` item 13 — the token is **never public** —
+      // rather than merely assuming the projection ignores it.
+      baseListingLastUpdatedAt: instantAt(987_654_321),
     };
 
     const result = projectListingPublicly(approvedListing(fullyPublicContent), [
@@ -423,6 +430,9 @@ describe("pending-revision invisibility (DI-10)", () => {
       "retail-shopping",
       "Cobh",
       "+353 21 999 9999",
+      // `ADR-023` item 13 (issue #187) — the captured base token, in the only form it
+      // could leak as: its exact epoch-millisecond value.
+      "987654321",
     ]) {
       expect(serialized).not.toContain(proposed);
     }
