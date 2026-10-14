@@ -41,11 +41,18 @@
  * which is the guarantee requirement 23 rests on.
  */
 import { beforeAll, describe, expect, it } from "vitest";
-import { Kysely, PostgresDialect, type PostgresPool } from "kysely";
+import {
+  Kysely,
+  PostgresDialect,
+  type Insertable,
+  type PostgresPool,
+  type Selectable,
+} from "kysely";
 import { Migrator } from "kysely/migration";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 
+import type { ListingRevisionTable, ListingTable } from "./listing-table";
 import { CLUSTER_TIMEOUT_MS, useEmbeddedPostgres } from "./testing/embedded-cluster";
 import { createTimestamptzTypeOverrides } from "./timestamp-parser";
 import {
@@ -790,3 +797,151 @@ describe("reversal", () => {
     CLUSTER_TIMEOUT_MS,
   );
 });
+
+/**
+ * The `C9` declaration agrees with what `002` actually created (issue #187).
+ *
+ * `listing-table.ts` tells the type system what it may assume about `listing_revision`.
+ * Until this unit it did not mention the column `002` added — the type and the schema
+ * disagreed, and nothing failed. These cases close that gap from **both** directions: the
+ * column list, carrier and nullability are read from the live catalogue, the same three
+ * are read from the Kysely declaration, and the two are compared.
+ *
+ * **This adds no second source of schema authority.** The migration remains the only
+ * statement of the shape. The bridge below is a `Record<keyof ListingRevisionTable, true>`,
+ * so `tsc` refuses it if it omits a declared column or names one that is not declared —
+ * it cannot drift from the type it mirrors, and it asserts nothing about the database. The
+ * database side of every comparison comes from `information_schema`.
+ *
+ * Still deliberately absent, and untestable because it does not exist: any revision
+ * serializer, hydrator, insert, read or update. The declaration makes the column
+ * *visible* to `C9` and nothing more.
+ */
+const DECLARED_REVISION_COLUMNS: Record<keyof ListingRevisionTable, true> = {
+  id: true,
+  listing_id: true,
+  state: true,
+  name: true,
+  category: true,
+  description: true,
+  locality: true,
+  country: true,
+  administrative_area: true,
+  postal_code: true,
+  postal_code_designated_public: true,
+  phone: true,
+  phone_designated_public: true,
+  email: true,
+  email_designated_public: true,
+  website: true,
+  website_designated_public: true,
+  rejected_at: true,
+  base_listing_last_updated_at: true,
+};
+
+const DECLARED_REVISION_COLUMN_NAMES: readonly string[] =
+  Object.keys(DECLARED_REVISION_COLUMNS);
+
+describe("the Kysely declaration agrees with migration 002 (issue #187)", () => {
+  it("declares the column under the exact database name the migration created", () => {
+    // `COLUMN` is the fixture the rest of this file already measures `002` by, so the name
+    // is not independently retyped here.
+    expect(DECLARED_REVISION_COLUMN_NAMES).toContain(COLUMN);
+  });
+
+  it("declares every column the catalogue reports, and none the catalogue lacks", async () => {
+    // Agreement in both directions, with the catalogue as the sole authority on the list.
+    // Before this unit the declaration was missing `COLUMN`, and this case is what fails.
+    const actual = [...(await columnNamesOf(raw, "listing_revision"))].sort();
+
+    expect([...DECLARED_REVISION_COLUMN_NAMES].sort()).toEqual(actual);
+  });
+
+  it("agrees with the catalogue that the token is not nullable", async () => {
+    // The declaration says `ReadOnlyColumn<number>`, not `number | null`; the catalogue
+    // says `NOT NULL`. The type half is the `_TheDeclaredCarrierAdmitsNoNull` guard below,
+    // which `npm run typecheck` enforces; this is the database half.
+    const columns = await columnsOf(raw, "listing_revision");
+    const token = columns.find((row) => row.column_name === COLUMN);
+
+    expect(token?.is_nullable).toBe("NO");
+    expect(token?.data_type).toBe("timestamp with time zone");
+    expect(token?.datetime_precision).toBe(3);
+
+    // The contrast that makes the declared non-nullability meaningful: the sibling whose
+    // nullability is real, and which the declaration correctly types `number | null`.
+    const rejectedAt = columns.find((row) => row.column_name === "rejected_at");
+
+    expect(rejectedAt?.is_nullable).toBe("YES");
+  });
+
+  it("names a column the database accepts, carrying epoch milliseconds and not a Date", async () => {
+    // Proves two things at once: the declared name is the real one rather than a plausible
+    // near-miss, and the carrier the declaration promises (`number`) is the carrier the
+    // offset-aware parser actually produces (issue #173), not the `Date` conversion
+    // `ADR-022` forbids.
+    //
+    // Rows here are whatever this file's own `NOT NULL` cases left behind; this case
+    // asserts nothing about how many there are, because revision persistence does not
+    // exist and the count is not this unit's claim to make.
+    const { rows } = await parsing.query<{ readonly captured: unknown }>(
+      `select ${COLUMN} as captured from listing_revision`,
+    );
+
+    for (const row of rows) {
+      expect(typeof row.captured).toBe("number");
+      expect(Number.isSafeInteger(row.captured)).toBe(true);
+      expect(row.captured).not.toBeInstanceOf(Date);
+    }
+  });
+
+  it("leaves listing_revision unwritable, so no repository operation becomes possible", () => {
+    // Making the column visible to `C9` must not make the table writable. Every column is
+    // `ReadOnlyColumn`, so no insert compiles — the `_TheTableHasNoInsertableColumn` guard
+    // below states that, and `tsc` enforces it. Nothing is executed here, because a
+    // runtime insert would be the persistence this unit excludes.
+    expect(DECLARED_REVISION_COLUMN_NAMES).toHaveLength(19);
+  });
+});
+
+/**
+ * Compile-time guards for the declaration (issue #187 ruling item 7).
+ *
+ * Checked by `tsc`, so `npm run typecheck` fails if the declared carrier is widened to
+ * admit `null`, swapped for `Date`, or made insertable. No runtime assertion can catch
+ * those: each would leave this suite green while the type system quietly promised
+ * something the schema does not permit, or permitted a write the table forbids.
+ */
+type Equals<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+
+/** Compiles only when `T` is exactly `true`. */
+type Assert<T extends true> = T;
+
+type SelectedRevision = Selectable<ListingRevisionTable>;
+type InsertableRevision = Insertable<ListingRevisionTable>;
+
+type _TheDeclaredCarrierIsNumber = Assert<
+  Equals<SelectedRevision["base_listing_last_updated_at"], number>
+>;
+type _TheDeclaredCarrierAdmitsNoNull = Assert<
+  Equals<null extends SelectedRevision["base_listing_last_updated_at"] ? true : false, false>
+>;
+type _TheDeclaredCarrierIsNotADate = Assert<
+  Equals<Date extends SelectedRevision["base_listing_last_updated_at"] ? true : false, false>
+>;
+/** The sibling whose nullability is genuine, so the contrast cannot be flattened. */
+type _TheRejectionAnchorStillAdmitsNull = Assert<
+  Equals<SelectedRevision["rejected_at"], number | null>
+>;
+/** `Insertable` of a table whose every column is `never` on insert has no usable key. */
+type _TheTableHasNoInsertableColumn = Assert<
+  Equals<keyof InsertableRevision extends never ? true : false, true>
+>;
+/** The carrier matches the listing instant it copies, so the `C9` round trip cannot drift. */
+type _ItMatchesTheListingInstantCarrier = Assert<
+  Equals<
+    SelectedRevision["base_listing_last_updated_at"],
+    Selectable<ListingTable>["last_updated_at"]
+  >
+>;

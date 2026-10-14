@@ -65,6 +65,10 @@ function rejectedRevision(overrides: Partial<ListingRevision> = {}): ListingRevi
     state: "rejected",
     proposedContent: { ...content, description: "A small bakery and cafe." },
     rejectedAt: anchor,
+    // `ADR-023` item 9 — a *rejected* revision keeps its captured base, because the base
+    // is part of the history `OQ-13` retains. Retention measures from `rejectedAt` and
+    // reads nothing from this field.
+    baseListingLastUpdatedAt: anchor,
     ...overrides,
   };
 }

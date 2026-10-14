@@ -129,6 +129,30 @@ export interface ListingRevisionTable {
   website: ReadOnlyColumn<string | null>;
   website_designated_public: ReadOnlyColumn<boolean>;
   rejected_at: ReadOnlyColumn<number | null>;
+  /**
+   * `base_listing_last_updated_at timestamptz(3) not null` — added by
+   * `migrations/002-add-revision-base-version.ts` (issue #183) for `ADR-023` item 9.
+   *
+   * **`number`, not `number | null`**, because the column is `NOT NULL`: every revision
+   * carries a captured base, and `ADR-023` item 12 refuses a missing one. The contrast
+   * with its sibling `rejected_at` above is deliberate — *that* nullability is real
+   * (present **iff** *rejected*), and copying it here would declare an absence the schema
+   * does not permit.
+   *
+   * The carrier is **epoch milliseconds**, like every other governed instant on these two
+   * tables, supplied by the offset-aware `pg` parser (issue #173) rather than by the
+   * default `Date` conversion `ADR-022` forbids in the domain.
+   *
+   * **`ReadOnlyColumn`, like every sibling** — this declaration makes the column visible
+   * to `C9`, and nothing more. The table stays unwritable, so no revision insert or
+   * update becomes possible, and **no serializer or hydrator is introduced**: revision
+   * hydration does not exist and is a separate authorized unit.
+   *
+   * **This is not a second source of schema truth.** The migration states the shape; this
+   * states what the type system may assume about it, and a test asserts the two agree on
+   * name, carrier and non-nullability against the live catalogue.
+   */
+  base_listing_last_updated_at: ReadOnlyColumn<number>;
 }
 
 /** The schema the first migration creates, and the only tables `C9` knows about. */

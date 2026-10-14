@@ -354,14 +354,35 @@ token (`ADR-023` item 9), while a row missing it could never be approved (item 1
 `listing.last_updated_at` is **unchanged**: already `timestamptz(3) not null` and
 already strictly forward-moving, it is the comparison's other side as it stands.
 
-**Nothing reads or writes that column.** There is **no domain field** on
+~~**Nothing reads or writes that column.** There is **no domain field** on
 `ListingRevision`, **no mapper**, **no API transport**, **no staleness comparison**
 and **no administrator message**; the **`PS-11` isolation level and retry policy
 remain undecided**; and **no revision or moderation persistence exists** — no
 revision read, no revision write, no moderation operation. The **token's
 immutability** is a write-path rule (`ADR-017` `PS-9`'s precedent) that no write path
-yet exists to enforce. Each remains a **separately reviewed downstream step**, and
-**no provisioning or production execution has occurred**.
+yet exists to enforce.~~
+
+**The domain now carries the token, and `C9` now declares the column** (issue #187).
+`ListingRevision.baseListingLastUpdatedAt` is a **mandatory `Instant`** — the same
+carrier as the `listing.lastUpdatedAt` it copies, which is what makes `ADR-023` item
+11's exact epoch-millisecond equality structural rather than hoped for — and
+`listing-table.ts` declares `base_listing_last_updated_at: ReadOnlyColumn<number>`,
+**`number` rather than `number | null`** because the column is `NOT NULL`. The
+declaration is **not a second source of schema truth**: a test compares it against the
+live catalogue on name, carrier and nullability.
+
+**Nothing still reads or writes that column.** There is **no mapper**, **no
+serializer or hydrator for revisions**, **no API transport**, **no staleness
+comparison** and **no administrator message**; the **`PS-11` isolation level and retry
+policy remain undecided**; and **no revision or moderation persistence exists** — no
+revision read, no revision write, no moderation operation. `listing_revision` remains
+**unwritable by construction**: every column is typed read-only, so an insert does not
+compile. The **token's immutability** is enforced in the domain as far as the
+transitions that exist allow — rejection preserves it and approval consumes the
+proposal whole, both asserted by test — while the **write-path** rule (`ADR-017`
+`PS-9`'s precedent) still has no write path to enforce it. Each remains a
+**separately reviewed downstream step**, and **no provisioning or production execution
+has occurred**.
 
 ## What does not exist, and what is not authorized
 

@@ -23,10 +23,18 @@ accepted decision and creates no new policy.**
 **What still does not exist:** **no database is provisioned**, **no PostgreSQL
 version is selected**, **no migration has been executed against any shared,
 hosted, staging or production database**, and **`C9` persistence is not
-implemented** — no repository and no query module. **Storage for the base token
+implemented** — no repository and no query module. ~~**Storage for the base token
 now exists, but nothing reads or writes it**: there is no domain field, no
 mapper, no API transport, no staleness comparison and no administrator message,
-and the **`PS-11` isolation level and retry policy remain undecided**. ~~and **no `pg` timestamp
+and the **`PS-11` isolation level and retry policy remain undecided**.~~
+**Storage for the base token now exists, and the domain carries it** (issue
+#187): `ListingRevision.baseListingLastUpdatedAt` is a mandatory `Instant`, and
+`listing-table.ts` declares `base_listing_last_updated_at` so `C9` can see the
+column. **Nothing still reads or writes the column**: there is **no mapper, no
+API transport, no staleness comparison and no administrator message**, the
+**`PS-11` isolation level and retry policy remain undecided**, and the table
+stays unwritable — every column is typed read-only, so a revision insert does
+not compile. ~~and **no `pg` timestamp
 parser** (`ADR-022` requires one, explicitly and tested, before persistence
 implementation is complete)~~ — **the `ADR-022` timestamp parser now exists**
 (`../timestamp-parser.ts`, issue #173), though **no pool passes it yet**, since

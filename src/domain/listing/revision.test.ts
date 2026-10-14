@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { CategoryKey } from "./category";
-import { instantOf, type Instant } from "./instant";
+import { instantEquals, instantOf, isInstant, type Instant } from "./instant";
 import type { Listing, ListingContent } from "./listing";
 import { listingIdEquals, listingIdOf } from "./listing-id";
 import { projectListingPublicly } from "./public-projection";
@@ -65,11 +65,19 @@ const approved: Listing = {
   timestamps: pendingTimestamps,
 };
 
+/**
+ * `ADR-023` items 9/10 (issue #187) — the captured base is the **listing's own
+ * `lastUpdatedAt`**, copied when the administrator's work begins. `approved.timestamps`
+ * is `pendingTimestamps`, whose `lastUpdatedAt` is `t0`, so a fresh proposal against that
+ * listing captures exactly `t0`. Supplied explicitly rather than defaulted inside the
+ * domain, because the domain reads no clock and fetches no listing.
+ */
 function proposal(overrides: Partial<ListingRevision> = {}): ListingRevision {
   return {
     listingId,
     state: "pending",
     proposedContent: { ...content, description: "A small bakery and cafe." },
+    baseListingLastUpdatedAt: approved.timestamps.lastUpdatedAt,
     ...overrides,
   };
 }
@@ -242,6 +250,9 @@ function reconstructed(
     listingId: listingIdOf("listing-1"),
     state: revision.state,
     proposedContent: { ...revision.proposedContent },
+    // Carried through the round trip, because a reconstructed revision that lost its base
+    // would be a *different* proposal — one the `OP-10` comparison could no longer judge.
+    baseListingLastUpdatedAt: revision.baseListingLastUpdatedAt,
     ...(revision.rejectedAt === undefined ? {} : { rejectedAt: revision.rejectedAt }),
   }));
 }
@@ -1139,5 +1150,312 @@ describe("the resolution operations read no ambient clock", () => {
     }
 
     expect(consulted).toBe(false);
+  });
+});
+
+/**
+ * The captured base version (`ADR-023` item 9, issue #187).
+ *
+ * `migrations/002-add-revision-base-version.ts` (issue #183) stores the listing version a
+ * proposal was prepared against. These tests attack the **domain half**: that the field
+ * exists, is mandatory, carries the listing's own instant exactly, survives every
+ * transition unchanged, and is neither compared nor disclosed here.
+ *
+ * What is deliberately **not** attacked, because it does not exist: the `OP-10` staleness
+ * comparison, revision serialization, hydration or persistence, and administrator
+ * transport. A test for any of those would be a test for unwritten code.
+ */
+describe("the captured base version (ADR-023 item 9)", () => {
+  it("carries the listing's own lastUpdatedAt, as the exact same instant", () => {
+    const base = approved.timestamps.lastUpdatedAt;
+    const revision = proposal();
+
+    expect(instantEquals(revision.baseListingLastUpdatedAt, base)).toBe(true);
+    // Not merely equal under the carrier's own comparison — the identical value, since
+    // item 11 preserves the exact epoch-millisecond figure rather than an approximation.
+    expect(revision.baseListingLastUpdatedAt).toEqual(base);
+  });
+
+  it("preserves a non-zero millisecond figure exactly, never rounding or normalising it", () => {
+    // A value whose millisecond component could not survive second-precision storage or a
+    // careless round trip unnoticed.
+    const base = instantAt(1_762_000_000_123);
+    const admitted = admitPendingRevision(
+      approved,
+      [],
+      proposal({ baseListingLastUpdatedAt: base }),
+    );
+
+    expect(admitted.ok).toBe(true);
+    if (!admitted.ok) return;
+
+    const carried = admitted.value[0] as ListingRevision;
+    expect(instantEquals(carried.baseListingLastUpdatedAt, base)).toBe(true);
+    expect(carried.baseListingLastUpdatedAt).toEqual(instantAt(1_762_000_000_123));
+    expect(carried.baseListingLastUpdatedAt).not.toEqual(instantAt(1_762_000_000_000));
+  });
+
+  it("is carried by a pending revision, and by a rejected one", () => {
+    expect(isInstant(proposal({ state: "pending" }).baseListingLastUpdatedAt)).toBe(true);
+    expect(
+      isInstant(proposal({ state: "rejected", rejectedAt: t0 }).baseListingLastUpdatedAt),
+    ).toBe(true);
+  });
+
+  it("is carried by the transient approved state, which never reaches storage", () => {
+    // `approved` is representable in memory and mandatory there too, but
+    // `approvePendingRevision` removes the proposal rather than persisting it
+    // (`ADR-017` `PS-4`/`PS-5`) — which is why the column can be `NOT NULL` with no
+    // approved row ever existing to carry a value.
+    const transient = proposal({ state: "approved" });
+    expect(isInstant(transient.baseListingLastUpdatedAt)).toBe(true);
+    expect([...REVISION_STATES]).toContain(transient.state);
+  });
+
+  it("survives rejection unchanged, while the state and anchor change", () => {
+    const base = instantAt(4_242);
+    const pending = proposal({ baseListingLastUpdatedAt: base });
+    const rejectedAt = instantAt(9_999);
+
+    const result = rejectPendingRevision(published, [pending], rejectedAt);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const rejected = result.value[0] as ListingRevision;
+    expect(rejected.state).toBe("rejected");
+    expect(rejected.rejectedAt).toEqual(rejectedAt);
+    // The point of the unit: a rejected proposal's base is **not** refreshed. If it were,
+    // every stale revision would silently become fresh.
+    expect(instantEquals(rejected.baseListingLastUpdatedAt, base)).toBe(true);
+    expect(rejected.baseListingLastUpdatedAt).toEqual(base);
+    expect(rejected.baseListingLastUpdatedAt).not.toEqual(rejectedAt);
+  });
+
+  it("is never refreshed to the listing's current value by rejection", () => {
+    // A deliberately stale base: the listing has moved on since the work began.
+    const stale = instantAt(1);
+    expect(instantEquals(stale, approved.timestamps.lastUpdatedAt)).toBe(false);
+
+    const result = rejectPendingRevision(
+      published,
+      [proposal({ baseListingLastUpdatedAt: stale })],
+      instantAt(5_000),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const rejected = result.value[0] as ListingRevision;
+    expect(rejected.baseListingLastUpdatedAt).toEqual(stale);
+    expect(rejected.baseListingLastUpdatedAt).not.toEqual(
+      approved.timestamps.lastUpdatedAt,
+    );
+  });
+
+  it("is consumed with the proposal on approval, leaving retained bases untouched", () => {
+    const retainedBase = instantAt(111);
+    const pendingBase = instantAt(222);
+    const retained = proposal({
+      state: "rejected",
+      rejectedAt: t0,
+      baseListingLastUpdatedAt: retainedBase,
+    });
+    const pending = proposal({ baseListingLastUpdatedAt: pendingBase });
+
+    const result = approvePendingRevision(published, [retained, pending], instantAt(7_000));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // The approved proposal — and with it its base — is gone, not rewritten elsewhere.
+    expect(result.value.revisions).toHaveLength(1);
+    const survivor = result.value.revisions[0] as ListingRevision;
+    expect(survivor.state).toBe("rejected");
+    expect(survivor.baseListingLastUpdatedAt).toEqual(retainedBase);
+    // No base is confused with another, and none leaks onto the listing.
+    expect(survivor.baseListingLastUpdatedAt).not.toEqual(pendingBase);
+    expect(result.value.listing.timestamps.lastUpdatedAt).toEqual(instantAt(7_000));
+    expect(Object.keys(result.value.listing.timestamps)).not.toContain(
+      "baseListingLastUpdatedAt",
+    );
+  });
+
+  it("is admitted without being compared to the listing's current version", () => {
+    // `OP-10` is where a stale base is refused. Admission is not that place, and this unit
+    // adds no comparison: a base that differs from the listing's current `lastUpdatedAt`
+    // is still admitted.
+    const differing = instantAt(123_456);
+    expect(instantEquals(differing, approved.timestamps.lastUpdatedAt)).toBe(false);
+
+    const admitted = admitPendingRevision(
+      approved,
+      [],
+      proposal({ baseListingLastUpdatedAt: differing }),
+    );
+
+    expect(admitted.ok).toBe(true);
+    if (!admitted.ok) return;
+    expect((admitted.value[0] as ListingRevision).baseListingLastUpdatedAt).toEqual(
+      differing,
+    );
+  });
+
+  it("is supplied by the caller, with no clock consulted", () => {
+    const realNow = Date.now;
+    let consulted = false;
+    Date.now = () => {
+      consulted = true;
+      return realNow.call(Date);
+    };
+
+    try {
+      const admitted = admitPendingRevision(approved, [], proposal());
+      expect(admitted.ok).toBe(true);
+    } finally {
+      Date.now = realNow;
+    }
+
+    expect(consulted).toBe(false);
+  });
+
+  it("survives a reconstruction that shares no reference with the original", () => {
+    const base = instantAt(777);
+    const original = [proposal({ baseListingLastUpdatedAt: base })];
+    const rebuilt = reconstructed(original);
+
+    expect(rebuilt[0]).not.toBe(original[0]);
+    expect(
+      instantEquals((rebuilt[0] as ListingRevision).baseListingLastUpdatedAt, base),
+    ).toBe(true);
+
+    const result = rejectPendingRevision(published, rebuilt, instantAt(8_000));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect((result.value[0] as ListingRevision).baseListingLastUpdatedAt).toEqual(base);
+  });
+
+  it("is not disclosed by the public projection (item 13)", () => {
+    const base = instantAt(1_357_924_680);
+
+    const projected = projectListingPublicly(published, [
+      proposal({ baseListingLastUpdatedAt: base }),
+    ]);
+
+    expect(projected.ok).toBe(true);
+    if (!projected.ok) return;
+
+    const serialized = JSON.stringify(projected.value);
+    expect(serialized).not.toContain("1357924680");
+    expect(serialized).not.toContain("baseListingLastUpdatedAt");
+  });
+});
+
+describe("a malformed base token is governed, never thrown (ADR-023 item 12)", () => {
+  /**
+   * Each malformation reaches the existing `INVALID_REVISION` outcome, the same shape
+   * every other malformed revision input already produces. **No error code is added** —
+   * item 12's *missing* half is a presence rule at the domain edge, not a new failure
+   * kind, and its *unequal* half is the `OP-10` comparison this unit does not implement.
+   */
+  const malformed: readonly (readonly [string, unknown])[] = [
+    ["an absent token", undefined],
+    ["a null token", null],
+    ["a bare epoch-millisecond number", 1_000],
+    ["a Date", new Date(1_000)],
+    ["a non-safe-integer carrier", { epochMilliseconds: Number.MAX_SAFE_INTEGER + 2 }],
+    ["a fractional carrier", { epochMilliseconds: 1_000.5 }],
+    ["a NaN carrier", { epochMilliseconds: Number.NaN }],
+    ["a string carrier", { epochMilliseconds: "1000" }],
+    ["an empty object", {}],
+    ["an array", []],
+  ];
+
+  for (const [label, offered] of malformed) {
+    it(`refuses ${label} as INVALID_REVISION, mutating and throwing nothing`, () => {
+      const entry = { ...proposal(), baseListingLastUpdatedAt: offered };
+      const revisions = [entry] as readonly unknown[] as readonly ListingRevision[];
+      const listingSnapshot = structuredClone(published);
+
+      for (const outcome of [
+        approvePendingRevision(published, revisions, t0),
+        rejectPendingRevision(published, revisions, t0),
+      ]) {
+        expect(outcome.ok).toBe(false);
+        if (outcome.ok) return;
+        expect((outcome.error as DomainError & { readonly code: string }).code).toBe(
+          "INVALID_REVISION",
+        );
+      }
+
+      expect(published).toEqual(listingSnapshot);
+      expect(revisions).toHaveLength(1);
+      expect(revisions[0]).toBe(entry);
+    });
+  }
+
+  it("admits a well-formed token through the same guard", () => {
+    expect(rejectPendingRevision(published, [proposal()], t0).ok).toBe(true);
+  });
+});
+
+/**
+ * The compile-time regression guard (issue #187 ruling item 7).
+ *
+ * These are **`type` declarations checked by `tsc`**, so `npm run typecheck` is what fails
+ * if the field is ever widened, made optional, or swapped for `number` or `Date`. A
+ * runtime test cannot catch any of those: each would leave this whole suite green while
+ * silently readmitting a revision with no usable captured base — and the `NOT NULL` in
+ * migration `002` would become a promise the domain had stopped keeping.
+ *
+ * They follow the pattern `category.test.ts` established for the same reason (issue #175).
+ */
+type Equals<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+
+/** Compiles only when `T` is exactly `true`. */
+type Assert<T extends true> = T;
+
+/** The keys of `T` that a value must actually supply. */
+type RequiredKeys<T> = {
+  [K in keyof T]-?: Record<string, never> extends Pick<T, K> ? never : K;
+}[keyof T];
+
+type _TheFieldIsExactlyInstant = Assert<
+  Equals<ListingRevision["baseListingLastUpdatedAt"], Instant>
+>;
+type _TheFieldIsMandatory = Assert<
+  Equals<
+    "baseListingLastUpdatedAt" extends RequiredKeys<ListingRevision> ? true : false,
+    true
+  >
+>;
+type _TheFieldIsNotOptional = Assert<
+  Equals<undefined extends ListingRevision["baseListingLastUpdatedAt"] ? true : false, false>
+>;
+type _TheFieldIsNotWidenedToNumber = Assert<
+  Equals<Equals<ListingRevision["baseListingLastUpdatedAt"], number>, false>
+>;
+type _ANumberIsNotAssignableToIt = Assert<
+  Equals<number extends ListingRevision["baseListingLastUpdatedAt"] ? true : false, false>
+>;
+type _ADateIsNotAssignableToIt = Assert<
+  Equals<Date extends ListingRevision["baseListingLastUpdatedAt"] ? true : false, false>
+>;
+type _ItIsNotWidenedToUnknown = Assert<
+  Equals<Equals<ListingRevision["baseListingLastUpdatedAt"], unknown>, false>
+>;
+/** It is the **same** carrier as the listing instant it copies, so item 11 cannot drift. */
+type _ItSharesTheListingInstantCarrier = Assert<
+  Equals<ListingRevision["baseListingLastUpdatedAt"], Listing["timestamps"]["lastUpdatedAt"]>
+>;
+/** Unlike the rejection anchor beside it, which really is optional. */
+type _TheRejectionAnchorRemainsOptional = Assert<
+  Equals<"rejectedAt" extends RequiredKeys<ListingRevision> ? true : false, false>
+>;
+
+describe("the base-token representation is guarded at compile time (issue #187)", () => {
+  it("is asserted by tsc, not by this assertion", () => {
+    // The guards are the `type` declarations above. This case exists so the obligation is
+    // visible in the suite output; widening the field fails `npm run typecheck`.
+    expect(isInstant(proposal().baseListingLastUpdatedAt)).toBe(true);
   });
 });

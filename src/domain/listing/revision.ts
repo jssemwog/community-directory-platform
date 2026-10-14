@@ -29,6 +29,16 @@
  * pointer, copy, or immutable-history shape. That is `DDM-8`, whose design decision
  * `Accepted` `ADR-017` has **discharged**; implementing the selected physical revision
  * representation is not part of this slice.
+ *
+ * **Issue #187 adds the captured base version**, and only that. `baseListingLastUpdatedAt`
+ * carries the listing version a proposal was prepared against, as `ADR-023` item 9
+ * requires and migration `002` stores (issue #183). It **decides nothing**: the token, its
+ * type and its exactness were all settled by `ADR-023` and `ADR-022`, and the column
+ * already existed. This module **carries** the value — it does not compare it, serialize
+ * it, hydrate it, expose it, or read a clock to produce it. The `OP-10` staleness
+ * comparison, the administrator conflict message and transport, and revision
+ * serialization, hydration and persistence remain **unimplemented** and separately
+ * authorized.
  */
 
 import { isInstant, type Instant } from "./instant";
@@ -71,6 +81,47 @@ export interface ListingRevision {
    * module computes no eligibility, schedules no purge and states no retention period.
    */
   readonly rejectedAt?: Instant;
+  /**
+   * `ADR-023` item 9 (`Accepted` 2026-10-12, issue #181) — the **captured base version**
+   * the proposal was prepared against, and the domain half of the storage migration
+   * `002` added (issue #183).
+   *
+   * **The value is the listing's own `lastUpdatedAt`**, copied when the administrator's
+   * work begins (item 10). It is therefore an `Instant` and not a second kind of token:
+   * item 14 refused a dedicated counter or fingerprint for the MVP precisely so this
+   * stays recognisably the listing's instant. Sharing `Instant` with
+   * `timestamps.lastUpdatedAt` is what makes item 11's **exact epoch-millisecond
+   * equality** structural rather than hoped for — the two sides of that comparison cannot
+   * drift into different representations.
+   *
+   * **Mandatory in every state**, matching `base_listing_last_updated_at timestamptz(3)
+   * not null`. Both persisted states need it — *pending* for the `OP-10` comparison,
+   * *rejected* because the base is part of the history `OQ-13` retains — and *approved*
+   * exists only transiently, because `approvePendingRevision` removes the proposal from
+   * the collection rather than persisting it (`ADR-017` `PS-4`/`PS-5`). There is no state
+   * in which absence is correct, so item 12's refusal of a **missing** token is enforced
+   * by the type rather than by cooperative callers.
+   *
+   * **Supplied by the caller, never derived here.** The domain reads no clock, fetches no
+   * listing and depends on no persistence: the token arrives as
+   * `listing.timestamps.lastUpdatedAt` exactly as the rejection and approval instants
+   * arrive as an `at` argument. `ADR-022` additionally forbids consulting a clock at the
+   * `C9` boundary, and a default would fabricate a base version nobody observed.
+   *
+   * **Immutable through every transition.** It records what the proposal was prepared
+   * against and must never be refreshed to the listing's current value — every stale
+   * revision would silently become fresh, which is the single failure `ADR-023` exists to
+   * prevent. `rejectPendingRevision` preserves it by spreading the target, and that
+   * preservation is asserted by test rather than assumed.
+   *
+   * **Never public** (item 13). `publicProjectionOf` reads nothing from any revision
+   * (`DI-10`), and this field must not change that.
+   *
+   * **This module neither compares nor exposes it.** The staleness predicate is `OP-10`,
+   * the administrator message and transport are the moderation API unit, and revision
+   * serialization, hydration and persistence remain unimplemented.
+   */
+  readonly baseListingLastUpdatedAt: Instant;
 }
 
 /** The revisions of a listing that are currently in the pending state. */
@@ -220,6 +271,17 @@ function isReadableRevision(candidate: unknown): candidate is ListingRevision {
   }
 
   if (!isReadableContent(candidate.proposedContent)) {
+    return false;
+  }
+
+  // `ADR-023` item 12 — a **missing** base token is refused at the domain edge. Checked
+  // unconditionally, unlike `rejectedAt` above, because the base applies in every state
+  // rather than only while *rejected*. `isInstant` is the same carrier test the rejection
+  // anchor uses, so a bare number, a `Date`, a non-safe-integer carrier and an absent
+  // field all fail here and surface as the existing `INVALID_REVISION` — **no new error
+  // code**, and nothing thrown. The **unequal** half of item 12 is the `OP-10`
+  // comparison, which this module deliberately does not perform.
+  if (!isInstant(candidate.baseListingLastUpdatedAt)) {
     return false;
   }
 
