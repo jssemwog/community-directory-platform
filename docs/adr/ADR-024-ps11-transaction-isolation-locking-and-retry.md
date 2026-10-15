@@ -112,9 +112,18 @@ strategies from the plausible ones.
 
 ### The stale comparison
 
-6. Compare the **persisted revision's original captured base token** with the **current listing
-   `lastUpdatedAt`**, read under the lock, **before any mutation**. Equality is **exact
-   epoch-millisecond equality** (`ADR-022`, `ADR-023` item 11).
+6. Compare the **original captured base token** with the **current listing `lastUpdatedAt`**,
+   read under the lock, **before any mutation**. Equality is **exact epoch-millisecond
+   equality** (`ADR-022`, `ADR-023` item 11).
+
+   At **`OP-10`** that token is the one **persisted with the revision** — the case `ADR-023`
+   names, where staleness is defined. On the paths where **no revision row exists yet**
+   (**`OP-6`**, **`FR-ADM-04`**, and **`FR-ADM-10b`** before its insert) the **same comparison**
+   is made against the token the **caller captured when work began**, under `ADR-023` item 12's
+   rule that *a missing or unequal token refuses the write*. The comparison, the exactness and
+   the prohibition in item 9 are identical in both cases; **only the token's origin differs, and
+   it is never re-captured from the row being compared**. This narrows nothing in `ADR-023`:
+   `OP-10` remains where a *revision* is stale.
 7. Include **that same original token** in the **guarded listing-write predicate**
    (`… WHERE id = $1 AND last_updated_at = $capturedBase`).
 8. Treat an **affected-row count of zero**, after the lock was held and the stale comparison
