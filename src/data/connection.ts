@@ -360,7 +360,7 @@ export function createListingPersistence(
   // another on demand — and **`ADR-016` selects no observability**, so inventing a log line or
   // a telemetry hook here would be deciding something nobody has ruled on. Query and
   // connection failures are unaffected: they reject their own promises and reach the caller as
-  // a `StorageFailure` (`listing-repository.ts`).
+  // a `StorageFailure` (`storage-failure.ts`).
   pool.on("error", () => {});
 
   const db = new Kysely<ListingDatabase>({ dialect: new PostgresDialect({ pool }) });

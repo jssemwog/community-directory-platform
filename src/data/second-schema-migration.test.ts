@@ -44,9 +44,11 @@ import { beforeAll, describe, expect, it } from "vitest";
 import {
   Kysely,
   PostgresDialect,
+  type Expression,
   type Insertable,
   type PostgresPool,
   type Selectable,
+  type Updateable,
 } from "kysely";
 import { Migrator } from "kysely/migration";
 import { createRequire } from "node:module";
@@ -895,11 +897,14 @@ describe("the Kysely declaration agrees with migration 002 (issue #187)", () => 
     }
   });
 
-  it("leaves listing_revision unwritable, so no repository operation becomes possible", () => {
-    // Making the column visible to `C9` must not make the table writable. Every column is
-    // `ReadOnlyColumn`, so no insert compiles — the `_TheTableHasNoInsertableColumn` guard
-    // below states that, and `tsc` enforces it. Nothing is executed here, because a
-    // runtime insert would be the persistence this unit excludes.
+  it("declares every revision column, and none beyond the two migrations", () => {
+    // Issue #187 asserted here that the table was *unwritable*, because making the column
+    // visible to `C9` must not by itself make the table writable. Issue #195 authorized the
+    // `OP-6` creation path and widened the insert types deliberately, so that claim has moved
+    // rather than been dropped: the compile-time guards below now state exactly which writes
+    // are authorized — insertable, `rejected_at` only as SQL `null`, and still never
+    // updatable — and `tsc` enforces all three. What remains true here regardless of the
+    // write surface is the declaration's completeness against the live catalogue.
     expect(DECLARED_REVISION_COLUMN_NAMES).toHaveLength(19);
   });
 });
@@ -934,9 +939,69 @@ type _TheDeclaredCarrierIsNotADate = Assert<
 type _TheRejectionAnchorStillAdmitsNull = Assert<
   Equals<SelectedRevision["rejected_at"], number | null>
 >;
-/** `Insertable` of a table whose every column is `never` on insert has no usable key. */
-type _TheTableHasNoInsertableColumn = Assert<
-  Equals<keyof InsertableRevision extends never ? true : false, true>
+/**
+ * The write surface issue #195 authorized, stated exactly (and nothing wider).
+ *
+ * Issue #187 asserted the opposite here — that `Insertable` had no usable key at all, because
+ * every column was `never` on insert. The `OP-6` creation path needed that tripwire tripped, so
+ * the guard is replaced rather than removed: it now pins **which** writes compile, so a later
+ * unit cannot widen the surface silently.
+ */
+type UpdateableRevision = Updateable<ListingRevisionTable>;
+
+/** The captured token is insertable as an expression — never as a bare number, never as null. */
+type _TheBaseTokenInsertsAsAnExpression = Assert<
+  Equals<InsertableRevision["base_listing_last_updated_at"], Expression<number>>
+>;
+/**
+ * The rejection anchor is insertable **only** as SQL `null`.
+ *
+ * This slice persists *pending* revisions, and a pending row must carry no anchor. The rejection
+ * path has to widen this, which is the tripwire that makes it say so deliberately.
+ *
+ * `undefined` is admitted because Kysely makes a null-admitting insert key **optional**, not
+ * because omission is a way to write a value: the serializer supplies the column explicitly.
+ * What matters is that neither a number nor an `Expression` is accepted, which the two guards
+ * below state directly so the authorized surface cannot be read off a union by eye.
+ */
+type _TheRejectionAnchorInsertsOnlyAsNull = Assert<
+  Equals<InsertableRevision["rejected_at"], null | undefined>
+>;
+type _TheRejectionAnchorRejectsAnInstant = Assert<
+  Equals<Expression<number> extends InsertableRevision["rejected_at"] ? true : false, false>
+>;
+type _TheRejectionAnchorRejectsANumber = Assert<
+  Equals<number extends InsertableRevision["rejected_at"] ? true : false, false>
+>;
+/** Identity is supplied by the application (`ADR-019`), so it must be insertable as a string. */
+type _TheIdentifierIsInsertable = Assert<Equals<InsertableRevision["id"], string>>;
+
+/** The keys an insert must supply, as opposed to those it may omit. */
+type RequiredInsertKeys<T> = {
+  [K in keyof T]-?: Record<string, never> extends Pick<T, K> ? never : K;
+}[keyof T];
+
+/**
+ * The captured base token is **mandatory on insert** — it cannot be omitted.
+ *
+ * `ADR-023` item 12 refuses a missing token, and the column is `NOT NULL` with no default, so an
+ * insert that left it out would be refused by the store. Requiring it in the *type* means the
+ * refusal happens at compile time instead, and it is what stops a later unit from quietly making
+ * the token optional to make some other insert convenient.
+ */
+type _TheBaseTokenIsMandatoryOnInsert = Assert<
+  Equals<
+    "base_listing_last_updated_at" extends RequiredInsertKeys<InsertableRevision> ? true : false,
+    true
+  >
+>;
+/** The contrast that keeps the claim meaningful: the nullable anchor *may* be omitted. */
+type _TheRejectionAnchorIsOptionalOnInsert = Assert<
+  Equals<"rejected_at" extends RequiredInsertKeys<InsertableRevision> ? true : false, false>
+>;
+/** No column may be updated: `OP-10`, rejection and administrative edits are separate units. */
+type _TheTableHasNoUpdateableColumn = Assert<
+  Equals<keyof UpdateableRevision extends never ? true : false, true>
 >;
 /** The carrier matches the listing instant it copies, so the `C9` round trip cannot drift. */
 type _ItMatchesTheListingInstantCarrier = Assert<

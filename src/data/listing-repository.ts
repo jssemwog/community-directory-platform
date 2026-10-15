@@ -34,7 +34,12 @@
  * ## Failure vocabulary
  *
  * Expected outcomes are `Result` values, in the domain's own convention. The classification is
- * strict, because a boundary that blurs it is worse than one that throws:
+ * strict, because a boundary that blurs it is worse than one that throws.
+ *
+ * `StorageFailure` and its classification helpers moved to `storage-failure.ts` under issue #195,
+ * unchanged, so the revision repository classifies driver errors identically rather than keeping a
+ * second copy of the reasoning — including the non-enumerable `cause` that keeps the driver's
+ * row-quoting `detail` out of logs and responses:
  *
  * - **Not found is its own outcome.** It never catches, wraps or masks a SQL error.
  * - **A hydration failure is never reported as not found.** A row that exists but cannot be
@@ -56,6 +61,13 @@ import type { Listing } from "../domain/listing/listing";
 import type { ListingId } from "../domain/listing/listing-id";
 import { err, ok, type Result } from "../domain/listing/result";
 import { hydrateListing, serializeSubmittedListing } from "./listing-mapping";
+import { identifierTextOf } from "./row-mapping";
+import {
+  constraintOf,
+  sqlStateOf,
+  storageFailure,
+  type StorageFailure,
+} from "./storage-failure";
 import type { ListingHydrationFailure } from "./listing-mapping";
 import type { ListingDatabase } from "./listing-table";
 import { TimestamptzParseError, type TimestamptzParseFailure } from "./timestamp-parser";
@@ -74,43 +86,6 @@ const UNIQUE_VIOLATION = "23505";
  * where an unrecognised failure belongs.
  */
 const LISTING_IDENTITY_CONSTRAINT = "listing_pkey";
-
-/**
- * A conservative SQL identifier, used to decide whether a constraint name may be exposed.
- *
- * The name is **server-supplied**, and this repository authored only lower-case identifiers. A
- * value outside that shape is not echoed: it would be unrecognised text of unknown provenance
- * appearing in an error that callers may log.
- */
-const SAFE_CONSTRAINT_NAME = /^[a-z_][a-z0-9_]*$/;
-
-/**
- * A failure the store reported.
- *
- * **Its enumerable surface is deliberately tiny, and that is a security property rather than
- * tidiness.** A PostgreSQL constraint error carries `detail: "Failing row contains (…)"` as an
- * **enumerable own property** — measured, not assumed — so an error object passed through
- * verbatim would publish the row's values into any log line, JSON response or `{...spread}` that
- * touched it. Only a `SQLSTATE` and a constraint **name** are exposed here: both are schema
- * metadata, neither is data or a credential.
- *
- * The original error is still retained on `cause`, because a diagnosis without it is guesswork —
- * but as a **non-enumerable** property, so it never appears in `JSON.stringify`, a spread or a
- * structured log by accident. A caller that genuinely needs it must reach for it deliberately,
- * and it is typed `unknown` so that reaching for a field inside it is a conscious cast.
- *
- * It is deliberately **not** a domain error: the domain's vocabulary describes governed business
- * failures, and "the database was unreachable" is not one of them.
- */
-export interface StorageFailure {
-  readonly code: "STORAGE_FAILURE";
-  /** PostgreSQL's `SQLSTATE`, when the driver supplied one. */
-  readonly sqlState?: string;
-  /** The violated constraint's **name**, when the driver supplied one. Never its contents. */
-  readonly constraint?: string;
-  /** The original driver error. **Non-enumerable**: retained for diagnosis, never serialized. */
-  readonly cause: unknown;
-}
 
 export type InsertListingFailure =
   /** A listing with this identifier already exists; nothing was written. */
@@ -136,61 +111,6 @@ export type FindListingFailure =
    */
   | { readonly code: "STORED_INSTANT_UNREADABLE"; readonly reason: TimestamptzParseFailure }
   | StorageFailure;
-
-/** PostgreSQL's `SQLSTATE` for an error, if the driver attached one. */
-function sqlStateOf(cause: unknown): string | undefined {
-  const code = (cause as { readonly code?: unknown } | null)?.code;
-  return typeof code === "string" ? code : undefined;
-}
-
-/**
- * The violated constraint's name, if the driver named one **and** it looks like an identifier
- * this repository could have written. Anything else is dropped rather than echoed.
- */
-function constraintOf(cause: unknown): string | undefined {
-  const constraint = (cause as { readonly constraint?: unknown } | null)?.constraint;
-
-  return typeof constraint === "string" && SAFE_CONSTRAINT_NAME.test(constraint)
-    ? constraint
-    : undefined;
-}
-
-function storageFailure(cause: unknown): StorageFailure {
-  const sqlState = sqlStateOf(cause);
-  const constraint = constraintOf(cause);
-
-  const failure: {
-    code: "STORAGE_FAILURE";
-    sqlState?: string;
-    constraint?: string;
-  } = { code: "STORAGE_FAILURE" };
-
-  if (sqlState !== undefined) {
-    failure.sqlState = sqlState;
-  }
-
-  if (constraint !== undefined) {
-    failure.constraint = constraint;
-  }
-
-  // Non-enumerable on purpose: see `StorageFailure`. `JSON.stringify`, object spread and most
-  // structured loggers walk enumerable properties only, so the driver's `detail` — which can
-  // quote the failing row — cannot escape through them.
-  Object.defineProperty(failure, "cause", {
-    value: cause,
-    enumerable: false,
-    writable: false,
-    configurable: false,
-  });
-
-  return failure as StorageFailure;
-}
-
-/** The identifier as the `uuid` column stores it (`ADR-017` `PS-1`). */
-function identifierTextOf(id: ListingId): string {
-  const supplied = (id as unknown as { readonly supplied: unknown }).supplied;
-  return typeof supplied === "string" ? supplied : String(supplied);
-}
 
 /**
  * Persist one submitted listing (`OP-3`).

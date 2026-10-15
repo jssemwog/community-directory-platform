@@ -27,18 +27,36 @@
  * be — so the value is bound as a `bigint` and converted **by PostgreSQL** with exact integer
  * interval arithmetic. `new Date(...)` appears nowhere in this file, which keeps the host time
  * zone, the locale and `Date`'s narrower range out of the write path entirely.
+ *
+ * ## The column primitives now live in `row-mapping.ts`
+ *
+ * `listing_revision` stores the same content column set, the same designation pairs and the same
+ * `timestamptz(3)` carrier, so issue #195 moved the six shared primitives — the instant
+ * expression and its exactness argument, the `Instant` and `ListingId` accessors, the designation
+ * pair in both directions, and the absent-field spread — into `row-mapping.ts`, unchanged. Both
+ * mappers import them and neither owns them, so the listing's `last_updated_at` and the
+ * revision's captured base token are converted by the **same** expression rather than by two
+ * copies that can drift.
  */
 
-import { sql, type Expression, type Insertable } from "kysely";
+import type { Insertable } from "kysely";
 
 import { isCategoryKey, type CategoryKey } from "../domain/listing/category";
 import { instantOf, type Instant } from "../domain/listing/instant";
-import { listingIdOf, type ListingId } from "../domain/listing/listing-id";
-import type { DesignatableValue, Listing, ListingContent } from "../domain/listing/listing";
+import { listingIdOf } from "../domain/listing/listing-id";
+import type { Listing, ListingContent } from "../domain/listing/listing";
 import { isPublicationValue, type PublicationState } from "../domain/listing/publication";
 import { err, ok, type Result } from "../domain/listing/result";
 import { isListingStatus, type ListingStatus } from "../domain/listing/status";
 import type { ListingTimestamps } from "../domain/listing/timestamps";
+import {
+  designatableValueFrom,
+  designationColumnsOf,
+  epochMillisecondsOf,
+  identifierTextOf,
+  timestamptzFromEpochMilliseconds,
+  withOptional,
+} from "./row-mapping";
 import type { ListingRow, ListingTable } from "./listing-table";
 
 /**
@@ -77,64 +95,6 @@ export type ListingHydrationFailure =
       readonly code: "UNUSABLE_INSTANT";
       readonly column: "submitted_at" | "last_updated_at" | "rejected_at";
     };
-
-/**
- * A `timestamptz` carrying exactly this epoch-millisecond instant.
- *
- * `to_timestamp(0)` is the epoch as `timestamptz`, and an `interval` holds whole microseconds in a
- * 64-bit integer, so adding one is exact. **Building that interval is the part that needs care.**
- *
- * The obvious `bigint * interval '1 millisecond'` is **not** integer arithmetic: PostgreSQL
- * declares only `interval * double precision` (checked in `pg_operator` — there is no `bigint`
- * overload), so the count is silently cast to a double and the product is computed in floating
- * point. Above 2^53 microseconds — roughly year 2255 — that product is no longer exactly
- * representable, and the error can reach about a millisecond at the top of the range `instantOf`
- * admits. A sweep of 187 magnitudes across the whole governed range found no value that actually
- * stored incorrectly, because `timestamptz(3)` rounds to the millisecond and the error stayed
- * under half of one; but "it happens to round back" is not the same as exact, and this is a
- * boundary whose whole purpose is exactness.
- *
- * So the interval is built by **parsing an integer**: PostgreSQL reads `'<n> milliseconds'`
- * straight into its 64-bit microsecond field, with no float operator involved at any point. Every
- * safe-integer millisecond count fits (9.007e18 µs against an int64 limit of 9.22e18), so the
- * conversion is exact by construction rather than by luck, and a value outside `timestamptz`'s
- * own range fails loudly with `22008` instead of being quietly rounded.
- *
- * The millisecond count is a **bound parameter**; only the cast and the unit are SQL text, so
- * nothing is interpolated. Negative values (pre-epoch instants, which `ADR-022` admits) parse
- * identically.
- */
-function timestamptzFromEpochMilliseconds(epochMilliseconds: number): Expression<number> {
-  return sql<number>`to_timestamp(0) + ((${epochMilliseconds}::bigint)::text || ' milliseconds')::interval`;
-}
-
-/** The epoch-millisecond carrier of an `Instant`, read through its own accessor shape. */
-function epochMillisecondsOf(instant: Instant): number {
-  return (instant as unknown as { readonly epochMilliseconds: number }).epochMilliseconds;
-}
-
-/** The identifier's wrapped value, as `ADR-017` `PS-1` stores it: an opaque UUID string. */
-function identifierTextOf(id: ListingId): string {
-  const supplied = (id as unknown as { readonly supplied: unknown }).supplied;
-  return typeof supplied === "string" ? supplied : String(supplied);
-}
-
-/**
- * The columns one `DesignatableValue` occupies.
- *
- * `ADR-017` `PS-2` keeps the designation **beside** the value on the same row, and its default is
- * **not public**. An absent value therefore writes SQL `null` **and** `false`: there is nothing to
- * designate, and the fail-closed default is the honest flag for it.
- */
-function designationColumnsOf(
-  value: DesignatableValue | undefined,
-): { readonly value: string | null; readonly designatedPublic: boolean } {
-  if (value === undefined) {
-    return { value: null, designatedPublic: false };
-  }
-
-  return { value: value.value, designatedPublic: value.designatedPublic === true };
-}
 
 /**
  * Turn a newly submitted listing into the row that records it.
@@ -186,22 +146,6 @@ export function serializeSubmittedListing(listing: Listing): ListingInsert {
         ? null
         : timestamptzFromEpochMilliseconds(epochMillisecondsOf(timestamps.rejectedAt)),
   };
-}
-
-/**
- * One optional value and its designation, reconstructed.
- *
- * **The flag alone is not a value.** No `CHECK` ties `*_designated_public` to a non-null column,
- * and the flag is `not null default false`, so the store can hold `postal_code IS NULL` with
- * `postal_code_designated_public = true`. There is nothing to designate in that row, so the field
- * hydrates as **absent** and the stray flag is dropped — which is issue #177's stated rule, and
- * the only reading that cannot leak a designation for a value that does not exist.
- */
-function designatableValueFrom(
-  value: string | null,
-  designatedPublic: boolean,
-): DesignatableValue | undefined {
-  return value === null ? undefined : { value, designatedPublic };
 }
 
 /** A governed instant, or a failure naming its column. */
@@ -352,20 +296,6 @@ function contentFrom(row: ListingRow): Result<ListingContent, ListingHydrationFa
   };
 
   return ok(content);
-}
-
-/**
- * Spread an optional field **only when it has a value**.
- *
- * `undefined` and absent are different things here: `docs/08`'s optional attributes are *absent*
- * when not provided, and an explicit `postalCode: undefined` key would survive serialization,
- * comparison and `Object.keys` as though the field existed.
- */
-function withOptional<K extends string, V>(
-  key: K,
-  value: V | undefined,
-): Partial<Record<K, V>> {
-  return value === undefined ? {} : ({ [key]: value } as Record<K, V>);
 }
 
 /**

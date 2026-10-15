@@ -34,15 +34,37 @@
  *   `undefined`. Serialization still supplies every one of them explicitly — the default is the
  *   store's fail-closed backstop (`ADR-017` `PS-2`), not this layer's way of omitting a value.
  *
- * ## Why `listing_revision` is typed but never touched
+ * ## `listing_revision` — writable for the `OP-6` creation path only (issue #195)
  *
  * Kysely's database interface is the map of the schema, and a map missing a real table invites a
- * later unit to add it twice. It is typed here for that reason **only**. **No revision operation
- * is authorized** (issue #177 §6), and none exists: the table cannot be honestly hydrated today,
- * because it stores `id uuid not null` while the domain's `ListingRevision` carries **no
- * identifier field**, and `ADR-022` records `DDM-2`'s *"revision identity domain type"* as still
- * open. Its update type is `never` for the same reason as the listing's, and its insert type is
- * `never` as well — nothing in this slice may write it.
+ * later unit to add it twice. The table was typed for that reason alone under issue #177, with
+ * every column read-only so that no revision write could compile.
+ *
+ * **Issue #195 trips that tripwire deliberately, for one operation.** The columns `OP-6` writes
+ * are now `Written`, so a pending revision can be inserted; every update type stays `never`, and
+ * `rejected_at` is insertable **only as SQL `null`**, because this slice persists *pending*
+ * revisions and nothing else. Rejection persistence must therefore widen the type again, and say
+ * so deliberately — the tripwire is preserved for the next unit rather than removed.
+ *
+ * ### The identifier, and the blocker that was overstated
+ *
+ * Issue #177 recorded that the table *"cannot be honestly hydrated today, because it stores
+ * `id uuid not null` while the domain's `ListingRevision` carries **no identifier field**"*. The
+ * premise is right and still holds; the conclusion was too strong.
+ *
+ * A row's `id` that the domain has no field for is not unrepresentable **data** — it is a
+ * physical identifier the domain deliberately does not model, and `DI-11` supplies the addressing
+ * the domain uses instead: an approved listing has at most one *pending* revision, enforced by
+ * `listing_revision_one_pending_per_listing`, so `listing_id` plus the *pending* state names
+ * exactly one row without any identity of its own. Nothing governed is lost by not mapping the
+ * column: the value stays in the row, and `ADR-024`'s `OP-10` re-reads it inside its own
+ * transaction (`SELECT id … FOR UPDATE`, then `DELETE … WHERE id = $revisionId`), so no later
+ * path depends on this slice surfacing it.
+ *
+ * `DDM-2`'s *"revision identity domain type"* therefore remains **open and untouched**, exactly
+ * as `ADR-019` requires — the identifier crosses the `C9` boundary as an application-supplied
+ * `string` parameter (`ADR-019`: the application is the sole generator, PostgreSQL declares no
+ * default) and never enters the domain.
  */
 
 import type { ColumnType, Expression, Selectable } from "kysely";
@@ -103,32 +125,42 @@ export interface ListingTable {
 }
 
 /**
- * The `listing_revision` table — **typed only**, written and read by nothing in this slice.
+ * The `listing_revision` table — insertable by the `OP-6` creation path, never updatable.
  *
- * Every column is read-only to the type system, so an attempt to insert or update one does not
- * compile. See the module header for why hydrating a revision is not yet honest.
+ * See the module header for what issue #195 widened and what it deliberately did not.
  */
 export interface ListingRevisionTable {
-  id: ReadOnlyColumn<string>;
-  listing_id: ReadOnlyColumn<string>;
+  /** `uuid not null` — `ADR-017` `PS-1`; the **application** supplies it (`ADR-019`). */
+  id: Written<string>;
+  /** `uuid not null`, foreign key to `listing (id)`. */
+  listing_id: Written<string>;
   /** `CHECK`ed against `pending` and `rejected` only: an approved proposal's row is removed in
    * the same atomic unit that applies it (`ADR-017` Q-3), so `approved` never persists. */
-  state: ReadOnlyColumn<string>;
-  name: ReadOnlyColumn<string>;
-  category: ReadOnlyColumn<string>;
-  description: ReadOnlyColumn<string>;
-  locality: ReadOnlyColumn<string>;
-  country: ReadOnlyColumn<string>;
-  administrative_area: ReadOnlyColumn<string | null>;
-  postal_code: ReadOnlyColumn<string | null>;
-  postal_code_designated_public: ReadOnlyColumn<boolean>;
-  phone: ReadOnlyColumn<string | null>;
-  phone_designated_public: ReadOnlyColumn<boolean>;
-  email: ReadOnlyColumn<string | null>;
-  email_designated_public: ReadOnlyColumn<boolean>;
-  website: ReadOnlyColumn<string | null>;
-  website_designated_public: ReadOnlyColumn<boolean>;
-  rejected_at: ReadOnlyColumn<number | null>;
+  state: Written<string>;
+  name: Written<string>;
+  category: Written<string>;
+  description: Written<string>;
+  locality: Written<string>;
+  country: Written<string>;
+  administrative_area: Written<string | null>;
+  postal_code: Written<string | null>;
+  postal_code_designated_public: Written<boolean, boolean | undefined>;
+  phone: Written<string | null>;
+  phone_designated_public: Written<boolean, boolean | undefined>;
+  email: Written<string | null>;
+  email_designated_public: Written<boolean, boolean | undefined>;
+  website: Written<string | null>;
+  website_designated_public: Written<boolean, boolean | undefined>;
+  /**
+   * `timestamptz(3)`, non-null **iff** `state = 'rejected'`
+   * (`listing_revision_rejected_at_check`).
+   *
+   * **Insertable only as SQL `null`**, which is a restriction of *this unit*: issue #195
+   * persists *pending* revisions, and a pending row must carry no rejection anchor. The
+   * rejection path writes one, and widening this to accept an instant expression is the
+   * tripwire that makes that unit say so deliberately.
+   */
+  rejected_at: WritableAsNullOnly<number | null>;
   /**
    * `base_listing_last_updated_at timestamptz(3) not null` — added by
    * `migrations/002-add-revision-base-version.ts` (issue #183) for `ADR-023` item 9.
@@ -143,16 +175,17 @@ export interface ListingRevisionTable {
    * tables, supplied by the offset-aware `pg` parser (issue #173) rather than by the
    * default `Date` conversion `ADR-022` forbids in the domain.
    *
-   * **`ReadOnlyColumn`, like every sibling** — this declaration makes the column visible
-   * to `C9`, and nothing more. The table stays unwritable, so no revision insert or
-   * update becomes possible, and **no serializer or hydrator is introduced**: revision
-   * hydration does not exist and is a separate authorized unit.
+   * **A `GovernedInstant` since issue #195** — epoch milliseconds out, a SQL expression in,
+   * exactly like the listing's own instants, so the captured token and
+   * `listing.last_updated_at` round-trip through the **same** conversion. That shared
+   * expression is what makes `ADR-023` item 11's exact epoch-millisecond equality
+   * structural rather than hoped for. It is **never** defaulted, refreshed or recomputed.
    *
    * **This is not a second source of schema truth.** The migration states the shape; this
    * states what the type system may assume about it, and a test asserts the two agree on
    * name, carrier and non-nullability against the live catalogue.
    */
-  base_listing_last_updated_at: ReadOnlyColumn<number>;
+  base_listing_last_updated_at: GovernedInstant;
 }
 
 /** The schema the first migration creates, and the only tables `C9` knows about. */
@@ -160,6 +193,9 @@ export interface ListingDatabase {
   listing: ListingTable;
   listing_revision: ListingRevisionTable;
 }
+
+/** A column this slice may write, but only ever as SQL `null`. */
+type WritableAsNullOnly<Select> = ColumnType<Select, null, never>;
 
 /**
  * One `listing` row as the configured connection delivers it.
@@ -169,3 +205,12 @@ export interface ListingDatabase {
  * (issue #177 §5), so no caller outside `src/data/` ever handles a row.
  */
 export type ListingRow = Selectable<ListingTable>;
+
+/**
+ * One `listing_revision` row as the configured connection delivers it.
+ *
+ * Exported for the same reason as `ListingRow`: revision hydration takes one and its tests must
+ * construct one. The repository's own surface speaks in domain values, so no caller outside
+ * `src/data/` ever handles a row — and in particular the row's `id` never leaves this directory.
+ */
+export type ListingRevisionRow = Selectable<ListingRevisionTable>;
