@@ -42,9 +42,17 @@
  * can state in its signature that it accepts only a genuinely pending proposal. The comparison
  * itself lives in the adapter, where the locked listing is: `createPendingRevision` performs
  * `ADR-023`'s exact pre-insert equality check against the listing row it holds a lock on.
- * **Still unimplemented and separately authorized:** the `OP-10` approval and application path,
- * `FR-ADM-04`, `FR-ADM-10b`, rejection persistence, rejected-history retrieval, the
- * administrator conflict message and every API transport.
+ * **Issue #197 added the `OP-10` persistence path**, which **reuses `approvePendingRevision`
+ * unchanged**: the adapter hydrates the locked listing and its sole pending proposal, calls this
+ * module with the caller's approval instant, and turns the single `RevisionResolution` it returns
+ * into one atomic transaction — a guarded listing update and the removal of the applied proposal.
+ * `ADR-017` Q-3's atomicity is therefore enforced where it is enforced, and `DI-6`'s
+ * strictly-later rule is reached for the first time from a write path.
+ *
+ * **Still unimplemented and separately authorized:** `FR-ADM-04`, `FR-ADM-10b`, rejection
+ * persistence, rejected-history retrieval, retention and purge, the administrator conflict
+ * message, and every API transport, authorization check and visible message — **no transport,
+ * authorization or administrator-facing messaging exists for any operation.**
  */
 
 import { isInstant, type Instant } from "./instant";

@@ -23,13 +23,19 @@
  * - They insert as a **SQL expression**, never a bare number: PostgreSQL cannot cast a number to
  *   `timestamptz`, and the conversion must stay exact to the millisecond. `listing-mapping.ts`
  *   builds that expression.
- * - **Every update type is `never` — a restriction of *this unit*, not an architectural rule.**
- *   Issue #177 authorizes exactly one insert and one read (§5/§6), so an unauthorized write
- *   should not compile, and the type system is the cheapest place to say so. It is **not** a
- *   claim that listings are immutable: `OP-6`–`OP-10` moderation and revision writes are
- *   expected, and `ADR-017` `PS-9`'s write-once columns are the only genuinely permanent
- *   restriction here. The unit that implements those paths is expected to widen these types,
- *   and changing a `never` is the tripwire that makes it say so deliberately.
+ * - **The update surface is the `OP-10` content set, and nothing else (issue #197).** Issue
+ *   #177 made every update type `never` and said the unit implementing `OP-6`-`OP-10` would be
+ *   expected to widen them, with *"changing a `never`"* as the tripwire that makes it
+ *   deliberate. `OP-10` trips it for exactly the columns it applies: the governed content
+ *   fields, their designation flags, the category, and `last_updated_at`.
+ *
+ *   **Everything else stays `never` on update, and that is load-bearing.** `id` is identity
+ *   (`DI-8`); `status` changes belong exclusively to `OP-7`/`OP-8` and never to an edit
+ *   (`docs/09` `OP-6`); `submitted_at` is write-once (`ADR-017` `PS-9`); `rejected_at` is a
+ *   write-once anchor; and `publication_state`/`unpublish_reason` are `OP-9`'s. The domain's
+ *   `withListingContent` provably preserves all six, so `OP-10` has nothing to write through
+ *   them - and a compile-time guard pins that, so a later unit cannot widen the surface
+ *   silently.
  * - The `*_designated_public` flags carry a database `DEFAULT false`, so their insert type admits
  *   `undefined`. Serialization still supplies every one of them explicitly — the default is the
  *   store's fail-closed backstop (`ADR-017` `PS-2`), not this layer's way of omitting a value.
@@ -72,6 +78,19 @@ import type { ColumnType, Expression, Selectable } from "kysely";
 /** A column this slice reads and writes once, and never updates. */
 type Written<Select, Insert = Select> = ColumnType<Select, Insert, never>;
 
+/**
+ * A listing column `OP-10` may rewrite when it applies an approved revision (issue #197).
+ *
+ * `ADR-017` Q-3 makes applying the proposal's content and removing that proposal one atomic
+ * unit, so the content columns become updatable for the first time. The update type equals the
+ * insert type: an approved revision carries the **same** governed content a submission does,
+ * and `OP-10` applies it unchanged.
+ *
+ * Everything outside the content set stays `never` on update, which is why this is a separate
+ * alias rather than a widening of `Written` — see the module header.
+ */
+type AppliedContent<Select, Insert = Select> = ColumnType<Select, Insert, Insert>;
+
 /** A column this slice reads but must never write. */
 type ReadOnlyColumn<Select> = ColumnType<Select, never, never>;
 
@@ -84,6 +103,15 @@ type ReadOnlyColumn<Select> = ColumnType<Select, never, never>;
  */
 type GovernedInstant = ColumnType<number, Expression<number>, never>;
 
+/**
+ * The one governed instant `OP-10` advances: `last_updated_at`.
+ *
+ * Written as the same SQL expression the insert uses, so the applied instant round-trips
+ * exactly (`ADR-022`). `submitted_at` and `rejected_at` keep their `never` update types —
+ * both are write-once anchors (`ADR-017` `PS-9`).
+ */
+type AdvancedInstant = ColumnType<number, Expression<number>, Expression<number>>;
+
 /** The same, for a column that is null unless its governed condition holds. */
 type OptionalGovernedInstant = ColumnType<number | null, Expression<number> | null, never>;
 
@@ -93,33 +121,39 @@ export interface ListingTable {
   id: Written<string>;
   /** `text not null`, `CHECK`ed against the three governed statuses. */
   status: Written<string>;
-  name: Written<string>;
+  name: AppliedContent<string>;
   /** `text not null`, `CHECK`ed against the 16 approved machine keys (`ADR-021`). */
-  category: Written<string>;
-  description: Written<string>;
+  category: AppliedContent<string>;
+  description: AppliedContent<string>;
   /** `text not null` — free text (`ADR-020`). */
-  locality: Written<string>;
+  locality: AppliedContent<string>;
   /** `text not null` — free text (`ADR-020`). */
-  country: Written<string>;
+  country: AppliedContent<string>;
   /** `text` — optional (`ADR-020`); absent is SQL `null`, never `''`. */
-  administrative_area: Written<string | null>;
-  postal_code: Written<string | null>;
+  administrative_area: AppliedContent<string | null>;
+  postal_code: AppliedContent<string | null>;
   /** `boolean not null default false` — `ADR-017` `PS-2`, fail-closed. */
-  postal_code_designated_public: Written<boolean, boolean | undefined>;
-  phone: Written<string | null>;
-  phone_designated_public: Written<boolean, boolean | undefined>;
-  email: Written<string | null>;
-  email_designated_public: Written<boolean, boolean | undefined>;
-  website: Written<string | null>;
-  website_designated_public: Written<boolean, boolean | undefined>;
+  postal_code_designated_public: AppliedContent<boolean, boolean | undefined>;
+  phone: AppliedContent<string | null>;
+  phone_designated_public: AppliedContent<boolean, boolean | undefined>;
+  email: AppliedContent<string | null>;
+  email_designated_public: AppliedContent<boolean, boolean | undefined>;
+  website: AppliedContent<string | null>;
+  website_designated_public: AppliedContent<boolean, boolean | undefined>;
   /** `text`, non-null **iff** `status = 'approved'` (`listing_publication_state_check`). */
   publication_state: Written<string | null>;
   /** `text`, non-null **iff** `publication_state = 'unpublished'`. */
   unpublish_reason: Written<string | null>;
   /** `timestamptz(3) not null` — write-once (`DI-6`, `ADR-022`). */
   submitted_at: GovernedInstant;
-  /** `timestamptz(3) not null` — strictly increasing (`NFR-DATA-05`, `ADR-022`). */
-  last_updated_at: GovernedInstant;
+  /**
+   * `timestamptz(3) not null` — strictly increasing (`NFR-DATA-05`, `ADR-022`).
+   *
+   * Updatable since issue #197, because applying an approved revision advances it.
+   * Monotonicity is the domain's to enforce, and `advancedTimestamps` does so before this
+   * column is ever written; a type cannot police it and must not pretend to.
+   */
+  last_updated_at: AdvancedInstant;
   /** `timestamptz(3)`, non-null **iff** `status = 'rejected'` (`listing_rejected_at_check`). */
   rejected_at: OptionalGovernedInstant;
 }

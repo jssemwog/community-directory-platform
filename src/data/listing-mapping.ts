@@ -39,7 +39,7 @@
  * copies that can drift.
  */
 
-import type { Insertable } from "kysely";
+import type { Insertable, Updateable } from "kysely";
 
 import { isCategoryKey, type CategoryKey } from "../domain/listing/category";
 import { instantOf, type Instant } from "../domain/listing/instant";
@@ -66,6 +66,17 @@ import type { ListingRow, ListingTable } from "./listing-table";
  * database-defaulted column is derived from `listing-table.ts` instead of restated here.
  */
 export type ListingInsert = Insertable<ListingTable>;
+
+/**
+ * The columns one application of an approved revision rewrites (issue #197).
+ *
+ * Derived from `Updateable<ListingTable>` rather than hand-written, so the set is read off
+ * `listing-table.ts`'s update types instead of restated here: a column that is `never` on
+ * update cannot appear in this type at all, which is what keeps the mapper and the declaration
+ * from disagreeing about what `OP-10` may write. `Required` because every one of them is
+ * supplied explicitly — a partial application is not a thing `ADR-017` Q-3 admits.
+ */
+export type AppliedListingUpdate = Required<Updateable<ListingTable>>;
 
 /**
  * Why a stored row could not become a domain listing.
@@ -145,6 +156,49 @@ export function serializeSubmittedListing(listing: Listing): ListingInsert {
       timestamps.rejectedAt === undefined
         ? null
         : timestamptzFromEpochMilliseconds(epochMillisecondsOf(timestamps.rejectedAt)),
+  };
+}
+
+/**
+ * The columns `OP-10` rewrites when it applies an approved revision (issue #197).
+ *
+ * **Pure, and deliberately narrower than a whole row.** `ADR-017` Q-3 applies the proposal's
+ * content and removes the proposal as one unit, and `withListingContent` has already produced
+ * the applied listing — so this records that result and decides nothing. Only the governed
+ * content set and `last_updated_at` appear, because those are the only columns the domain
+ * changed: identity, status, `submitted_at`, any rejection anchor and the publication state are
+ * provably preserved by `withListingContent`, so writing them would be writing unchanged values
+ * through columns that must stay unwritable (`ADR-017` `PS-9`, `docs/09` `OP-6`).
+ *
+ * The instant is the **caller-supplied** approval moment the domain already validated as
+ * strictly later (`DI-6`); no clock is read here, and the same expression the insert uses
+ * converts it, so the stored value is exact to the millisecond (`ADR-022`).
+ */
+export function serializeAppliedListingContent(listing: Listing): AppliedListingUpdate {
+  const { content, timestamps } = listing;
+  const postalCode = designationColumnsOf(content.postalCode);
+  const phone = designationColumnsOf(content.phone);
+  const email = designationColumnsOf(content.email);
+  const website = designationColumnsOf(content.website);
+
+  return {
+    name: content.name,
+    category: content.category,
+    description: content.description,
+    locality: content.locality,
+    country: content.country,
+    administrative_area: content.administrativeArea ?? null,
+    postal_code: postalCode.value,
+    postal_code_designated_public: postalCode.designatedPublic,
+    phone: phone.value,
+    phone_designated_public: phone.designatedPublic,
+    email: email.value,
+    email_designated_public: email.designatedPublic,
+    website: website.value,
+    website_designated_public: website.designatedPublic,
+    last_updated_at: timestamptzFromEpochMilliseconds(
+      epochMillisecondsOf(timestamps.lastUpdatedAt),
+    ),
   };
 }
 
