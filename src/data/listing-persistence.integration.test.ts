@@ -26,7 +26,7 @@
  * requires of its callers.
  */
 import { beforeAll, describe, expect, it } from "vitest";
-import { Kysely, sql } from "kysely";
+import { Kysely, sql, type Expression, type Updateable } from "kysely";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 
@@ -42,7 +42,11 @@ import { listingIdOf } from "../domain/listing/listing-id";
 import type { Listing } from "../domain/listing/listing";
 import { createListingPersistence, type ListingPersistence } from "./connection";
 import { findListingById, insertSubmittedListing } from "./listing-repository";
-import type { ListingDatabase } from "./listing-table";
+import type {
+  ListingDatabase,
+  ListingRevisionTable,
+  ListingTable,
+} from "./listing-table";
 
 /**
  * The narrow slice of `pg` this file reaches directly.
@@ -1178,10 +1182,16 @@ describe("shutdown", () => {
 });
 
 describe("the typed database exposes no unauthorized operation", () => {
-  it("offers exactly the two repository functions, and no update or delete", () => {
-    // A compile-time fact, recorded at runtime so it is visible in the suite: every column's
-    // update type in `listing-table.ts` is `never`, and `listing_revision`'s insert type is
-    // `never` too, so an unauthorized write does not compile.
+  it("offers the authorized repository functions, and the write surface the chain allows", () => {
+    // A compile-time fact, recorded at runtime so it is visible in the suite.
+    //
+    // **The claim has narrowed twice, and the comment is corrected rather than deleted.** Issue
+    // #177 could say that *every* listing update type was `never` and that `listing_revision`
+    // was not insertable at all. Issue #195 authorized the `OP-6` creation path and made the
+    // revision table insertable; issue #197 authorized `OP-10` and made the listing's **content
+    // columns** updatable. Both widenings were deliberate tripwires, and both are now pinned by
+    // the compile-time guards below — which is where the real assertion lives, because a
+    // runtime test cannot see a type.
     const database: Kysely<ListingDatabase> = persistence.db;
 
     expect(typeof database.insertInto).toBe("function");
@@ -1189,3 +1199,93 @@ describe("the typed database exposes no unauthorized operation", () => {
     expect(typeof findListingById).toBe("function");
   });
 });
+
+/**
+ * Compile-time guards on the listing write surface (issues #177, #197).
+ *
+ * Checked by `tsc`, so `npm run typecheck` fails if a later unit widens the surface without
+ * saying so. No runtime assertion can catch these: each would leave this suite green while the
+ * type system quietly permitted a write the chain never authorized.
+ */
+type Equals<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+
+/** Compiles only when `T` is exactly `true`. */
+type Assert<T extends true> = T;
+
+type UpdateableListing = Updateable<ListingTable>;
+
+/** The keys an update may supply. */
+type UpdateableListingKeys = keyof UpdateableListing;
+
+/**
+ * `OP-10` may rewrite the governed content set, its designation flags, the category and
+ * `last_updated_at` — and **nothing else** (issue #197).
+ *
+ * Stated as an exact key set rather than a series of "may" checks, so adding a column to the
+ * update surface fails here even if every existing guard still holds.
+ */
+type _TheUpdateSurfaceIsExactlyTheAppliedContentSet = Assert<
+  Equals<
+    UpdateableListingKeys,
+    | "name"
+    | "category"
+    | "description"
+    | "locality"
+    | "country"
+    | "administrative_area"
+    | "postal_code"
+    | "postal_code_designated_public"
+    | "phone"
+    | "phone_designated_public"
+    | "email"
+    | "email_designated_public"
+    | "website"
+    | "website_designated_public"
+    | "last_updated_at"
+  >
+>;
+
+/**
+ * The six columns that must never be updatable, named individually.
+ *
+ * `id` is identity (`DI-8`); `status` belongs to `OP-7`/`OP-8` and never to an edit (`docs/09`
+ * `OP-6`); `submitted_at` is write-once (`ADR-017` `PS-9`); `rejected_at` is a write-once
+ * anchor; `publication_state` and `unpublish_reason` are `OP-9`'s. `withListingContent` provably
+ * preserves all six, so `OP-10` has nothing to write through them — and naming them one by one
+ * means a reader learns *which* column a future failure is about.
+ */
+type _IdentityIsNotUpdateable = Assert<
+  Equals<"id" extends UpdateableListingKeys ? true : false, false>
+>;
+type _StatusIsNotUpdateable = Assert<
+  Equals<"status" extends UpdateableListingKeys ? true : false, false>
+>;
+type _SubmittedAtIsNotUpdateable = Assert<
+  Equals<"submitted_at" extends UpdateableListingKeys ? true : false, false>
+>;
+type _RejectionAnchorIsNotUpdateable = Assert<
+  Equals<"rejected_at" extends UpdateableListingKeys ? true : false, false>
+>;
+type _PublicationStateIsNotUpdateable = Assert<
+  Equals<"publication_state" extends UpdateableListingKeys ? true : false, false>
+>;
+type _UnpublishReasonIsNotUpdateable = Assert<
+  Equals<"unpublish_reason" extends UpdateableListingKeys ? true : false, false>
+>;
+
+/** The advanced instant is written as an expression, never as a bare number or a `Date`. */
+type _TheAdvancedInstantIsAnExpression = Assert<
+  Equals<NonNullable<UpdateableListing["last_updated_at"]>, Expression<number>>
+>;
+type _TheAdvancedInstantRejectsANumber = Assert<
+  Equals<number extends UpdateableListing["last_updated_at"] ? true : false, false>
+>;
+type _TheAdvancedInstantRejectsADate = Assert<
+  Equals<Date extends UpdateableListing["last_updated_at"] ? true : false, false>
+>;
+
+/** The revision table stays entirely unupdatable: `OP-10` removes a proposal, never edits one. */
+type _TheRevisionTableHasNoUpdateableColumn = Assert<
+  Equals<keyof Updateable<ListingRevisionTable> extends never ? true : false, true>
+>;
