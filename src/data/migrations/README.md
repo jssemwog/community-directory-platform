@@ -31,10 +31,13 @@ and the **`PS-11` isolation level and retry policy remain undecided**.~~
 #187): `ListingRevision.baseListingLastUpdatedAt` is a mandatory `Instant`, and
 `listing-table.ts` declares `base_listing_last_updated_at` so `C9` can see the
 column. **Nothing still reads or writes the column**: there is **no mapper, no
-API transport, no staleness comparison and no administrator message**, the
-**`PS-11` isolation level and retry policy remain undecided**, and the table
+API transport, no staleness comparison and no administrator message**, and the table
 stays unwritable — every column is typed read-only, so a revision insert does
-not compile. ~~and **no `pg` timestamp
+not compile. The **`PS-11` isolation and retry policy is now decided**
+(`ADR-024`, 2026-10-14, issue #189) — **`READ COMMITTED` under the listing-row
+lock, with the captured token compared before any mutation and no automatic
+retry** — and **that decision implements nothing here**: no transaction,
+repository, SQL, comparison or retry code exists. ~~and **no `pg` timestamp
 parser** (`ADR-022` requires one, explicitly and tested, before persistence
 implementation is complete)~~ — **the `ADR-022` timestamp parser now exists**
 (`../timestamp-parser.ts`, issue #173), though **no pool passes it yet**, since
