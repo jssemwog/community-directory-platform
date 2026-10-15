@@ -41,8 +41,13 @@ import {
   CLUSTER_USER,
   EXIT_POLL_INTERVAL_MS,
   EXIT_WAIT_CEILING_MS,
+  REMOVE_CEILING_MS,
+  REMOVE_RETRY_INTERVAL_MS,
   SHUTDOWN_TIMEOUT_MS,
   SHUTDOWN_TIMEOUT_SECONDS,
+  TRANSIENT_REMOVAL_CODES,
+  isTransientRemovalError,
+  removeOwnedRoot,
   requestCompleteShutdown,
   waitForOwnedExit,
   type LifecycleSeams,
@@ -226,15 +231,77 @@ interface StartedCluster {
  */
 const createdRoots: string[] = [];
 
-afterAll(() => {
-  for (const root of createdRoots.splice(0)) {
-    try {
-      rmSync(root, { recursive: true, force: true });
-    } catch {
-      // A root that cannot be removed is surfaced by the suite's own residue checks rather than
-      // by throwing here, which would mask the failure that actually matters.
-    }
+/**
+ * Cleanup failures, deferred so that they are **reported without masking** (issue #193).
+ *
+ * A `finally` block that throws replaces whatever the test body was failing on, which is how
+ * a teardown problem comes to stand in front of the defect it is hiding. A `finally` block that
+ * swallows is no better: the cleanup failure then goes unreported entirely.
+ *
+ * So teardown records here and the `afterAll` below asserts the list is empty. A failing test
+ * keeps its own failure, *and* the cleanup failure is reported alongside it — both errors
+ * survive, and neither is inferred from the other.
+ */
+interface CleanupFailure {
+  readonly root: string;
+  readonly detail: string;
+}
+
+const cleanupFailures: CleanupFailure[] = [];
+
+/**
+ * Discard an owned root through the **governed** removal path (issue #193).
+ *
+ * Teardown used `rmSync(root, { recursive: true, force: true })` directly. Node's `rmSync`
+ * defaults to `maxRetries: 0`, and `force` suppresses only `ENOENT` — never `EBUSY` — so a
+ * cleanup removal had **no tolerance at all** for the Windows handle-release lag that
+ * `removeOwnedRoot` exists to absorb, and a transient `EBUSY` in teardown failed a test that
+ * was about something else entirely.
+ *
+ * Routing teardown through the same bounded, governed retry is strictly **stronger** than one
+ * zero-tolerance attempt: it is more persistent about residue, not less. Removal is idempotent
+ * on an already-absent root — one attempt, no sleep, success, as the seam-driven case at the
+ * end of this file proves — so the registry backstop below can run unconditionally after this
+ * without a double-removal hazard.
+ *
+ * This never throws. It records instead, for the reason given above `cleanupFailures`.
+ */
+async function discardOwnedRoot(root: string): Promise<void> {
+  const removal = await removeOwnedRoot(root);
+
+  if (!removal.removed) {
+    cleanupFailures.push({
+      root,
+      detail:
+        `governed removal failed after ${removal.attempts} attempt(s) in ` +
+        `${removal.elapsedMs}ms (ceiling ${REMOVE_CEILING_MS}ms): ${String(removal.lastError)}`,
+    });
   }
+}
+
+afterAll(async () => {
+  const survived: string[] = [];
+
+  for (const root of createdRoots.splice(0)) {
+    // The backstop is the governed path too, so the last word on residue is as patient as the
+    // mechanism under test. Idempotent on a root a `finally` already removed.
+    await removeOwnedRoot(root);
+
+    if (existsSync(root)) survived.push(root);
+  }
+
+  // Both claims are made here rather than from a `finally`, so a failing test keeps its own
+  // failure and these are reported in addition to it, never instead of it.
+  //
+  // A cleanup failure recorded on a path that *also* failed for its own reasons — a cluster
+  // that never started, say — is still reported: it is extra diagnostic detail about the same
+  // run, and suppressing it is what left teardown problems invisible before.
+  expect(
+    cleanupFailures.splice(0).map((failure) => `${failure.root}: ${failure.detail}`),
+    "owned-root teardown failed",
+  ).toEqual([]);
+
+  expect(survived, "owned roots survived the governed backstop removal").toEqual([]);
 });
 
 async function startCluster(): Promise<StartedCluster> {
@@ -276,7 +343,7 @@ async function startCluster(): Promise<StartedCluster> {
       // Best effort: there may be nothing to stop, which is not what this path reports.
     }
 
-    rmSync(root, { recursive: true, force: true });
+    await discardOwnedRoot(root);
 
     throw error;
   }
@@ -327,7 +394,7 @@ describe.runIf(onWindows)("complete shutdown, against a real cluster", () => {
           expect(existsSync(join(cluster.clusterDirectory, "postmaster.pid"))).toBe(false);
         } finally {
           // `stop()` is deliberately **not** called (ruling 3); the directory is ours to remove.
-          rmSync(cluster.root, { recursive: true, force: true });
+          await discardOwnedRoot(cluster.root);
         }
       }
     },
@@ -365,27 +432,71 @@ describe.runIf(onWindows)("complete shutdown, against a real cluster", () => {
         expect(descendantsOf(rows, bystander.postmaster).length).toBe(bystanderBefore);
       } finally {
         await requestCompleteShutdown(bystander.clusterDirectory);
-        rmSync(target.root, { recursive: true, force: true });
-        rmSync(bystander.root, { recursive: true, force: true });
+        await discardOwnedRoot(target.root);
+        await discardOwnedRoot(bystander.root);
       }
     },
     CLUSTER_TIMEOUT_MS,
   );
 
   it(
-    "releases the data directory, so removal needs no retry",
+    "releases the data directory, so the governed removal succeeds within its ceiling",
     async () => {
       // The removal race this module used to compensate for: a child still holding a handle
-      // made the owned root undeletable for up to 30s. A complete shutdown dissolves it, and
-      // the proof is that a single immediate removal succeeds.
+      // made the owned root undeletable for up to 30s. A complete shutdown dissolves the
+      // *process* side of that race, and this case proves the root is then removable.
+      //
+      // It used to prove it with a single bare `rmSync(root, { recursive: true, force: true })`
+      // and the title "removal needs no retry" — and it failed intermittently, 3 runs in 12
+      // focused, with `EBUSY: resource busy or locked, rmdir` (issue #193). That was not a
+      // defect in the mechanism. `EBUSY` is a member of `TRANSIENT_REMOVAL_CODES`, which is to
+      // say it is **precisely the condition `removeOwnedRoot` is governed to retry**; the old
+      // assertion failed on the one outcome the design explicitly tolerates. `pg_ctl -w` had
+      // already exited 0 by then, so the owner was gone and what still held the directory was
+      // the operating system's own lagging release of it.
+      //
+      // Two further facts settled the diagnosis. The failure was thrown by `rmSync`, not by an
+      // assertion, because `rmSync` defaults to `maxRetries: 0` and `force` forgives only
+      // `ENOENT`. And this was the only case to remove the root with *nothing* awaited in
+      // between — its siblings all `await postgresProcesses()` first, a PowerShell spawn that
+      // incidentally gave Windows the milliseconds it needed. The old proof was therefore a
+      // measurement of handle-release latency wearing the costume of a correctness claim.
+      //
+      // So the claim is now made of governed guarantees only: the owned root **is** removed,
+      // **within** `REMOVE_CEILING_MS`, and is **absent** afterwards. The attempt count is
+      // reported in the diagnostic rather than dictated, because how many attempts Windows
+      // costs us is the host's business and never the oracle. That "one attempt is enough on a
+      // healthy path" is the honest form of the old title, and it is proved exactly — and
+      // deterministically — by the seam-driven cases at the end of this file.
       const cluster = await startCluster();
       const outcome = await requestCompleteShutdown(cluster.clusterDirectory);
 
       expect(outcome.ok, outcome.detail).toBe(true);
 
-      rmSync(cluster.root, { recursive: true, force: true });
+      const removal = await removeOwnedRoot(cluster.root);
 
+      expect(
+        removal.removed,
+        `removal failed after ${removal.attempts} attempt(s) in ${removal.elapsedMs}ms ` +
+          `(governed ceiling ${REMOVE_CEILING_MS}ms): ${String(removal.lastError)}`,
+      ).toBe(true);
+
+      // Within the governed bound — the ceiling is a diagnostic limit, not a stopwatch, and
+      // this reads the mechanism's own injected clock rather than the host's speed.
+      expect(
+        removal.elapsedMs,
+        `removal took ${removal.elapsedMs}ms over ${removal.attempts} attempt(s)`,
+      ).toBeLessThan(REMOVE_CEILING_MS);
+
+      // Any legitimate attempt count is permitted; only "at least one" is a guarantee, and it
+      // is the guarantee that removal was actually attempted rather than assumed.
+      expect(removal.attempts).toBeGreaterThanOrEqual(1);
+
+      // Absence, independently of what the removal reported about itself.
       expect(existsSync(cluster.root)).toBe(false);
+
+      // And the process side of the original race, still asserted here: nothing owned survived.
+      expect(descendantsOf(await postgresProcesses(), cluster.postmaster)).toEqual([]);
     },
     CLUSTER_TIMEOUT_MS,
   );
@@ -448,12 +559,21 @@ describe.runIf(onWindows)("complete shutdown, against a real cluster", () => {
         expect(outcome.elapsedMs).toBeLessThan(SHUTDOWN_TIMEOUT_MS);
 
         // The real cleanup guarantees, unchanged and still asserted here: no owned PostgreSQL
-        // process survives, and the released directory is removable with no retry.
+        // process survives, and the released directory is removable — through the governed
+        // path, for the reason recorded in the case above (issue #193). The bare `rmSync` that
+        // used to stand here carried the identical `EBUSY` exposure.
         expect(descendantsOf(await postgresProcesses(), cluster.postmaster)).toEqual([]);
-        rmSync(cluster.root, { recursive: true, force: true });
+
+        const removal = await removeOwnedRoot(cluster.root);
+
+        expect(
+          removal.removed,
+          `removal failed after ${removal.attempts} attempt(s) in ${removal.elapsedMs}ms: ` +
+            String(removal.lastError),
+        ).toBe(true);
         expect(existsSync(cluster.root)).toBe(false);
       } finally {
-        rmSync(cluster.root, { recursive: true, force: true });
+        await discardOwnedRoot(cluster.root);
       }
     },
     CLUSTER_TIMEOUT_MS,
@@ -473,7 +593,7 @@ describe.runIf(onWindows)("complete shutdown, against a real cluster", () => {
 
         expect(second.ok).toBe(false);
       } finally {
-        rmSync(cluster.root, { recursive: true, force: true });
+        await discardOwnedRoot(cluster.root);
       }
     },
     CLUSTER_TIMEOUT_MS,
@@ -668,5 +788,322 @@ describe("the bounded wait cannot hang, spin or exhaust silently (issue #190)", 
       expect(result.last).toBe(stuck);
       expect(result.elapsedMs).toBeGreaterThanOrEqual(EXIT_WAIT_CEILING_MS);
     }
+  });
+});
+
+/**
+ * Governed owned-root removal, proved deterministically (issue #193).
+ *
+ * The real-cluster case above proves the root **is** removed within its governed ceiling. It
+ * deliberately does not dictate an attempt count, because on Windows the first attempt
+ * genuinely fails some of the time and asserting otherwise is what made it flaky.
+ *
+ * That leaves the honest form of the old claim — *a healthy removal needs no retry* — to be
+ * proved where it can be stated as a fact rather than a hope: against the seams. These cases
+ * use a **virtual clock**, so `sleep` advances time instead of spending it, and a **controlled
+ * `remove`**, so the filesystem's mood is an input rather than a hazard. No cluster is started,
+ * no real clock is read, nothing is slept on and nothing can leak; each case is instant and
+ * identical on a fast machine and a loaded one.
+ *
+ * `embedded-cluster.test.ts` already drives this mechanism for transient retry, non-transient
+ * refusal, ceiling exhaustion and the absence recheck. These do not restate those. What they
+ * add is what issue #193 found missing and what the deleted assertion was reaching for: exact
+ * **attempt and sleep accounting** on the healthy path, exact virtual-time advance across a
+ * retry, and the proof that removal cannot be skipped.
+ */
+const UNBOUNDED_REMOVAL_SENTINEL = "unbounded removal retry detected";
+
+/**
+ * The legitimate maximum number of sleeps a bounded removal loop can perform: one per retry
+ * interval until the ceiling. Derived from the module's own constants, never hard-coded, so it
+ * cannot drift away from the mechanism it bounds.
+ */
+const LEGITIMATE_REMOVAL_SLEEPS = Math.ceil(REMOVE_CEILING_MS / REMOVE_RETRY_INTERVAL_MS);
+
+/** A small allowance above the legitimate maximum, so an honest loop is never tripped. */
+const REMOVAL_SLEEP_ALLOWANCE = 8;
+
+/** A filesystem error shaped the way Node shapes one, so the code path under test is the real one. */
+function removalError(code: string): Error & { code: string } {
+  return Object.assign(new Error(`${code}: simulated, rmdir '/owned/root'`), { code });
+}
+
+/**
+ * Virtual-time removal seams whose `sleep` is instrumented and **self-limiting**.
+ *
+ * The self-limit is what makes the "retry became unbounded" mutation *detectable* rather than
+ * fatal. Without it, a loop that had lost its ceiling would spin on resolved promises forever:
+ * virtual time never reaches a ceiling that no longer exists, no real time passes, so vitest's
+ * own timeout cannot fire and the run **hangs** instead of failing. Counting the sleeps turns
+ * that hang into an immediate, named failure.
+ *
+ * It is thrown from the test seam, so no production code and no new production seam is
+ * involved, and no wall-clock timing or fixed sleeping is introduced. This mirrors
+ * `virtualWaitSeams` above, which solved the same problem for the bounded exit wait (#190).
+ */
+function virtualRemovalSeams(
+  behaviour: {
+    readonly remove: (attempt: number) => void;
+    readonly exists: (attempt: number) => boolean;
+  },
+  options: { readonly cap?: number } = {},
+): LifecycleSeams & {
+  readonly removals: () => number;
+  readonly sleeps: () => number;
+  readonly cap: number;
+  readonly elapsed: () => number;
+} {
+  const cap = options.cap ?? LEGITIMATE_REMOVAL_SLEEPS + REMOVAL_SLEEP_ALLOWANCE;
+  let current = 0;
+  let removals = 0;
+  let sleeps = 0;
+
+  return {
+    now: () => current,
+    sleep: async (ms: number) => {
+      sleeps += 1;
+
+      if (sleeps > cap) {
+        throw new Error(
+          `${UNBOUNDED_REMOVAL_SENTINEL}: ${sleeps} sleeps exceeded the ${cap} admissible ` +
+            `for a ${REMOVE_CEILING_MS}ms ceiling retried every ${REMOVE_RETRY_INTERVAL_MS}ms`,
+        );
+      }
+
+      current += ms;
+    },
+    remove: () => {
+      removals += 1;
+      behaviour.remove(removals);
+    },
+    exists: () => behaviour.exists(removals),
+    removals: () => removals,
+    sleeps: () => sleeps,
+    cap,
+    elapsed: () => current,
+  };
+}
+
+describe("governed owned-root removal, against injected seams (issue #193)", () => {
+  it("retries exactly three codes, and nothing else is admitted to the list", async () => {
+    // The cases below iterate `TRANSIENT_REMOVAL_CODES`, which proves every member is retried
+    // but would say nothing about a *fourth* member quietly joining it — the list would simply
+    // grow and the iteration would grow with it. Pinning the membership is what makes "only
+    // these three" a claim rather than an assumption, and it is the second detector for a
+    // widened classification: adding a code here fails this case, and treating an unlisted code
+    // as transient fails the non-transient case below.
+    expect([...TRANSIENT_REMOVAL_CODES]).toEqual(["EBUSY", "EPERM", "ENOTEMPTY"]);
+
+    // And the classifier agrees with the list in both directions, for the exact errnos that
+    // matter: the three Windows handle-release codes, and representative real errors.
+    for (const code of TRANSIENT_REMOVAL_CODES) {
+      expect(isTransientRemovalError(removalError(code)), `${code} must be transient`).toBe(true);
+    }
+
+    for (const code of ["ENOTDIR", "EACCES", "ENOENT", "EIO", "EMFILE"]) {
+      expect(
+        isTransientRemovalError(removalError(code)),
+        `${code} must not be retried to a deadline`,
+      ).toBe(false);
+    }
+
+    // An error carrying no code at all is a real failure, not a handle-release lag.
+    expect(isTransientRemovalError(new Error("no code"))).toBe(false);
+    expect(isTransientRemovalError(undefined)).toBe(false);
+  });
+
+  it("succeeds on the first attempt and sleeps not once, on a healthy path", async () => {
+    // The honest form of the deleted "needs no retry" assertion, stated as a fact about the
+    // mechanism instead of a measurement of the host's handle-release latency. A healthy
+    // removal is attempted exactly once, waited on never, and costs no virtual time at all.
+    //
+    // An implementation that retried a success, or slept before checking, would fail here — and
+    // would have passed the old bare `rmSync` proof every single time.
+    const seams = virtualRemovalSeams({
+      remove: () => {},
+      exists: () => false,
+    });
+
+    const outcome = await removeOwnedRoot("/owned/root", seams);
+
+    expect(outcome.removed).toBe(true);
+    expect(outcome.attempts).toBe(1);
+    expect(seams.removals()).toBe(1);
+    expect(seams.sleeps()).toBe(0);
+    expect(seams.elapsed()).toBe(0);
+    expect(outcome.elapsedMs).toBe(0);
+    expect(outcome.lastError).toBeUndefined();
+  });
+
+  it.each(TRANSIENT_REMOVAL_CODES)(
+    "retries a transient %s on exactly the governed interval, and no longer",
+    async (code) => {
+      // Virtual time is asserted *exactly*, not merely as "greater than zero": three failures
+      // then a success must cost precisely three retry intervals. That is what pins the retry
+      // to `REMOVE_RETRY_INTERVAL_MS` and makes any change to the pacing visible, while
+      // remaining completely independent of the host.
+      const seams = virtualRemovalSeams({
+        remove: (attempt) => {
+          if (attempt < 4) throw removalError(code);
+        },
+        exists: (attempt) => attempt < 4,
+      });
+
+      const outcome = await removeOwnedRoot("/owned/root", seams);
+
+      expect(outcome.removed, `transient ${code} was not absorbed`).toBe(true);
+      expect(outcome.attempts).toBe(4);
+      expect(seams.sleeps()).toBe(3);
+      expect(seams.elapsed()).toBe(REMOVE_RETRY_INTERVAL_MS * 3);
+      expect(outcome.elapsedMs).toBe(REMOVE_RETRY_INTERVAL_MS * 3);
+
+      // Bounded throughout: it never approached the ceiling, and never came near the cap that
+      // would have caught an unbounded loop.
+      expect(outcome.elapsedMs).toBeLessThan(REMOVE_CEILING_MS);
+      expect(seams.sleeps()).toBeLessThan(seams.cap);
+      expect(isTransientRemovalError(outcome.lastError)).toBe(false);
+    },
+  );
+
+  it("bounds transient retry at the ceiling, and an unbounded one is detected, not survived", async () => {
+    // Boundedness stated as an exact count rather than a duration: with a fixed retry interval,
+    // a ceiling admits a known maximum number of sleeps. An honest loop never reaches the cap,
+    // so this must resolve rather than reject — while a loop that had lost its ceiling fails
+    // immediately and by name instead of spinning until someone kills the process.
+    const seams = virtualRemovalSeams({
+      remove: () => {
+        throw removalError("EBUSY");
+      },
+      exists: () => true,
+    });
+
+    const outcome = await removeOwnedRoot("/owned/root", seams);
+
+    expect(outcome.removed).toBe(false);
+    expect(seams.sleeps()).toBeLessThanOrEqual(LEGITIMATE_REMOVAL_SLEEPS);
+    expect(seams.sleeps()).toBeLessThan(seams.cap);
+
+    // Virtual time reached the ceiling and stopped there, rather than running on.
+    expect(outcome.elapsedMs).toBeGreaterThanOrEqual(REMOVE_CEILING_MS);
+    expect(outcome.elapsedMs).toBeLessThan(REMOVE_CEILING_MS + REMOVE_RETRY_INTERVAL_MS * 2);
+  });
+
+  it("keeps the unbounded-removal detector live, not decorative", async () => {
+    // A guard nothing can trip is no guard at all. Driving the same bounded loop against a
+    // deliberately tiny cap proves the sentinel really fires and names its reason — which is
+    // exactly what the ceiling-removal mutation produces: milliseconds, no hang, no vitest
+    // timeout, and no process to terminate by hand.
+    const seams = virtualRemovalSeams(
+      {
+        remove: () => {
+          throw removalError("EBUSY");
+        },
+        exists: () => true,
+      },
+      { cap: 3 },
+    );
+
+    await expect(removeOwnedRoot("/owned/root", seams)).rejects.toThrow(
+      UNBOUNDED_REMOVAL_SENTINEL,
+    );
+
+    expect(seams.sleeps()).toBe(4);
+    expect(seams.elapsed()).toBe(REMOVE_RETRY_INTERVAL_MS * 3);
+  });
+
+  it("fails immediately on a non-transient error, without a single sleep", async () => {
+    // The complement of the retry guarantee, and the reason the transient list is a list rather
+    // than a shrug: a permissions mistake or a path bug must surface as itself, at once, rather
+    // than be retried to a deadline and then reported as the deadline.
+    const seams = virtualRemovalSeams({
+      remove: () => {
+        throw removalError("ENOTDIR");
+      },
+      exists: () => true,
+    });
+
+    const outcome = await removeOwnedRoot("/owned/root", seams);
+
+    expect(outcome.removed).toBe(false);
+    expect(outcome.attempts).toBe(1);
+    expect(seams.removals()).toBe(1);
+    expect(seams.sleeps()).toBe(0);
+    expect(outcome.elapsedMs).toBe(0);
+
+    // The original error is handed back intact, and is not reclassified as transient.
+    expect(isTransientRemovalError(outcome.lastError)).toBe(false);
+    expect((outcome.lastError as { code?: string }).code).toBe("ENOTDIR");
+  });
+
+  it("fails loudly when the ceiling is exhausted, never reporting a removal it did not make", async () => {
+    // Exhaustion is a failure, not a reason to proceed. Both ways of exhausting the ceiling are
+    // driven: an error every time, and a `remove` that reports success while leaving the
+    // directory in place. A silent success in either is the defect this module exists to
+    // remove, and neither is detectable by timing anything.
+    const cases: readonly {
+      readonly label: string;
+      readonly remove: () => void;
+    }[] = [
+      {
+        label: "always throws a transient error",
+        remove: () => {
+          throw removalError("EBUSY");
+        },
+      },
+      { label: "reports success but removes nothing", remove: () => {} },
+    ];
+
+    for (const { label, remove } of cases) {
+      const seams = virtualRemovalSeams({ remove, exists: () => true });
+      const outcome = await removeOwnedRoot("/owned/root", seams);
+
+      expect(outcome.removed, `exhaustion that ${label} claimed success`).toBe(false);
+      expect(outcome.elapsedMs).toBeGreaterThanOrEqual(REMOVE_CEILING_MS);
+      expect(outcome.attempts).toBeGreaterThan(1);
+    }
+  });
+
+  it("cannot report removal without attempting it, or while the root is still there", async () => {
+    // The anti-vacuity guarantee: "no error" and "nothing there" are different claims, and only
+    // the second is the one this mechanism makes. A removal that reports success twice while
+    // the directory persists must keep going, and may only claim success once absence agrees.
+    //
+    // This is what fails if removal is ever skipped altogether — the success report would then
+    // rest on nothing having been attempted.
+    let present = true;
+    const seams = virtualRemovalSeams({
+      remove: (attempt) => {
+        if (attempt >= 3) present = false;
+      },
+      exists: () => present,
+    });
+
+    const outcome = await removeOwnedRoot("/owned/root", seams);
+
+    expect(outcome.removed).toBe(true);
+    expect(outcome.attempts).toBe(3);
+    expect(seams.removals()).toBe(3);
+    expect(seams.sleeps()).toBe(2);
+    expect(seams.elapsed()).toBe(REMOVE_RETRY_INTERVAL_MS * 2);
+  });
+
+  it("treats an already-absent root exactly as the contract specifies: one attempt, success", async () => {
+    // The idempotence the teardown paths depend on. `rmSync`'s `force` swallows `ENOENT`, so a
+    // root that is already gone raises nothing and the absence recheck immediately agrees —
+    // one attempt, no sleep, success. A second cleanup of the same root therefore costs
+    // nothing and cannot fail, which is what lets the `afterAll` registry be an unconditional
+    // backstop rather than a guess about what has already been removed.
+    const seams = virtualRemovalSeams({
+      remove: () => {},
+      exists: () => false,
+    });
+
+    const outcome = await removeOwnedRoot("/owned/root", seams);
+
+    expect(outcome.removed).toBe(true);
+    expect(outcome.attempts).toBe(1);
+    expect(seams.removals()).toBe(1);
+    expect(seams.sleeps()).toBe(0);
+    expect(outcome.lastError).toBeUndefined();
   });
 });
