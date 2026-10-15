@@ -295,7 +295,8 @@ resolved by code placed here:
   safety/length boundary to `DD-1`/`DD-2`, so the bound is an **obligation** and its
   value a **narrow later decision**. **Future normalisation remains separately governed,
   is not prohibited, and should arrive additively**; **no backfill is owed today because
-  no schema and no rows exist**. **No implementation is authorized here.**
+  no rows exist** — the two schema migrations exist (issues #171 and #183), but
+  `listing_revision` is written by nothing and holds no rows. **No implementation is authorized here.**
 - **`DDM-7`** audit-entry storage — `OQ-14`, and meaningful only if `E5` is
   known to exist.
 
