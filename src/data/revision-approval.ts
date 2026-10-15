@@ -35,20 +35,26 @@
  * The token is the **persisted revision's own** captured base. The caller supplies neither it nor
  * a revision identifier; it is never recaptured, refreshed or replaced.
  *
- * **What a test can and cannot prove about that predicate, stated honestly.** It is proven
- * *correct and satisfiable*: were it malformed — a bound number against a `timestamptz`, say, or
- * a value that did not match — the update would affect zero rows and **every** success case in
- * `revision-approval.integration.test.ts` would fail as a guarded-write protocol failure
- * instead. What cannot be proven is that **removing** it changes any outcome: with the listing
- * row locked and the comparison already passed, `last_updated_at` cannot differ from the token
- * by the time the update runs. Removing the predicate therefore fails no test, which was
- * verified rather than assumed.
+ * **The predicate is proven by inspecting the statement PostgreSQL actually received.** Its
+ * *behaviour* cannot be tested: with the listing row locked and the comparison already passed,
+ * `last_updated_at` cannot differ from the token by the time the update runs, so removing the
+ * predicate changes no outcome — which is the unreachability `ADR-024` itself asserts when it
+ * marks the zero-row case *"unreachable under the lock"*. A behavioural test able to reach it
+ * would contradict the ADR.
  *
- * That is not a gap in the suite but a property `ADR-024` itself asserts — it marks the zero-row
- * case *"unreachable under the lock"* — so a test able to reach it would contradict the ADR. The
- * predicate stays because the ADR requires it and because it is the one check that would survive
- * a future unit weakening or reordering the lock; its redundancy under the current protocol is
- * the reason it is defence in depth rather than the mechanism.
+ * So the proof is at the right level instead. `revision-approval.integration.test.ts` runs this
+ * operation against a boundary built with Kysely's own `log`, captures the compiled `UPDATE`, and
+ * asserts the `WHERE` clause carries the identity **and** the token — splitting `SET` from
+ * `WHERE`, because `last_updated_at` appears on both sides and a whole-statement search would
+ * pass with the guard gone. It also asserts the `WHERE` parameters are the identifier and the
+ * **original** captured instant rather than the applied one, so a refreshed token would fail too.
+ * Removing the predicate fails those cases explicitly, and the analyser is itself attacked with a
+ * predicate-less sample so it cannot pass vacuously.
+ *
+ * The predicate therefore stays for the reason `ADR-024` requires it: it is the one check that
+ * would still hold if a later unit weakened or reordered the lock. Its redundancy under the
+ * current protocol is what makes it defence in depth rather than the mechanism — and **no
+ * production hook and no weakening of the lock was introduced to test it.**
  *
  * ## Identity stays inside this function
  *

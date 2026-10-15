@@ -32,7 +32,8 @@
  * function.
  */
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { sql } from "kysely";
+import { Kysely, PostgresDialect, sql } from "kysely";
+import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -45,7 +46,13 @@ import { instantOf, type Instant } from "../domain/listing/instant";
 import { listingIdOf } from "../domain/listing/listing-id";
 import type { Listing, ListingContent } from "../domain/listing/listing";
 import type { PendingListingRevision } from "../domain/listing/revision";
-import { createListingPersistence, type ListingPersistence } from "./connection";
+import {
+  createListingPersistence,
+  startupOptionsFor,
+  type ListingPersistence,
+} from "./connection";
+import { createTimestamptzTypeOverrides } from "./timestamp-parser";
+import type { ListingDatabase } from "./listing-table";
 import { findListingById, insertSubmittedListing } from "./listing-repository";
 import { createPendingRevision, findPendingRevisionByListing } from "./revision-repository";
 import { approveAndApplyPendingRevision } from "./revision-approval";
@@ -68,6 +75,8 @@ let rival: ListingPersistence;
 let observer: ListingPersistence;
 /** A database that will store rows the domain cannot represent. */
 let hostile: ListingPersistence;
+/** The same boundary, with every executed statement captured. */
+let capturing: ReturnType<typeof createCapturingPersistence>;
 
 const APPROVED_AT = 1_767_323_045_123;
 /** Strictly later than `APPROVED_AT`, as `DI-6` requires of an approval. */
@@ -200,6 +209,119 @@ async function sessionsInTransaction(): Promise<number> {
   return rows.rows[0]?.count ?? 0;
 }
 
+/**
+ * The narrow slice of `pg` this file reaches directly, to build a **logging** boundary.
+ *
+ * `pg` ships no type declarations and `@types/pg` is deliberately absent (`ADR-017`), so the
+ * module is described here — the pattern `migrate.ts` and the listing suite established.
+ */
+interface PgModule {
+  readonly Pool: new (config: Record<string, unknown>) => unknown;
+}
+
+const pg = createRequire(import.meta.url)("pg") as PgModule;
+
+interface CapturedStatement {
+  readonly sql: string;
+  readonly parameters: readonly unknown[];
+}
+
+/**
+ * A `C9` boundary identical to the production one, with every executed statement captured.
+ *
+ * **No production change buys this.** `approveAndApplyPendingRevision` accepts any
+ * `Kysely<ListingDatabase>`, and Kysely's own `log` option reports each statement it executes as
+ * compiled SQL plus bound parameters — so the *actual executed* `UPDATE` can be inspected
+ * without a fault-injection hook, a source-text assertion, or any weakening of the lock.
+ *
+ * The pool is configured exactly as `createListingPersistence` configures its own: the governed
+ * `timestamptz` overrides so instants arrive as epoch milliseconds (`ADR-022` decision 9), and
+ * the governed `DateStyle` in the startup packet. Anything less would be testing a different
+ * boundary from the one that runs in production.
+ */
+function createCapturingPersistence(database: string): {
+  readonly db: Kysely<ListingDatabase>;
+  readonly statements: readonly CapturedStatement[];
+  reset(): void;
+  shutdown(): Promise<void>;
+} {
+  const statements: CapturedStatement[] = [];
+
+  const pool = new pg.Pool({
+    connectionString: cluster.connectionStringFor(database),
+    max: 2,
+    types: createTimestamptzTypeOverrides(),
+    options: startupOptionsFor({ application_name: "revision_approval_capture" }),
+  });
+
+  const db = new Kysely<ListingDatabase>({
+    dialect: new PostgresDialect({ pool: pool as never }),
+    log: (event) => {
+      if (event.level === "query") {
+        statements.push({
+          sql: event.query.sql,
+          parameters: event.query.parameters,
+        });
+      }
+    },
+  });
+
+  return {
+    db,
+    statements,
+    reset: () => {
+      statements.length = 0;
+    },
+    shutdown: () => db.destroy(),
+  };
+}
+
+/** Every `update "listing"` statement among those captured. */
+function listingUpdatesIn(statements: readonly CapturedStatement[]): readonly CapturedStatement[] {
+  return statements.filter((statement) => /^\s*update\s+"listing"\s+set\b/i.test(statement.sql));
+}
+
+/** What the analyser below found in one `UPDATE`, so a failure names the missing part. */
+interface GuardedUpdateShape {
+  readonly setsLastUpdatedAt: boolean;
+  readonly whereHasListingId: boolean;
+  readonly whereHasLastUpdatedAt: boolean;
+  readonly whereConvertsAnInstant: boolean;
+  readonly setsForbiddenColumn: string | undefined;
+}
+
+/**
+ * Describe the guarded shape of one compiled `UPDATE`, by splitting `SET` from `WHERE`.
+ *
+ * The split matters: `last_updated_at` appears on **both** sides — it is assigned in `SET` and
+ * compared in `WHERE` — so an assertion that merely searched the whole statement would pass with
+ * the predicate removed. This is the precise thing the missing mutation needed.
+ *
+ * Exported shape rather than bare booleans so a failure says *which* clause was absent, and so
+ * the analyser itself can be attacked with a hostile sample below.
+ */
+function guardedUpdateShapeOf(statementSql: string): GuardedUpdateShape {
+  const whereAt = statementSql.search(/\swhere\s/i);
+  const setClause = whereAt === -1 ? statementSql : statementSql.slice(0, whereAt);
+  const whereClause = whereAt === -1 ? "" : statementSql.slice(whereAt);
+
+  const forbidden = [
+    "status",
+    "submitted_at",
+    "rejected_at",
+    "publication_state",
+    "unpublish_reason",
+  ].find((column) => new RegExp(`"${column}"\\s*=`, "i").test(setClause));
+
+  return {
+    setsLastUpdatedAt: /"last_updated_at"\s*=/i.test(setClause),
+    whereHasListingId: /"id"\s*=/i.test(whereClause),
+    whereHasLastUpdatedAt: /"last_updated_at"\s*=/i.test(whereClause),
+    whereConvertsAnInstant: /to_timestamp\s*\(/i.test(whereClause),
+    setsForbiddenColumn: forbidden,
+  };
+}
+
 const LOCK_WAIT_SENTINEL = "no backend ever blocked on a lock";
 
 /**
@@ -276,6 +398,9 @@ beforeAll(async () => {
     pool: { connectionString: cluster.connectionStringFor(HOSTILE_DATABASE), max: 1 },
   });
 
+  capturing = createCapturingPersistence(VERIFIED_DATABASE);
+
+  cluster.closeBeforeShutdown("capturing persistence", () => capturing.shutdown());
   cluster.closeBeforeShutdown("verified persistence", () => persistence.shutdown());
   cluster.closeBeforeShutdown("rival persistence", () => rival.shutdown());
   cluster.closeBeforeShutdown("observer persistence", () => observer.shutdown());
@@ -1178,5 +1303,196 @@ describe("the ADR-024 protocol, under real concurrency", () => {
       expect((await storedListingRow(listing)).name).toBe(PROPOSED_CONTENT.name);
     },
     CLUSTER_TIMEOUT_MS,
+  );
+});
+
+describe("the guarded UPDATE, as PostgreSQL actually received it (issue #197)", () => {
+  it(
+    "carries the listing identifier and the original base token in its WHERE clause",
+    async () => {
+      // **The predicate, proved by execution rather than by inference.** `ADR-024` requires the
+      // original token *"carried in the guarded listing-write predicate"*, and under the lock
+      // its removal changes no outcome — so no behavioural test can see it. What *can* be seen
+      // is the statement PostgreSQL was actually given, which Kysely's own `log` reports as
+      // compiled SQL plus bound parameters.
+      const listing = await seedWithProposal();
+
+      capturing.reset();
+
+      const applied = await approveAndApplyPendingRevision(capturing.db, {
+        listingId: listing.id,
+        approvedAt: instant(APPLIED_AT),
+      });
+
+      expect(applied.ok, JSON.stringify(applied)).toBe(true);
+
+      const updates = listingUpdatesIn(capturing.statements);
+
+      // Exactly one listing write: no no-op update, no second pass, nothing unrelated.
+      expect(updates).toHaveLength(1);
+
+      const update = updates[0] as CapturedStatement;
+      const shape = guardedUpdateShapeOf(update.sql);
+
+      // The `SET` clause applies the approved instant…
+      expect(shape.setsLastUpdatedAt, update.sql).toBe(true);
+
+      // …and the `WHERE` clause guards on both the identity and the token. The clause split is
+      // what makes this meaningful: `last_updated_at` appears on both sides, so a search over
+      // the whole statement would pass with the predicate gone.
+      expect(shape.whereHasListingId, update.sql).toBe(true);
+      expect(shape.whereHasLastUpdatedAt, update.sql).toBe(true);
+      expect(shape.whereConvertsAnInstant, update.sql).toBe(true);
+
+      // And it writes nothing through a column the chain keeps unwritable.
+      expect(shape.setsForbiddenColumn, update.sql).toBeUndefined();
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "binds the original persisted base token, not the applied instant, in the predicate",
+    async () => {
+      // The two instants are deliberately far apart in the fixture, so "the token" and "the new
+      // value" cannot be confused: `APPROVED_AT` is what the proposal captured and what the
+      // predicate must match; `APPLIED_AT` is what the `SET` clause writes. A predicate built
+      // from a *refreshed* token would bind `APPLIED_AT` here and this would fail.
+      const listing = await seedWithProposal();
+
+      capturing.reset();
+
+      expect(
+        (
+          await approveAndApplyPendingRevision(capturing.db, {
+            listingId: listing.id,
+            approvedAt: instant(APPLIED_AT),
+          })
+        ).ok,
+      ).toBe(true);
+
+      const update = listingUpdatesIn(capturing.statements)[0] as CapturedStatement;
+      const whereAt = update.sql.search(/\swhere\s/i);
+      const setParameterCount = (update.sql.slice(0, whereAt).match(/\$\d+/g) ?? []).length;
+
+      // Both instants are bound, and the listing identifier with them.
+      expect(update.parameters).toContain(APPROVED_AT);
+      expect(update.parameters).toContain(APPLIED_AT);
+      expect(update.parameters).toContain(listingText(listing));
+
+      // The parameters belonging to the `WHERE` clause are the ones after the `SET` clause's,
+      // and they are the identifier followed by the **original** captured token.
+      expect(update.parameters.slice(setParameterCount)).toEqual([
+        listingText(listing),
+        APPROVED_AT,
+      ]);
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "issues exactly one listing update and one revision delete, and nothing else that writes",
+    async () => {
+      const listing = await seedWithProposal();
+
+      capturing.reset();
+
+      expect(
+        (
+          await approveAndApplyPendingRevision(capturing.db, {
+            listingId: listing.id,
+            approvedAt: instant(APPLIED_AT),
+          })
+        ).ok,
+      ).toBe(true);
+
+      const written = capturing.statements.filter((statement) =>
+        /^\s*(update|insert|delete)\b/i.test(statement.sql),
+      );
+
+      expect(written).toHaveLength(2);
+      expect(written[0]?.sql).toMatch(/^update "listing" set/i);
+      expect(written[1]?.sql).toMatch(/^delete from "listing_revision"/i);
+
+      // The delete carries all three predicates: identity plus the two defence-in-depth checks.
+      const deletion = written[1]?.sql ?? "";
+
+      expect(deletion).toMatch(/"id"\s*=/i);
+      expect(deletion).toMatch(/"listing_id"\s*=/i);
+      expect(deletion).toMatch(/"state"\s*=/i);
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "writes nothing at all when the proposal is stale",
+    async () => {
+      // The companion claim: a refusal issues no write whatsoever, so the rollback has nothing
+      // to undo in the first place.
+      const listing = await seedWithProposal();
+
+      await sql`
+        update listing set last_updated_at = to_timestamp(0)
+          + ((${APPROVED_AT + 1}::bigint)::text || ' milliseconds')::interval
+         where id = ${listingText(listing)}::uuid
+      `.execute(persistence.db);
+
+      capturing.reset();
+
+      const applied = await approveAndApplyPendingRevision(capturing.db, {
+        listingId: listing.id,
+        approvedAt: instant(APPLIED_AT),
+      });
+
+      expect(applied.ok).toBe(false);
+
+      expect(
+        capturing.statements.filter((statement) =>
+          /^\s*(update|insert|delete)\b/i.test(statement.sql),
+        ),
+      ).toEqual([]);
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "keeps the analyser honest: a predicate-less statement is rejected, not tolerated",
+    () => {
+      // **The anti-vacuity guard.** An analyser that returned `true` for everything would make
+      // the cases above pass for the wrong reason, so it is attacked with the exact statement a
+      // predicate-removal mutation produces — identical to the real one except that the `WHERE`
+      // clause has lost its token comparison.
+      const guarded =
+        'update "listing" set "name" = $1, "last_updated_at" = to_timestamp(0) + ' +
+        "((($2)::bigint)::text || ' milliseconds')::interval " +
+        'where "id" = $3 and "last_updated_at" = to_timestamp(0) + ' +
+        "((($4)::bigint)::text || ' milliseconds')::interval";
+
+      const hostile =
+        'update "listing" set "name" = $1, "last_updated_at" = to_timestamp(0) + ' +
+        "((($2)::bigint)::text || ' milliseconds')::interval " +
+        'where "id" = $3';
+
+      const guardedShape = guardedUpdateShapeOf(guarded);
+
+      expect(guardedShape.setsLastUpdatedAt).toBe(true);
+      expect(guardedShape.whereHasListingId).toBe(true);
+      expect(guardedShape.whereHasLastUpdatedAt).toBe(true);
+      expect(guardedShape.whereConvertsAnInstant).toBe(true);
+
+      const hostileShape = guardedUpdateShapeOf(hostile);
+
+      // The `SET` clause still assigns the instant — which is exactly why a whole-statement
+      // search would have been fooled — but the guard is gone, and the analyser says so.
+      expect(hostileShape.setsLastUpdatedAt).toBe(true);
+      expect(hostileShape.whereHasListingId).toBe(true);
+      expect(hostileShape.whereHasLastUpdatedAt).toBe(false);
+      expect(hostileShape.whereConvertsAnInstant).toBe(false);
+
+      // And a statement that touched a forbidden column is detected too.
+      expect(
+        guardedUpdateShapeOf('update "listing" set "status" = $1 where "id" = $2')
+          .setsForbiddenColumn,
+      ).toBe("status");
+    },
   );
 });
