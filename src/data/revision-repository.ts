@@ -132,7 +132,8 @@ export type CreatePendingRevisionFailure =
         | "rejection-anchor-present"
         | "unusable-base-token"
         | "unusable-listing-identifier"
-        | "unusable-revision-identifier";
+        | "unusable-revision-identifier"
+        | "unreadable-revision";
     }
   /** A revision with this identifier already exists (`listing_revision_pkey`). */
   | { readonly code: "REVISION_ALREADY_EXISTS" }
@@ -174,6 +175,25 @@ export type FindPendingRevisionFailure =
   | { readonly code: "STORED_INSTANT_UNREADABLE"; readonly reason: TimestamptzParseFailure }
   | StorageFailure;
 
+/**
+ * A refusal raised from inside the transaction so that it **rolls back**.
+ *
+ * Kysely commits when its callback returns and rolls back only when it throws, so returning a
+ * failure value would leave the transaction **committed**. On the refusal paths nothing has been
+ * written, so a commit would write nothing either — but it would release the `PS-11` lock through
+ * `COMMIT` rather than `ROLLBACK`, and more importantly the code would be claiming a rollback it
+ * never performed. `ADR-024` requires a refused `OP-6` to leave the listing and any pending
+ * revision unchanged, and the honest way to say that is to actually roll back.
+ *
+ * It never escapes this module: `createPendingRevision` catches it and returns its failure.
+ */
+class PendingRevisionRefused extends Error {
+  constructor(readonly failure: CreatePendingRevisionFailure) {
+    super("the pending revision was refused");
+    this.name = "PendingRevisionRefused";
+  }
+}
+
 /** The listing columns the `PS-11` lock reads — `ADR-024` step 1, and nothing more. */
 interface LockedListing {
   readonly id: string;
@@ -208,12 +228,13 @@ function refusePendingRevision(
     return { code: "INVALID_PENDING_REVISION", reason: "unusable-revision-identifier" } as const;
   }
 
-  if (revision.state !== "pending") {
+  // Ordered so that each refusal names the *specific* fact that is wrong, before the general
+  // shape check below reports anything else as simply unreadable.
+  if (revision?.state !== "pending") {
     return { code: "INVALID_PENDING_REVISION", reason: "not-pending" } as const;
   }
 
-  if (!isPendingRevision(revision)) {
-    // Pending, so the only remaining narrowing failure is the rejection anchor.
+  if (revision.rejectedAt !== undefined) {
     return { code: "INVALID_PENDING_REVISION", reason: "rejection-anchor-present" } as const;
   }
 
@@ -225,6 +246,15 @@ function refusePendingRevision(
 
   if (typeof listingId !== "string" || listingId === "") {
     return { code: "INVALID_PENDING_REVISION", reason: "unusable-listing-identifier" } as const;
+  }
+
+  // The domain's own full judgement, last: it proves the complete readable shape — the identity
+  // object, the governed state, inspectable proposed content, the rejection-anchor rule and the
+  // exact base-token carrier. Anything the specific checks above did not name is reported as
+  // unreadable rather than guessed at, and this is also the call that **narrows** the value, so
+  // no cast is needed downstream.
+  if (!isPendingRevision(revision)) {
+    return { code: "INVALID_PENDING_REVISION", reason: "unreadable-revision" } as const;
   }
 
   return undefined;
@@ -274,27 +304,37 @@ export async function createPendingRevision(
     return err(refusal);
   }
 
-  const pending = revision as PendingListingRevision;
+  // Narrowed by the domain's own guard rather than by a cast: `refusePendingRevision` has already
+  // run it, so this cannot fail, and asking again is how the compiler — not a comment — comes to
+  // know the value is a `PendingListingRevision`.
+  if (!isPendingRevision(revision)) {
+    return err({ code: "INVALID_PENDING_REVISION", reason: "unreadable-revision" } as const);
+  }
+
+  const pending: PendingListingRevision = revision;
   const listingId = identifierTextOf(pending.listingId);
 
   try {
-    const outcome = await db
+    await db
       .transaction()
       // `ADR-024`: set explicitly per transaction, never inherited from a server default.
       .setIsolationLevel("read committed")
-      .execute<Result<void, CreatePendingRevisionFailure>>(async (trx) => {
+      .execute(async (trx) => {
         // (1) The `PS-11` lock. FIRST, before any check or content read, held to commit.
         const locked = await lockListing(trx, listingId);
 
         // (2) The listing must exist.
         if (locked === undefined) {
-          return err({ code: "LISTING_NOT_FOUND" } as const);
+          throw new PendingRevisionRefused({ code: "LISTING_NOT_FOUND" } as const);
         }
 
         // (3) …and be able to accept a proposal. `FR-ADM-10` admits a revision only against an
         // approved listing, which is the domain's own rule in `admitPendingRevision`.
         if (locked.status !== "approved") {
-          return err({ code: "LISTING_NOT_APPROVED", status: locked.status } as const);
+          throw new PendingRevisionRefused({
+            code: "LISTING_NOT_APPROVED",
+            status: locked.status,
+          } as const);
         }
 
         // (4) The post-lock read. A fresh statement snapshot under `READ COMMITTED`, so it
@@ -311,7 +351,9 @@ export async function createPendingRevision(
         // (5) `DI-11`, decided **under the lock** rather than by the index. A second proposal is
         // rejected, not queued, and neither the pending revision nor the listing is disturbed.
         if (existing.length > 0) {
-          return err({ code: "PENDING_REVISION_ALREADY_EXISTS" } as const);
+          throw new PendingRevisionRefused({
+            code: "PENDING_REVISION_ALREADY_EXISTS",
+          } as const);
         }
 
         // (6) The stale check, **before any mutation** (`ADR-023` item 12). The locked listing's
@@ -323,16 +365,17 @@ export async function createPendingRevision(
         if (!current.ok) {
           // The column is `NOT NULL` and the parser delivers safe integers, so this is a stored
           // value that cannot be read rather than an absence — and never a staleness claim.
-          return err({
+          throw new PendingRevisionRefused({
             code: "REVISION_PROTOCOL_FAILURE",
             detail: "the locked listing's last_updated_at is not a usable instant",
           } as const);
         }
 
         if (!instantEquals(pending.baseListingLastUpdatedAt, current.value)) {
-          // Rolled back by returning a failure: nothing is written, and the listing and any
-          // pending revision are unchanged. Never automatically refreshed, merged or overwritten.
-          return err({ code: "STALE_LISTING_VERSION" } as const);
+          // Thrown, so the transaction genuinely **rolls back**: nothing is written, and the
+          // listing and any pending revision are unchanged. Never automatically refreshed,
+          // merged or overwritten.
+          throw new PendingRevisionRefused({ code: "STALE_LISTING_VERSION" } as const);
         }
 
         // (7) Insert, carrying the ORIGINAL captured token — never the value just read. No
@@ -341,12 +384,17 @@ export async function createPendingRevision(
           .insertInto("listing_revision")
           .values(serializePendingRevision(revisionId, pending))
           .execute();
-
-        return ok(undefined);
       });
 
-    return outcome;
+    // Reached only when the transaction committed, which happens only on the insert path.
+    return ok(undefined);
   } catch (cause) {
+    // A governed refusal: raised inside the transaction so that it rolled back, and carried out
+    // here so the caller still receives it as an ordinary `Result` rather than an exception.
+    if (cause instanceof PendingRevisionRefused) {
+      return err(cause.failure);
+    }
+
     // A governed instant the parser refused is not an infrastructure failure: the query ran.
     if (cause instanceof TimestamptzParseError) {
       return err({ code: "STORED_INSTANT_UNREADABLE", reason: cause.reason } as const);

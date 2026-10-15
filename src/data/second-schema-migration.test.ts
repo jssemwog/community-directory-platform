@@ -975,6 +975,30 @@ type _TheRejectionAnchorRejectsANumber = Assert<
 >;
 /** Identity is supplied by the application (`ADR-019`), so it must be insertable as a string. */
 type _TheIdentifierIsInsertable = Assert<Equals<InsertableRevision["id"], string>>;
+
+/** The keys an insert must supply, as opposed to those it may omit. */
+type RequiredInsertKeys<T> = {
+  [K in keyof T]-?: Record<string, never> extends Pick<T, K> ? never : K;
+}[keyof T];
+
+/**
+ * The captured base token is **mandatory on insert** — it cannot be omitted.
+ *
+ * `ADR-023` item 12 refuses a missing token, and the column is `NOT NULL` with no default, so an
+ * insert that left it out would be refused by the store. Requiring it in the *type* means the
+ * refusal happens at compile time instead, and it is what stops a later unit from quietly making
+ * the token optional to make some other insert convenient.
+ */
+type _TheBaseTokenIsMandatoryOnInsert = Assert<
+  Equals<
+    "base_listing_last_updated_at" extends RequiredInsertKeys<InsertableRevision> ? true : false,
+    true
+  >
+>;
+/** The contrast that keeps the claim meaningful: the nullable anchor *may* be omitted. */
+type _TheRejectionAnchorIsOptionalOnInsert = Assert<
+  Equals<"rejected_at" extends RequiredInsertKeys<InsertableRevision> ? true : false, false>
+>;
 /** No column may be updated: `OP-10`, rejection and administrative edits are separate units. */
 type _TheTableHasNoUpdateableColumn = Assert<
   Equals<keyof UpdateableRevision extends never ? true : false, true>

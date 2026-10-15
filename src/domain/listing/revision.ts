@@ -158,17 +158,29 @@ export interface PendingListingRevision extends ListingRevision {
 }
 
 /**
- * Whether a revision is genuinely pending, checked at runtime rather than assumed.
+ * Whether a value is genuinely a pending revision, checked at runtime rather than assumed.
  *
  * The type above is erased at compile time, and the values this guards arrive from callers,
- * requests and rehydration — so the narrowing has to be **verified** at the boundary that
- * relies on it. It judges state and the rejection anchor only; content validity is
- * `validation.ts`'s and the base token's carrier is `isInstant`'s, and neither is restated.
+ * requests and rehydration — so the narrowing has to be **verified** by the boundary that relies
+ * on it, which is why it takes `unknown` rather than a value already claimed to be a revision.
+ *
+ * **It proves the whole readable shape, not just the state.** `isReadableRevision` is the same
+ * judgement the Slice D operations already apply to every collection entry: the listing identity
+ * is an object, the state is governed, the proposed content is of a kind the rules can inspect,
+ * the rejection anchor is an `Instant` when present, and — `ADR-023` item 12 — the **captured
+ * base token is present and is an exact `Instant` carrier**, so a bare number, a `Date`, a
+ * non-safe-integer or an absent token all fail here. On top of that it requires the two facts the
+ * narrowing names: the state is exactly *pending*, and no rejection anchor is set.
+ *
+ * What it still does not judge is content **validity** — blank, too long, malformed — which is
+ * `validation.ts`'s and is not restated here (`FR-VAL-05`, `VR-S3`).
  */
-export function isPendingRevision(
-  revision: ListingRevision,
-): revision is PendingListingRevision {
-  return revision.state === "pending" && revision.rejectedAt === undefined;
+export function isPendingRevision(candidate: unknown): candidate is PendingListingRevision {
+  return (
+    isReadableRevision(candidate) &&
+    candidate.state === "pending" &&
+    candidate.rejectedAt === undefined
+  );
 }
 
 /** The revisions of a listing that are currently in the pending state. */

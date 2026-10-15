@@ -158,6 +158,18 @@ async function storedLastUpdatedAt(listing: Listing): Promise<number> {
   return value;
 }
 
+/** Sessions this database has left holding a transaction open. Must always settle at zero. */
+async function sessionsInTransaction(): Promise<number> {
+  const rows = await sql<{ count: number }>`
+    select count(*)::int as count
+      from pg_stat_activity
+     where datname = current_database()
+       and state in ('idle in transaction', 'idle in transaction (aborted)')
+  `.execute(observer.db);
+
+  return rows.rows[0]?.count ?? 0;
+}
+
 const LOCK_WAIT_SENTINEL = "no backend ever blocked on a lock";
 
 /**
@@ -661,6 +673,116 @@ describe("creating a pending revision (OP-6)", () => {
       expect((created.error as { cause?: unknown }).cause).toBeDefined();
 
       expect(await pendingRowCount(listing)).toBe(0);
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "refuses a revision whose proposed content cannot be read at all",
+    async () => {
+      // The general shape check behind the specific ones: the domain's own
+      // `isPendingRevision` proves the complete readable revision, so a proposal carrying a
+      // number where a name belongs is refused by name rather than reaching SQL and failing
+      // as a `STORAGE_FAILURE` — or worse, being stringified into a column.
+      const listing = await seed();
+      const proposal = {
+        ...proposalFor(listing),
+        proposedContent: { ...proposalFor(listing).proposedContent, name: 42 },
+      } as unknown as ListingRevision;
+
+      const created = await createPendingRevision(persistence.db, {
+        revisionId: randomUUID(),
+        revision: proposal,
+      });
+
+      expect(created.ok).toBe(false);
+
+      if (created.ok) return;
+
+      expect(created.error).toEqual({
+        code: "INVALID_PENDING_REVISION",
+        reason: "unreadable-revision",
+      });
+      expect(await pendingRowCount(listing)).toBe(0);
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it.each([
+    ["an empty identifier", "", "unusable-revision-identifier"],
+    ["a non-string identifier", 7 as unknown as string, "unusable-revision-identifier"],
+  ])(
+    "refuses %s before opening a transaction",
+    async (_label, revisionId, reason) => {
+      // `ADR-019` makes the identifier application-supplied, and the `uuid` cast would
+      // silently stringify a non-string — so the boundary refuses it rather than storing
+      // whatever `String(…)` produced.
+      const listing = await seed();
+
+      const created = await createPendingRevision(persistence.db, {
+        revisionId,
+        revision: proposalFor(listing),
+      });
+
+      expect(created.ok).toBe(false);
+
+      if (created.ok) return;
+
+      expect(created.error).toEqual({ code: "INVALID_PENDING_REVISION", reason });
+      expect(await pendingRowCount(listing)).toBe(0);
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "leaves no transaction open and no session blocked, on success or refusal",
+    async () => {
+      // Every refusal inside the protocol is raised so that the transaction **rolls back**
+      // rather than committing a no-op, and every path releases its connection. A session
+      // left `idle in transaction` would hold the `PS-11` lock indefinitely, which is the
+      // most expensive leak this boundary could produce.
+      const listing = await seed();
+
+      expect(await sessionsInTransaction()).toBe(0);
+
+      // Refusal before the transaction, refusal inside it, and the committing path.
+      await createPendingRevision(persistence.db, {
+        revisionId: "",
+        revision: proposalFor(listing),
+      });
+
+      expect(await sessionsInTransaction()).toBe(0);
+
+      await createPendingRevision(persistence.db, {
+        revisionId: randomUUID(),
+        revision: proposalFor(listing, {
+          baseListingLastUpdatedAt: instant(APPROVED_AT - 1),
+        }),
+      });
+
+      expect(await sessionsInTransaction()).toBe(0);
+      expect(await pendingRowCount(listing)).toBe(0);
+
+      expect(
+        (
+          await createPendingRevision(persistence.db, {
+            revisionId: randomUUID(),
+            revision: proposalFor(listing),
+          })
+        ).ok,
+      ).toBe(true);
+
+      expect(await sessionsInTransaction()).toBe(0);
+
+      // And a refusal that happens *after* the lock is taken releases it too, so the next
+      // participant is not blocked.
+      await createPendingRevision(persistence.db, {
+        revisionId: randomUUID(),
+        revision: proposalFor(listing),
+      });
+
+      expect(await sessionsInTransaction()).toBe(0);
+      expect(await pendingRowCount(listing)).toBe(1);
     },
     CLUSTER_TIMEOUT_MS,
   );

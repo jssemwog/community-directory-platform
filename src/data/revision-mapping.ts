@@ -44,7 +44,6 @@ import type { ListingContent } from "../domain/listing/listing";
 import { err, ok, type Result } from "../domain/listing/result";
 import {
   isRevisionState,
-  type ListingRevision,
   type PendingListingRevision,
 } from "../domain/listing/revision";
 import {
@@ -240,12 +239,16 @@ export function hydratePendingRevision(
   }
 
   // `row.id` is deliberately not read — see the module header.
-  const revision: ListingRevision = {
+  //
+  // Declared as the narrow type rather than cast into it: `state` is the literal `"pending"` and
+  // no rejection anchor is set, so the value **structurally satisfies** `PendingListingRevision`
+  // and the compiler checks that rather than being told to assume it.
+  const revision: PendingListingRevision = {
     listingId: listingIdOf(row.listing_id),
     state: "pending",
     proposedContent: content.value,
     baseListingLastUpdatedAt: baseListingLastUpdatedAt.value,
   };
 
-  return ok(revision as PendingListingRevision);
+  return ok(revision);
 }
