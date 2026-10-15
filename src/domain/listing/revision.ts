@@ -35,10 +35,16 @@
  * requires and migration `002` stores (issue #183). It **decides nothing**: the token, its
  * type and its exactness were all settled by `ADR-023` and `ADR-022`, and the column
  * already existed. This module **carries** the value — it does not compare it, serialize
- * it, hydrate it, expose it, or read a clock to produce it. The `OP-10` staleness
- * comparison, the administrator conflict message and transport, and revision
- * serialization, hydration and persistence remain **unimplemented** and separately
- * authorized.
+ * it, hydrate it, expose it, or read a clock to produce it.
+ *
+ * **Issue #195 added the `OP-6` persistence path**, and with it the one narrowing this module
+ * now exports: `PendingListingRevision` and `isPendingRevision`, so the `C9` creation boundary
+ * can state in its signature that it accepts only a genuinely pending proposal. The comparison
+ * itself lives in the adapter, where the locked listing is: `createPendingRevision` performs
+ * `ADR-023`'s exact pre-insert equality check against the listing row it holds a lock on.
+ * **Still unimplemented and separately authorized:** the `OP-10` approval and application path,
+ * `FR-ADM-04`, `FR-ADM-10b`, rejection persistence, rejected-history retrieval, the
+ * administrator conflict message and every API transport.
  */
 
 import { isInstant, type Instant } from "./instant";
@@ -117,11 +123,52 @@ export interface ListingRevision {
    * **Never public** (item 13). `publicProjectionOf` reads nothing from any revision
    * (`DI-10`), and this field must not change that.
    *
-   * **This module neither compares nor exposes it.** The staleness predicate is `OP-10`,
-   * the administrator message and transport are the moderation API unit, and revision
-   * serialization, hydration and persistence remain unimplemented.
+   * **This module neither compares nor exposes it.** The administrator message and transport
+   * are the moderation API unit, and `OP-10`'s own staleness predicate is still unimplemented.
+   * `OP-6`'s comparison lives in the adapter (issue #195), where the locked listing is: the
+   * token is carried there unchanged and compared by exact equality before any mutation, and
+   * `revision-mapping.ts` round-trips it through the same expression the listing's own
+   * `lastUpdatedAt` uses.
    */
   readonly baseListingLastUpdatedAt: Instant;
+}
+
+/**
+ * A revision that is **genuinely pending** — the only kind `OP-6` may persist (issue #195).
+ *
+ * Two facts are narrowed, and both are already governed rules rather than new ones:
+ *
+ * - **`state` is exactly `"pending"`.** A *rejected* proposal is created by
+ *   `rejectPendingRevision` and never by a creation path, and `approved` exists only
+ *   transiently inside `approvePendingRevision`'s return — `ADR-017` Q-3 means no approved
+ *   revision is ever stored, which is why `001`'s `CHECK` admits `pending` and `rejected`
+ *   only. A creation boundary that accepted the broad union would be able to write a state
+ *   the store forbids and the lifecycle never produces.
+ * - **`rejectedAt` is absent.** `resolveSolePendingRevision` already refuses a *pending*
+ *   proposal carrying a rejection anchor as `REJECTION_TIMESTAMP_ALREADY_SET`, because the
+ *   anchor is written **by** the rejection. The same contradiction must not be writable.
+ *
+ * This is a **type narrowing, not a new domain concept**: no field is added, no identity is
+ * introduced and no rule is invented. It exists so the `C9` creation boundary can state in
+ * its signature what it will accept, instead of accepting anything and hoping.
+ */
+export interface PendingListingRevision extends ListingRevision {
+  readonly state: "pending";
+  readonly rejectedAt?: undefined;
+}
+
+/**
+ * Whether a revision is genuinely pending, checked at runtime rather than assumed.
+ *
+ * The type above is erased at compile time, and the values this guards arrive from callers,
+ * requests and rehydration — so the narrowing has to be **verified** at the boundary that
+ * relies on it. It judges state and the rejection anchor only; content validity is
+ * `validation.ts`'s and the base token's carrier is `isInstant`'s, and neither is restated.
+ */
+export function isPendingRevision(
+  revision: ListingRevision,
+): revision is PendingListingRevision {
+  return revision.state === "pending" && revision.rejectedAt === undefined;
 }
 
 /** The revisions of a listing that are currently in the pending state. */

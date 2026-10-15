@@ -1162,7 +1162,7 @@ describe("the resolution operations read no ambient clock", () => {
  * transition unchanged, and is neither compared nor disclosed here.
  *
  * What is deliberately **not** attacked, because it does not exist: the `OP-10` staleness
- * comparison, revision serialization, hydration or persistence, and administrator
+ * comparison, and administrator
  * transport. A test for any of those would be a test for unwritten code.
  */
 describe("the captured base version (ADR-023 item 9)", () => {
