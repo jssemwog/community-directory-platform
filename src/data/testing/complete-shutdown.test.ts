@@ -232,6 +232,24 @@ interface StartedCluster {
 const createdRoots: string[] = [];
 
 /**
+ * Cleanup failures, deferred so that they are **reported without masking** (issue #193).
+ *
+ * A `finally` block that throws replaces whatever the test body was failing on, which is how
+ * a teardown problem comes to stand in front of the defect it is hiding. A `finally` block that
+ * swallows is no better: the cleanup failure then goes unreported entirely.
+ *
+ * So teardown records here and the `afterAll` below asserts the list is empty. A failing test
+ * keeps its own failure, *and* the cleanup failure is reported alongside it — both errors
+ * survive, and neither is inferred from the other.
+ */
+interface CleanupFailure {
+  readonly root: string;
+  readonly detail: string;
+}
+
+const cleanupFailures: CleanupFailure[] = [];
+
+/**
  * Discard an owned root through the **governed** removal path (issue #193).
  *
  * Teardown used `rmSync(root, { recursive: true, force: true })` directly. Node's `rmSync`
@@ -241,23 +259,49 @@ const createdRoots: string[] = [];
  * was about something else entirely.
  *
  * Routing teardown through the same bounded, governed retry is strictly **stronger** than one
- * zero-tolerance attempt: it is more persistent about residue, not less. Nothing is asserted
- * here, because a cleanup failure is reported by the suite's residue checks and by the
- * `afterAll` registry below rather than by masking the assertion that actually matters.
+ * zero-tolerance attempt: it is more persistent about residue, not less. Removal is idempotent
+ * on an already-absent root — one attempt, no sleep, success, as the seam-driven case at the
+ * end of this file proves — so the registry backstop below can run unconditionally after this
+ * without a double-removal hazard.
+ *
+ * This never throws. It records instead, for the reason given above `cleanupFailures`.
  */
 async function discardOwnedRoot(root: string): Promise<void> {
-  await removeOwnedRoot(root);
+  const removal = await removeOwnedRoot(root);
+
+  if (!removal.removed) {
+    cleanupFailures.push({
+      root,
+      detail:
+        `governed removal failed after ${removal.attempts} attempt(s) in ` +
+        `${removal.elapsedMs}ms (ceiling ${REMOVE_CEILING_MS}ms): ${String(removal.lastError)}`,
+    });
+  }
 }
 
-afterAll(() => {
+afterAll(async () => {
+  const survived: string[] = [];
+
   for (const root of createdRoots.splice(0)) {
-    try {
-      rmSync(root, { recursive: true, force: true });
-    } catch {
-      // A root that cannot be removed is surfaced by the suite's own residue checks rather than
-      // by throwing here, which would mask the failure that actually matters.
-    }
+    // The backstop is the governed path too, so the last word on residue is as patient as the
+    // mechanism under test. Idempotent on a root a `finally` already removed.
+    await removeOwnedRoot(root);
+
+    if (existsSync(root)) survived.push(root);
   }
+
+  // Both claims are made here rather than from a `finally`, so a failing test keeps its own
+  // failure and these are reported in addition to it, never instead of it.
+  //
+  // A cleanup failure recorded on a path that *also* failed for its own reasons — a cluster
+  // that never started, say — is still reported: it is extra diagnostic detail about the same
+  // run, and suppressing it is what left teardown problems invisible before.
+  expect(
+    cleanupFailures.splice(0).map((failure) => `${failure.root}: ${failure.detail}`),
+    "owned-root teardown failed",
+  ).toEqual([]);
+
+  expect(survived, "owned roots survived the governed backstop removal").toEqual([]);
 });
 
 async function startCluster(): Promise<StartedCluster> {
@@ -841,6 +885,33 @@ function virtualRemovalSeams(
 }
 
 describe("governed owned-root removal, against injected seams (issue #193)", () => {
+  it("retries exactly three codes, and nothing else is admitted to the list", async () => {
+    // The cases below iterate `TRANSIENT_REMOVAL_CODES`, which proves every member is retried
+    // but would say nothing about a *fourth* member quietly joining it — the list would simply
+    // grow and the iteration would grow with it. Pinning the membership is what makes "only
+    // these three" a claim rather than an assumption, and it is the second detector for a
+    // widened classification: adding a code here fails this case, and treating an unlisted code
+    // as transient fails the non-transient case below.
+    expect([...TRANSIENT_REMOVAL_CODES]).toEqual(["EBUSY", "EPERM", "ENOTEMPTY"]);
+
+    // And the classifier agrees with the list in both directions, for the exact errnos that
+    // matter: the three Windows handle-release codes, and representative real errors.
+    for (const code of TRANSIENT_REMOVAL_CODES) {
+      expect(isTransientRemovalError(removalError(code)), `${code} must be transient`).toBe(true);
+    }
+
+    for (const code of ["ENOTDIR", "EACCES", "ENOENT", "EIO", "EMFILE"]) {
+      expect(
+        isTransientRemovalError(removalError(code)),
+        `${code} must not be retried to a deadline`,
+      ).toBe(false);
+    }
+
+    // An error carrying no code at all is a real failure, not a handle-release lag.
+    expect(isTransientRemovalError(new Error("no code"))).toBe(false);
+    expect(isTransientRemovalError(undefined)).toBe(false);
+  });
+
   it("succeeds on the first attempt and sleeps not once, on a healthy path", async () => {
     // The honest form of the deleted "needs no retry" assertion, stated as a fact about the
     // mechanism instead of a measurement of the host's handle-release latency. A healthy
