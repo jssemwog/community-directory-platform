@@ -52,6 +52,28 @@
  * revisions and nothing else. Rejection persistence must therefore widen the type again, and say
  * so deliberately — the tripwire is preserved for the next unit rather than removed.
  *
+ * ### Rejection persistence widens exactly two revision columns (issue #199)
+ *
+ * Issue #195's tripwire is now tripped, for the two columns the rejection transaction writes and
+ * **no others**: `state` becomes updatable, and `rejected_at` gains an **update** type so the
+ * write-once anchor can be written once. `ADR-017` states the whole mutation — *"sets its state
+ * to *rejected* and writes its write-once rejection timestamp"* — and that sentence is the exact
+ * boundary of this widening.
+ *
+ * **Everything else on the revision table stays `never` on update, and that is load-bearing.**
+ * The rejection is an **in-place state transition, not an edit**: the row keeps its identity
+ * (`id`, `DI-8`), its association (`listing_id`), its complete proposed content set, every
+ * designation flag, its category, and — most consequentially — its **captured base token**,
+ * which `ADR-023` forbids refreshing because a refreshed token would make every stale revision
+ * silently fresh. None of those is reachable through an `UPDATE` that compiles, and an exact
+ * key-set guard in `listing-persistence.integration.test.ts` fails `tsc` if that ever changes.
+ *
+ * Note what this widening does **not** make possible. `state` is updatable to any `string` the
+ * `CHECK` admits, so the type alone does not say *"only pending → rejected"*; the governed
+ * transition is the domain's (`revision.ts`), and the store's own
+ * `listing_revision_rejected_at_check` independently refuses a *rejected* row without an anchor
+ * or a non-rejected row carrying one. The type is the narrowest of the three, not the only one.
+ *
  * ### The identifier, and the blocker that was overstated
  *
  * Issue #177 recorded that the table *"cannot be honestly hydrated today, because it stores
@@ -168,9 +190,15 @@ export interface ListingRevisionTable {
   id: Written<string>;
   /** `uuid not null`, foreign key to `listing (id)`. */
   listing_id: Written<string>;
-  /** `CHECK`ed against `pending` and `rejected` only: an approved proposal's row is removed in
-   * the same atomic unit that applies it (`ADR-017` Q-3), so `approved` never persists. */
-  state: Written<string>;
+  /**
+   * `CHECK`ed against `pending` and `rejected` only: an approved proposal's row is removed in
+   * the same atomic unit that applies it (`ADR-017` Q-3), so `approved` never persists.
+   *
+   * **Updatable since issue #199**, because the rejection transaction *"sets its state to
+   * *rejected*"* on the existing row rather than writing a new one. It is one of exactly two
+   * updatable columns on this table; see the module header for why the other fifteen are not.
+   */
+  state: RevisionStateColumn;
   name: Written<string>;
   category: Written<string>;
   description: Written<string>;
@@ -189,12 +217,22 @@ export interface ListingRevisionTable {
    * `timestamptz(3)`, non-null **iff** `state = 'rejected'`
    * (`listing_revision_rejected_at_check`).
    *
-   * **Insertable only as SQL `null`**, which is a restriction of *this unit*: issue #195
-   * persists *pending* revisions, and a pending row must carry no rejection anchor. The
-   * rejection path writes one, and widening this to accept an instant expression is the
-   * tripwire that makes that unit say so deliberately.
+   * **Insertable only as SQL `null`**, and that restriction stands: a row enters this table
+   * *pending*, and a pending row must carry no rejection anchor. Issue #195 recorded that the
+   * rejection path would need to write one and left widening the type as its tripwire.
+   *
+   * **Issue #199 trips it, on the update side only.** The anchor is now writable as a
+   * `timestamptz` **expression**, through the same conversion every other governed instant uses
+   * (`ADR-022`), so the caller's rejection instant round-trips exact to the millisecond. The
+   * insert type is deliberately left at `null`: widening it would let a future insert fabricate
+   * an already-rejected revision, and `ADR-017` Q-1's anchor is written **by** the rejection.
+   *
+   * Write-once is enforced by **refusal, not by the type** — the domain refuses a pending
+   * proposal that already carries an anchor, the guarded `UPDATE` requires `rejected_at IS NULL`,
+   * and `001`'s `CHECK` ties the anchor's presence to the *rejected* state. A `ColumnType` cannot
+   * express "once", so it does not pretend to.
    */
-  rejected_at: WritableAsNullOnly<number | null>;
+  rejected_at: RejectionAnchorColumn;
   /**
    * `base_listing_last_updated_at timestamptz(3) not null` — added by
    * `migrations/002-add-revision-base-version.ts` (issue #183) for `ADR-023` item 9.
@@ -228,8 +266,24 @@ export interface ListingDatabase {
   listing_revision: ListingRevisionTable;
 }
 
-/** A column this slice may write, but only ever as SQL `null`. */
-type WritableAsNullOnly<Select> = ColumnType<Select, null, never>;
+/**
+ * The revision's `state` column — inserted by `OP-6`, and updated **in place** by the rejection
+ * transaction (issue #199).
+ *
+ * Typed `string` in all three directions for the reason the module header gives for `status` and
+ * `category`: the governed union is enforced by the store's `CHECK` and by the domain, and a
+ * TypeScript union here would be a claim this layer cannot keep.
+ */
+type RevisionStateColumn = ColumnType<string, string, string>;
+
+/**
+ * The revision's write-once rejection anchor — selected as epoch milliseconds, insertable only as
+ * SQL `null`, and updatable **once** as a `timestamptz` expression (issue #199).
+ *
+ * The asymmetry between the insert and update types is the whole point, and is argued at the
+ * column itself.
+ */
+type RejectionAnchorColumn = ColumnType<number | null, null, Expression<number>>;
 
 /**
  * One `listing` row as the configured connection delivers it.
