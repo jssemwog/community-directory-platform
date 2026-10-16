@@ -26,7 +26,7 @@
  * requires of its callers.
  */
 import { beforeAll, describe, expect, it } from "vitest";
-import { Kysely, sql, type Expression, type Updateable } from "kysely";
+import { Kysely, sql, type Expression, type Insertable, type Updateable } from "kysely";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 
@@ -1285,7 +1285,117 @@ type _TheAdvancedInstantRejectsADate = Assert<
   Equals<Date extends UpdateableListing["last_updated_at"] ? true : false, false>
 >;
 
-/** The revision table stays entirely unupdatable: `OP-10` removes a proposal, never edits one. */
-type _TheRevisionTableHasNoUpdateableColumn = Assert<
-  Equals<keyof Updateable<ListingRevisionTable> extends never ? true : false, true>
+type UpdateableRevision = Updateable<ListingRevisionTable>;
+
+/** The keys an update of a revision row may supply. */
+type UpdateableRevisionKeys = keyof UpdateableRevision;
+
+/**
+ * The revision update surface is **exactly** the rejection transition (issue #199).
+ *
+ * `OP-10` removes a proposal and never edits one, so until issue #199 this table had no
+ * updatable column at all. Rejection *"sets its state to *rejected* and writes its write-once
+ * rejection timestamp"* (`ADR-017`) on the existing row — two columns, and the tripwire is
+ * tripped for those two only.
+ *
+ * Stated as an exact key set rather than a series of "may" checks, so widening the surface fails
+ * here even if every individual guard below still holds.
+ */
+type _TheRevisionUpdateSurfaceIsExactlyTheRejectionTransition = Assert<
+  Equals<UpdateableRevisionKeys, "state" | "rejected_at">
+>;
+
+/**
+ * The fifteen revision columns that must never be updatable, named individually.
+ *
+ * A rejection is an **in-place state transition, not an edit**. `id` is identity (`DI-8`);
+ * `listing_id` is the association; the content fields, their designation flags and the category
+ * are the proposal itself, which rejection does not touch; and
+ * `base_listing_last_updated_at` is the captured token `ADR-023` forbids ever refreshing —
+ * a refreshed token would make every stale revision silently fresh, which is the single failure
+ * that ADR exists to prevent. Naming them one by one means a reader learns *which* column a
+ * future failure is about.
+ */
+type _RevisionIdentityIsNotUpdateable = Assert<
+  Equals<"id" extends UpdateableRevisionKeys ? true : false, false>
+>;
+type _RevisionListingIdIsNotUpdateable = Assert<
+  Equals<"listing_id" extends UpdateableRevisionKeys ? true : false, false>
+>;
+type _RevisionBaseTokenIsNotUpdateable = Assert<
+  Equals<"base_listing_last_updated_at" extends UpdateableRevisionKeys ? true : false, false>
+>;
+type _RevisionNameIsNotUpdateable = Assert<
+  Equals<"name" extends UpdateableRevisionKeys ? true : false, false>
+>;
+type _RevisionCategoryIsNotUpdateable = Assert<
+  Equals<"category" extends UpdateableRevisionKeys ? true : false, false>
+>;
+type _RevisionDescriptionIsNotUpdateable = Assert<
+  Equals<"description" extends UpdateableRevisionKeys ? true : false, false>
+>;
+type _RevisionLocalityIsNotUpdateable = Assert<
+  Equals<"locality" extends UpdateableRevisionKeys ? true : false, false>
+>;
+type _RevisionCountryIsNotUpdateable = Assert<
+  Equals<"country" extends UpdateableRevisionKeys ? true : false, false>
+>;
+type _RevisionAdministrativeAreaIsNotUpdateable = Assert<
+  Equals<"administrative_area" extends UpdateableRevisionKeys ? true : false, false>
+>;
+type _RevisionPostalCodeIsNotUpdateable = Assert<
+  Equals<"postal_code" extends UpdateableRevisionKeys ? true : false, false>
+>;
+type _RevisionPhoneIsNotUpdateable = Assert<
+  Equals<"phone" extends UpdateableRevisionKeys ? true : false, false>
+>;
+type _RevisionEmailIsNotUpdateable = Assert<
+  Equals<"email" extends UpdateableRevisionKeys ? true : false, false>
+>;
+type _RevisionWebsiteIsNotUpdateable = Assert<
+  Equals<"website" extends UpdateableRevisionKeys ? true : false, false>
+>;
+
+/** Every designation flag, as one set: a rejection changes no value's visibility. */
+type _RevisionDesignationsAreNotUpdateable = Assert<
+  Equals<
+    | "postal_code_designated_public"
+    | "phone_designated_public"
+    | "email_designated_public"
+    | "website_designated_public" extends UpdateableRevisionKeys
+      ? true
+      : false,
+    false
+  >
+>;
+
+/** The anchor is written as an expression, never as a bare number or a `Date` (`ADR-022`). */
+type _TheRejectionAnchorIsAnExpression = Assert<
+  Equals<NonNullable<UpdateableRevision["rejected_at"]>, Expression<number>>
+>;
+type _TheRejectionAnchorRejectsANumber = Assert<
+  Equals<number extends UpdateableRevision["rejected_at"] ? true : false, false>
+>;
+type _TheRejectionAnchorRejectsADate = Assert<
+  Equals<Date extends UpdateableRevision["rejected_at"] ? true : false, false>
+>;
+
+/**
+ * The anchor's **insert** type stays SQL `null` only (issue #195, preserved by #199).
+ *
+ * Only the update side was widened. A row enters this table *pending*, and widening the insert
+ * would let a future unit fabricate an already-rejected revision — the anchor is written **by**
+ * the rejection (`ADR-017` Q-1).
+ */
+type InsertedRejectionAnchor = Insertable<ListingRevisionTable>["rejected_at"];
+
+type _TheRejectionAnchorIsStillInsertableAsNullOnly = Assert<
+  Equals<InsertedRejectionAnchor, null | undefined>
+>;
+/** The update side's expression must not have leaked into the insert side. */
+type _TheRejectionAnchorIsNotInsertableAsAnInstant = Assert<
+  Equals<Expression<number> extends InsertedRejectionAnchor ? true : false, false>
+>;
+type _TheRejectionAnchorIsNotInsertableAsANumber = Assert<
+  Equals<number extends InsertedRejectionAnchor ? true : false, false>
 >;

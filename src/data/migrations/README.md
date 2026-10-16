@@ -30,14 +30,28 @@ and the **`PS-11` isolation level and retry policy remain undecided**.~~
 **Storage for the base token now exists, and the domain carries it** (issue
 #187): `ListingRevision.baseListingLastUpdatedAt` is a mandatory `Instant`, and
 `listing-table.ts` declares `base_listing_last_updated_at` so `C9` can see the
-column. **Nothing still reads or writes the column**: there is **no mapper, no
+column. ~~**Nothing still reads or writes the column**: there is **no mapper, no
 API transport, no staleness comparison and no administrator message**, and the table
 stays unwritable — every column is typed read-only, so a revision insert does
-not compile. The **`PS-11` isolation and retry policy is now decided**
-(`ADR-024`, 2026-10-14, issue #189) — **`READ COMMITTED` under the listing-row
-lock, with the captured token compared before any mutation and no automatic
-retry** — and **that decision implements nothing here**: no transaction,
-repository, SQL, comparison or retry code exists. ~~and **no `pg` timestamp
+not compile.~~ **Three `C9` revision transactions now read and write these
+tables** — `OP-6` creation (issue #195), `OP-10` approval and application (issue
+#197) and **rejection** (issue #199) — all under the `ADR-024` protocol decided
+by issue #189: **`READ COMMITTED`** set explicitly, the listing row locked
+**first** and held to commit, and **no automatic retry**. The table is no longer
+unwritable: the `OP-6` columns are insertable, and `state` and `rejected_at` —
+**and only those two** — are updatable, for the rejection transition; exact
+key-set guards fail `tsc` if either surface widens, and
+`base_listing_last_updated_at` is **not updatable at all**, so no transaction can
+refresh the captured token `ADR-023` forbids refreshing.
+
+**Only `OP-10` compares that token.** Rejection writes no listing row
+(`ADR-017`, `FR-ADM-10`), so it makes no comparison and has no staleness
+outcome — a **stale proposal is rejectable**. **Still absent:** **no API
+transport, no administrator message, no authorization, no audit storage, no
+rejection reason column, no rejected-history retrieval and no purge scheduling
+or execution**, and **`FR-ADM-04`/`FR-ADM-10b` are unimplemented**. **No
+migration was added, altered or re-run by any of the three** — both migrations
+remain exactly as authored. ~~and **no `pg` timestamp
 parser** (`ADR-022` requires one, explicitly and tested, before persistence
 implementation is complete)~~ — **the `ADR-022` timestamp parser now exists**
 (`../timestamp-parser.ts`, issue #173), though **no pool passes it yet**, since

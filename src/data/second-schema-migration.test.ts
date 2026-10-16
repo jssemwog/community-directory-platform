@@ -999,9 +999,25 @@ type _TheBaseTokenIsMandatoryOnInsert = Assert<
 type _TheRejectionAnchorIsOptionalOnInsert = Assert<
   Equals<"rejected_at" extends RequiredInsertKeys<InsertableRevision> ? true : false, false>
 >;
-/** No column may be updated: `OP-10`, rejection and administrative edits are separate units. */
-type _TheTableHasNoUpdateableColumn = Assert<
-  Equals<keyof UpdateableRevision extends never ? true : false, true>
+/**
+ * Only the rejection transition may be updated — and **not** the token this file is about
+ * (issue #199).
+ *
+ * Rejection *"sets its state to *rejected* and writes its write-once rejection timestamp"*
+ * (`ADR-017`), so those two columns became updatable. The captured base token added by this
+ * migration did **not**, and that is the claim worth asserting here: `ADR-023` forbids ever
+ * refreshing it, because a refreshed token would make every stale revision silently fresh.
+ * Administrative edits (`FR-ADM-04`) and the atomic path (`FR-ADM-10b`) remain separate units
+ * and add nothing to this set.
+ */
+type _TheOnlyUpdateableColumnsAreTheRejectionTransition = Assert<
+  Equals<keyof UpdateableRevision, "state" | "rejected_at">
+>;
+type _TheCapturedBaseTokenIsNotUpdateable = Assert<
+  Equals<
+    "base_listing_last_updated_at" extends keyof UpdateableRevision ? true : false,
+    false
+  >
 >;
 /** The carrier matches the listing instant it copies, so the `C9` round trip cannot drift. */
 type _ItMatchesTheListingInstantCarrier = Assert<

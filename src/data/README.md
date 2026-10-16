@@ -372,13 +372,28 @@ carrier as the `listing.lastUpdatedAt` it copies, which is what makes `ADR-023` 
 declaration is **not a second source of schema truth**: a test compares it against the
 live catalogue on name, carrier and nullability.
 
-**Nothing still reads or writes that column.** There is **no mapper**, **no
+~~**Nothing still reads or writes that column.** There is **no mapper**, **no
 serializer or hydrator for revisions**, **no API transport**, **no staleness
 comparison** and **no administrator message**; and **no revision or moderation
 persistence exists** — no
 revision read, no revision write, no moderation operation. `listing_revision` remains
 **unwritable by construction**: every column is typed read-only, so an insert does not
-compile.
+compile.~~
+
+**Superseded by three persistence units.** `revision-mapping.ts` serializes and hydrates
+revisions and round-trips that column (issue #195); `OP-6` creation and pending retrieval
+exist (issue #195, merged #196); `OP-10` approval-and-application exists, and **its**
+staleness comparison with it (issue #197, merged #198); and revision **rejection** exists
+(issue #199). `listing_revision` is no longer unwritable by construction: the columns `OP-6`
+inserts are writable, and `state` and `rejected_at` — and **only** those two — are updatable,
+for the rejection transition. Exact key-set guards fail `tsc` if either surface widens.
+
+**Still absent:** **no API transport**, **no administrator message**, **no authorization**,
+**no audit storage** (`OQ-14`/`NOQ-8`/`DDM-7`), **no rejection reason** (no column exists;
+`FR-ADM-08` is unimplemented), **no rejected-revision retrieval or history read**, and **no
+retention eligibility query, purge scheduling or purge execution** (`OQ-13`). **No operation
+identifier is claimed for revision rejection** — `docs/09` records which operation expresses it
+as a pre-existing open question, and that question is untouched.
 
 **The `PS-11` isolation and retry policy is now decided** (`ADR-024`, `Accepted`
 2026-10-14, issue #189), and **deciding it implements nothing**. The governed writes
@@ -386,14 +401,31 @@ will run at **`READ COMMITTED`**, set explicitly per transaction, under `ADR-017
 `PS-11` listing-row lock taken **first** and held to commit, with the **captured token
 compared before any mutation** and **carried again in the guarded listing-write
 predicate**; **no automatic application-level retry** is selected, and only **`40001`
-and `40P01`** are classified retryable. **No transaction, repository, SQL, comparison
+and `40P01`** are classified retryable. ~~**No transaction, repository, SQL, comparison
 or retry code exists**, and the four governed paths — `OP-6`, `OP-10`, `FR-ADM-04`,
-`FR-ADM-10b` — remain **unimplemented**. The **token's immutability** is enforced in the domain as far as the
-transitions that exist allow — rejection preserves it and approval consumes the
-proposal whole, both asserted by test — while the **write-path** rule (`ADR-017`
-`PS-9`'s precedent) still has no write path to enforce it. Each remains a
-**separately reviewed downstream step**, and **no provisioning or production execution
-has occurred**.
+`FR-ADM-10b` — remain **unimplemented**.~~
+
+**Three `PS-11` transactions now exist**, each at `READ COMMITTED` set explicitly, each taking
+the listing-row lock **first** and holding it to commit: **`OP-6`** revision creation (issue
+#195), **`OP-10`** approval and application (issue #197) and **revision rejection** (issue
+#199). **`FR-ADM-04`** and **`FR-ADM-10b`** remain **unimplemented**; `FR-ADM-04` additionally
+awaits a pure-domain operation that does not exist — the `FR-DATA-11c`/`ADR-017` Q-4
+designation rule that an administrator may **restrict but never make public**, and that a new
+or replacement value **defaults to private**.
+
+**Only `OP-10` compares a token, and that is deliberate.** `ADR-024` items 6–8 bind the
+comparison to the listing write it guards, so rejection — which *"the listing row is not
+written"* (`ADR-017`, `FR-ADM-10`) — makes **no** comparison, advances **no** timestamp, and
+has **no** staleness and **no** `DI-6` outcome. A **stale proposal is therefore rejectable**,
+which is also its only escape: it can never be approved, so refusing to reject it would hold
+the listing's single `DI-11` slot for ever. **Still no retry code exists**, and only `40001`
+and `40P01` are classified — classification is not a licence to retry.
+
+The **token's immutability** is now enforced on the write path too, not only in the domain:
+`base_listing_last_updated_at` is **not updatable at all**, so no transaction can refresh it,
+and the rejection suite asserts a stale token comes back unchanged. Each remaining path is a
+**separately reviewed downstream step**, and **no provisioning or production execution has
+occurred**.
 
 ## What does not exist, and what is not authorized
 
