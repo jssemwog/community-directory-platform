@@ -39,7 +39,7 @@
  * is driven through the real `OP-10` boundary, because that one does exist.
  */
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { Kysely, PostgresDialect, sql } from "kysely";
+import { Kysely, PostgresDialect, sql, type ControlledTransaction } from "kysely";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 
@@ -472,12 +472,17 @@ beforeAll(async () => {
 
 afterEach(async () => {
   // A stranded trigger would silently corrupt every later case, so removal is unconditional
-  // rather than left to the test that created it.
+  // rather than left to the test that created it. **Every** test-only trigger family is swept,
+  // not only the suppressors: each is also dropped in its own `finally`, but a `finally` that
+  // itself failed would otherwise leave a raising or rewriting trigger armed for the rest of
+  // the file, and the resulting failures would point anywhere but here.
   for (const table of ["listing", "listing_revision"] as const) {
     for (const operation of ["update", "delete"] as const) {
-      await sql
-        .raw(`drop trigger if exists cdp_test_suppress_${table}_${operation} on ${table}`)
-        .execute(persistence.db);
+      for (const family of ["suppress", "raise", "break_check"] as const) {
+        await sql
+          .raw(`drop trigger if exists cdp_test_${family}_${table}_${operation} on ${table}`)
+          .execute(persistence.db);
+      }
     }
   }
 });
@@ -1198,7 +1203,7 @@ describe("the impossible outcomes, forced by test-only triggers", () => {
           language plpgsql as $$ begin new.rejected_at := null; return new; end $$
       `.execute(persistence.db);
       await sql`
-        create trigger cdp_test_break_check_update before update on listing_revision
+        create trigger cdp_test_break_check_listing_revision_update before update on listing_revision
           for each row execute function cdp_test_break_check()
       `.execute(persistence.db);
 
@@ -1239,7 +1244,7 @@ describe("the impossible outcomes, forced by test-only triggers", () => {
         expect(Object.prototype.hasOwnProperty.call(rejected.error, "cause")).toBe(false);
       } finally {
         await sql`
-          drop trigger if exists cdp_test_break_check_update on listing_revision
+          drop trigger if exists cdp_test_break_check_listing_revision_update on listing_revision
         `.execute(persistence.db);
       }
     },
@@ -1248,22 +1253,6 @@ describe("the impossible outcomes, forced by test-only triggers", () => {
 });
 
 describe("the PS-11 protocol, under real concurrency", () => {
-  /** Take and hold the listing lock, without modifying the row. Caller decides when to commit. */
-  async function rivalHoldingTheLock(listing: Listing) {
-    const trx = await rival.db
-      .startTransaction()
-      .setIsolationLevel("read committed")
-      .execute();
-
-    await trx
-      .selectFrom("listing")
-      .select("id")
-      .where("id", "=", listingText(listing))
-      .forUpdate()
-      .execute();
-
-    return trx;
-  }
 
   /**
    * Hold the listing lock for the duration of `body`, and **always** release it.
@@ -1281,11 +1270,26 @@ describe("the PS-11 protocol, under real concurrency", () => {
    */
   async function withRivalLock(
     listing: Listing,
-    body: (trx: Awaited<ReturnType<typeof rivalHoldingTheLock>>) => Promise<void>,
+    body: (trx: ControlledTransaction<ListingDatabase>) => Promise<void>,
   ): Promise<void> {
-    const trx = await rivalHoldingTheLock(listing);
+    const trx = await rival.db
+      .startTransaction()
+      .setIsolationLevel("read committed")
+      .execute();
 
+    // **Acquisition is inside the `try`, not before it.** A `SELECT … FOR UPDATE` that throws
+    // leaves the transaction open and aborted, still holding whatever it acquired, so taking the
+    // lock outside the `try` would leak it on a setup failure — the same hazard as an escaping
+    // assertion, one statement earlier. Only `startTransaction` itself sits outside, and if that
+    // throws there is no transaction to release.
     try {
+      await trx
+        .selectFrom("listing")
+        .select("id")
+        .where("id", "=", listingText(listing))
+        .forUpdate()
+        .execute();
+
       await body(trx);
     } finally {
       if (trx.isCommitted === false && trx.isRolledBack === false) {
