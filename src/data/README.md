@@ -177,9 +177,17 @@ implementation**:
   governed or authorized** — every actual replacement **defaults to private** and
   never inherits a public designation, an **unchanged** value may be
   **restricted** but **never widened**, and a widening attempt is **refused
-  explicitly before any mutation**. **Deciding it implements nothing:** no domain
+  explicitly before any mutation**. ~~**Deciding it implements nothing:** no domain
   comparison, no result code and no enforcement exists, and **`OP-6` does not
-  enforce it** — see *What does not exist* below. *Outstanding:* the public
+  enforce it** — see *What does not exist* below.~~ **The pure-domain rule now
+  exists** (issue #205): `src/domain/listing/designation.ts` compares two
+  complete content sets exactly, classifies each governed field as unchanged,
+  removed, added or replaced, and refuses any private→public widening as
+  `DESIGNATION_WIDENING_REFUSED`, accumulated per field and kept distinct from
+  `ValidationViolation`. **No production write path calls it**: `OP-6` still does
+  **not** enforce `ADR-025`, and `FR-ADM-04` and `FR-ADM-10b` remain
+  unimplemented. Privacy enforcement is therefore **not live** — see *What does
+  not exist* below. *Outstanding:* the public
   projection form (a view or a single `C9` query module).
 - **`DDM-8`** revision storage and the representation of the effective public
   version. ~~*Outstanding:* the isolation level for revision transactions, and
