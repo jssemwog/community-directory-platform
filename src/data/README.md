@@ -168,12 +168,25 @@ implementation**:
   identity domain type**, and **public identity transport**. **No generator
   exists, and none is authorized here.**
 - **`DDM-6`** physical separation of non-public attributes and per-contact
-  public-display designations. *Outstanding:* the public projection form (a
+  public-display designations. ~~*Outstanding:* the public projection form (a
   view or a single `C9` query module), replacement-value semantics, and
-  restriction-only enforcement on the write paths.
+  restriction-only enforcement on the write paths.~~ **Replacement-value
+  semantics and restriction-only enforcement are decided** (`ADR-025`,
+  `Accepted` 2026-10-17, issue #203): a value is a **replacement** only when it
+  differs from the stored value by **exact** comparison — **no normalization is
+  governed or authorized** — every actual replacement **defaults to private** and
+  never inherits a public designation, an **unchanged** value may be
+  **restricted** but **never widened**, and a widening attempt is **refused
+  explicitly before any mutation**. **Deciding it implements nothing:** no domain
+  comparison, no result code and no enforcement exists, and **`OP-6` does not
+  enforce it** — see *What does not exist* below. *Outstanding:* the public
+  projection form (a view or a single `C9` query module).
 - **`DDM-8`** revision storage and the representation of the effective public
-  version. *Outstanding:* the isolation level for revision transactions, and
-  replacement-value semantics. **Stale-edit detection and resolution policy —
+  version. ~~*Outstanding:* the isolation level for revision transactions, and
+  replacement-value semantics.~~ **Both are now decided** — the isolation level
+  by `ADR-024` (`Accepted` 2026-10-14, issue #189) and **replacement-value
+  semantics by `ADR-025`** (`Accepted` 2026-10-17, issue #203). **Neither
+  decision implements anything** on this item. **Stale-edit detection and resolution policy —
   and its supporting token — are decided** (`ADR-023`, `Accepted` 2026-10-12,
   issue #181): see *Stale-edit detection is decided* below. **That policy is
   not a `DDM` item and carries no `DDM` number** — it is an `ADR-017`

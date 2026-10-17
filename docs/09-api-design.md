@@ -414,7 +414,13 @@ listing.
 issue #135). An administrator may change a designation **only to restrict** visibility;
 `OP-6` never makes a business-withheld value public. A contact value or postal code the
 administrator adds or replaces **defaults to private** and does not inherit the replaced
-value's designation. On an approved listing a designation change is part of the pending
+value's designation. **What counts as a replacement is since defined** by `Accepted` `ADR-025`
+(2026-10-17, issue #203): a value is a replacement only where it **differs from the listing's
+current persisted value by exact comparison** — **no normalization is governed or authorized** —
+an **addition** counts as a replacement, an absent value in `OP-6`'s **complete** proposed
+content is an **explicit removal** rather than an omission, and an attempted private→public
+widening is **refused explicitly before any mutation**. **`OP-6` does not yet enforce any of
+this**; enforcement is separately authorized work. On an approved listing a designation change is part of the pending
 revision like any other change, and follows the same approval path (`OP-10`,
 `FR-ADM-10b`) — the revision lifecycle, `DI-11` and rollback are unchanged
 (`FR-DATA-11c`).
