@@ -118,12 +118,20 @@ function isPublic(designatable: DesignatableValue | undefined): boolean {
  * designation change alone never makes a value a replacement, which is what allows an unchanged
  * value to be restricted.
  *
- * Exported because `ADR-025` makes the five-case classification itself binding, and on the
- * success path `enforceDesignationPolicy` returns the proposal by reference — so *unchanged*
- * versus *removed* is not observable through the policy alone, and that half of the governed
- * matrix would be unprovable.
+ * **Deliberately not exported.** The Release Gate tested the Development Gate's reason for
+ * exporting it — that *unchanged* versus *removed* is otherwise unobservable — and rejected it:
+ * test observability must not decide a production API. No requirement identifies a consumer
+ * (`FR-CONF-04` governs the resulting **revision** state, not designation outcomes), and nothing
+ * governed is lost, because the policy **enforces** the removal rule behaviourally — it returns
+ * the proposal, so the removed field is absent and the old value is demonstrably not preserved.
+ *
+ * `DesignationChange` stays exported because `DesignationViolation.change` carries it; only the
+ * computation is private. One consequence is recorded honestly rather than hidden: a removal is
+ * always accepted, so **`"removed"` can never appear in a violation** and that member of the
+ * union is unreachable through the public surface. It is kept because it is `ADR-025`'s own
+ * vocabulary for the case, and narrowing the union would misstate the policy.
  */
-export function classifyDesignatableChange(
+function classifyDesignatableChange(
   current: DesignatableValue | undefined,
   proposed: DesignatableValue | undefined,
 ): DesignationChange {

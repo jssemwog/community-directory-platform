@@ -16,7 +16,6 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
-  classifyDesignatableChange,
   enforceDesignationPolicy,
   type DesignatableField,
   type DesignationChange,
@@ -62,45 +61,86 @@ const violation = (
   change: DesignationChange,
 ): DesignationViolation => ({ code: "DESIGNATION_WIDENING_REFUSED", field, change });
 
-describe("the ADR-025 classification, per field", () => {
-  it.each(FIELDS)("classifies absent → absent as unchanged (%s)", (field) => {
-    expect(classifyDesignatableChange(undefined, undefined)).toBe("unchanged");
+/**
+ * `ADR-025`'s classification, asserted **through the public policy** rather than through the
+ * classifier.
+ *
+ * The Release Gate made `classifyDesignatableChange` private: no requirement identifies a
+ * production consumer, and test observability must not decide a public API. Every classification
+ * is still provable here, because the policy reports the classification that caused a refusal in
+ * `violation.change` — so a misclassification changes the reported `change`, not merely an
+ * internal label.
+ *
+ * The one exception is recorded rather than papered over. A **removal** is always accepted, so no
+ * violation carries `change: "removed"`, and the label itself is unobservable. What `ADR-025`
+ * actually binds about a removal — that it is not omission or preservation, and that no
+ * designation survives — is a statement about the **content** the policy returns, and is asserted
+ * that way in the matrix below.
+ */
+describe("the ADR-025 classification, observed through the policy", () => {
+  it.each(FIELDS)("reports an exactly equal carrier as unchanged (%s)", (field) => {
+    // Private → public on an identical carrier: refused, and the reported classification is the
+    // proof that the carrier was compared equal rather than treated as a replacement.
+    const result = enforceDesignationPolicy(
+      withField(field, { value: CARRIER[field], designatedPublic: false }),
+      withField(field, { value: CARRIER[field], designatedPublic: true }),
+    );
+
+    expect(result.ok).toBe(false);
+
+    if (!result.ok) expect(result.error).toEqual([violation(field, "unchanged")]);
+  });
+
+  it.each(FIELDS)("reports a different carrier as replaced (%s)", (field) => {
+    const result = enforceDesignationPolicy(
+      withField(field, { value: CARRIER[field], designatedPublic: true }),
+      withField(field, { value: OTHER[field], designatedPublic: true }),
+    );
+
+    expect(result.ok).toBe(false);
+
+    if (!result.ok) expect(result.error).toEqual([violation(field, "replaced")]);
+  });
+
+  it.each(FIELDS)("reports an arriving value as added (%s)", (field) => {
+    const result = enforceDesignationPolicy(
+      withField(field, undefined),
+      withField(field, { value: CARRIER[field], designatedPublic: true }),
+    );
+
+    expect(result.ok).toBe(false);
+
+    if (!result.ok) expect(result.error).toEqual([violation(field, "added")]);
+  });
+
+  it.each(FIELDS)("treats a designation-only change as unchanged, not replaced (%s)", (field) => {
+    // Same carrier, designation widened. If the carrier comparison wrongly reported a
+    // replacement, the reported `change` would say so.
+    const result = enforceDesignationPolicy(
+      withField(field, { value: CARRIER[field] }),
+      withField(field, { value: CARRIER[field], designatedPublic: true }),
+    );
+
+    expect(result.ok).toBe(false);
+
+    if (!result.ok) expect(result.error[0]?.change).toBe("unchanged");
+  });
+
+  it.each(FIELDS)("never reports a removal as a violation at all (%s)", (field) => {
+    // The behavioural half of `ADR-025`'s removal rule: accepted, and — see the matrix below —
+    // the returned content has the field absent, so nothing was preserved.
     expect(
-      enforceDesignationPolicy(withField(field, undefined), withField(field, undefined)).ok,
+      enforceDesignationPolicy(
+        withField(field, { value: CARRIER[field], designatedPublic: true }),
+        withField(field, undefined),
+      ).ok,
     ).toBe(true);
   });
 
-  it.each(FIELDS)("classifies an exactly equal carrier as unchanged (%s)", (field) => {
-    const same = { value: CARRIER[field] };
-
-    expect(classifyDesignatableChange(same, { value: CARRIER[field] })).toBe("unchanged");
-  });
-
-  it.each(FIELDS)("classifies present → absent as removed, never unchanged (%s)", (field) => {
-    // `ADR-017`'s proposal is a complete set, so an absent value is an explicit removal. If this
-    // were read as omission or preservation the classification would say "unchanged".
-    expect(classifyDesignatableChange({ value: CARRIER[field] }, undefined)).toBe("removed");
-  });
-
-  it.each(FIELDS)("classifies absent → present as added (%s)", (field) => {
-    expect(classifyDesignatableChange(undefined, { value: CARRIER[field] })).toBe("added");
-  });
-
-  it.each(FIELDS)("classifies a different carrier as replaced (%s)", (field) => {
+  it.each(FIELDS)("accepts absent → absent without a violation (%s)", (field) => {
     expect(
-      classifyDesignatableChange({ value: CARRIER[field] }, { value: OTHER[field] }),
-    ).toBe("replaced");
-  });
-
-  it.each(FIELDS)("a designation change alone never makes a value a replacement (%s)", (field) => {
-    // This is what allows an unchanged value to be restricted: the designation is not part of
-    // the comparison, only the carrier is.
-    expect(
-      classifyDesignatableChange(
-        { value: CARRIER[field], designatedPublic: true },
-        { value: CARRIER[field], designatedPublic: false },
-      ),
-    ).toBe("unchanged");
+      enforceDesignationPolicy(withField(field, undefined), withField(field, undefined)).ok,
+    ).toBe(true);
   });
 });
 
@@ -235,15 +275,12 @@ describe("no normalization of any kind", () => {
   ];
 
   it.each(FORMATTING)(
-    "treats a $label difference as a replacement, not an equal value ($field)",
+    "refuses a public $label difference, and reports it as a replacement ($field)",
     ({ field, current, proposed }) => {
-      expect(classifyDesignatableChange({ value: current }, { value: proposed })).toBe("replaced");
-    },
-  );
-
-  it.each(FORMATTING)(
-    "refuses a public $label difference, because it is a replacement ($field)",
-    ({ field, current, proposed }) => {
+      // Both sides were public, so if the carriers had been normalized to equal the policy
+      // would have accepted this as an unchanged public value. The refusal proves no
+      // normalization happened, and the reported `change` proves it was read as a replacement
+      // rather than as something else that happens to be refused.
       const result = enforceDesignationPolicy(
         withField(field, { value: current, designatedPublic: true }),
         withField(field, { value: proposed, designatedPublic: true }),
@@ -255,12 +292,20 @@ describe("no normalization of any kind", () => {
     },
   );
 
-  it("accepts only byte-identical carriers as unchanged", () => {
-    // The positive control for the table above: the same string really is unchanged.
-    expect(classifyDesignatableChange({ value: "P17 AB12" }, { value: "P17 AB12" })).toBe(
-      "unchanged",
-    );
-  });
+  it.each(FORMATTING)(
+    "would accept the same pair if the carriers really were equal ($label, $field)",
+    ({ field, current }) => {
+      // The positive control that makes the table above meaningful: with a byte-identical
+      // carrier on both sides, the very same public→public designation is accepted. So the
+      // refusals above are caused by the carrier difference and nothing else.
+      expect(
+        enforceDesignationPolicy(
+          withField(field, { value: current, designatedPublic: true }),
+          withField(field, { value: current, designatedPublic: true }),
+        ).ok,
+      ).toBe(true);
+    },
+  );
 });
 
 describe("accumulation, ordering and the absence of partial results", () => {
@@ -537,6 +582,13 @@ describe("the module's structural boundary", () => {
    * self-attack test caught, and exactly the class of unsound structural test PR #180 corrected.
    * Order matters too: `//` occurs inside `https://`, so a string must be recognised as a string
    * rather than stripped after the comments.
+   *
+   * A template is the one literal treated in two parts, because the Release Gate's hostile probes
+   * found the scanner swallowing a whole template and hiding `${Date.now()}` from the check below.
+   * Its **literal text is inert** and is stripped like any string; a `${...}` **interpolation is
+   * executable** and is kept, nested templates included. The scanner does not descend into strings
+   * inside an interpolation, so a forbidden identifier quoted *there* is a false positive — which
+   * fails closed, and is the direction to err in.
    */
   function executableSource(source: string): string {
     let out = "";
@@ -561,7 +613,7 @@ describe("the module's structural boundary", () => {
 
       const ch = source[i] as string;
 
-      if (ch === '"' || ch === "'" || ch === "`") {
+      if (ch === '"' || ch === "'") {
         i += 1;
 
         while (i < source.length) {
@@ -579,6 +631,53 @@ describe("the module's structural boundary", () => {
         }
 
         out += ch + ch;
+        continue;
+      }
+
+      if (ch === "`") {
+        // A template's **literal text** is stripped like any string, but a `${…}`
+        // interpolation is executable and is kept. A hostile probe found the first version
+        // swallowing the whole template, which hid `${Date.now()}` from the check below.
+        i += 1;
+        out += "``";
+
+        while (i < source.length) {
+          if (source[i] === "\\") {
+            i += 2;
+            continue;
+          }
+
+          if (source[i] === "`") {
+            i += 1;
+            break;
+          }
+
+          if (source.slice(i, i + 2) === "${") {
+            let depth = 0;
+
+            while (i < source.length) {
+              if (source[i] === "{") {
+                depth += 1;
+              } else if (source[i] === "}") {
+                depth -= 1;
+
+                if (depth === 0) {
+                  out += "}";
+                  i += 1;
+                  break;
+                }
+              }
+
+              out += source[i];
+              i += 1;
+            }
+
+            continue;
+          }
+
+          i += 1;
+        }
+
         continue;
       }
 
@@ -656,6 +755,26 @@ describe("the module's structural boundary", () => {
     expect(stripped).toContain("const d =");
   });
 
+  it("the stripper keeps template interpolations, which are executable, and drops the text", () => {
+    // The second defect the Release Gate's probes found: skipping a template wholesale hid
+    // `${Date.now()}` from the forbidden-identifier check. Literal text is inert; `${...}` is not.
+    const sample = [
+      "const a = `" + "Date.now is inert here`" + ";",
+      "const b = `" + "x${Date.now()}y`" + ";",
+      "const c = `" + "p${`" + "q${Math.random()}`" + "}r`" + ";",
+    ].join("\n");
+    const stripped = executableSource(sample);
+
+    // Inert literal text is still removed, so prose in a template cannot trip the check.
+    expect(stripped).not.toContain("Date.now is inert");
+    // Executable interpolation content survives, at one level and nested.
+    expect(stripped).toContain("Date.now()");
+    expect(stripped).toContain("Math.random()");
+    // The inert text around a live interpolation is still gone.
+    expect(stripped).not.toContain("x$");
+    expect(stripped).not.toContain("y`");
+  });
+
   it("the specifier extractor finds every import form it claims to", () => {
     const sample =
       'import x from "./a";\nimport type { Y } from "./b";\nimport "./c";\n' +
@@ -727,14 +846,6 @@ type _DateIsRejected = Assert<Equals<Date extends PolicyParams[0] ? true : false
 type _NumberIsRejected = Assert<Equals<number extends PolicyParams[0] ? true : false, false>>;
 type _PartialIsRejected = Assert<
   Equals<Partial<ListingContent> extends PolicyParams[0] ? true : false, false>
->;
-
-/** The classification helper takes an optional designatable value on each side, and returns one. */
-type _ClassifyTakesDesignatable = Assert<
-  Equals<Parameters<typeof classifyDesignatableChange>[0], DesignatableValue | undefined>
->;
-type _ClassifyReturnsChange = Assert<
-  Equals<ReturnType<typeof classifyDesignatableChange>, DesignationChange>
 >;
 
 /** The violation's own shape, so a field cannot be dropped or widened. */
