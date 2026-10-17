@@ -32,7 +32,7 @@
  * function.
  */
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { Kysely, PostgresDialect, sql } from "kysely";
+import { Kysely, PostgresDialect, sql, type ControlledTransaction } from "kysely";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 
@@ -77,6 +77,9 @@ let observer: ListingPersistence;
 let hostile: ListingPersistence;
 /** The same boundary, with every executed statement captured. */
 let capturing: ReturnType<typeof createCapturingPersistence>;
+
+/** The rival pool's label, so its own sessions can be counted and named at teardown. */
+const RIVAL_APPLICATION_NAME = "revision_approval_rival";
 
 const APPROVED_AT = 1_767_323_045_123;
 /** Strictly later than `APPROVED_AT`, as `DI-6` requires of an approval. */
@@ -209,6 +212,52 @@ async function sessionsInTransaction(): Promise<number> {
   return rows.rows[0]?.count ?? 0;
 }
 
+/** Every live backend on this database, by `pid`. Used to prove *only* an owned one was ended. */
+async function livePids(): Promise<readonly number[]> {
+  const rows = await sql<{ pid: number }>`
+    select pid from pg_stat_activity where datname = current_database() and pid is not null
+  `.execute(observer.db);
+
+  return rows.rows.map((row) => row.pid);
+}
+
+/** Sessions belonging to one labelled pool, whatever their state. */
+async function sessionsNamed(applicationName: string): Promise<number> {
+  const rows = await sql<{ count: number }>`
+    select count(*)::int as count
+      from pg_stat_activity
+     where datname = current_database() and application_name = ${applicationName}
+  `.execute(observer.db);
+
+  return rows.rows[0]?.count ?? 0;
+}
+
+/** Sessions of one labelled pool that are blocked waiting on a lock. */
+async function blockedSessionsNamed(applicationName: string): Promise<number> {
+  const rows = await sql<{ count: number }>`
+    select count(*)::int as count
+      from pg_stat_activity
+     where datname = current_database()
+       and application_name = ${applicationName}
+       and wait_event_type = 'Lock'
+  `.execute(observer.db);
+
+  return rows.rows[0]?.count ?? 0;
+}
+
+/**
+ * Resolve with the **next** error this pool hands to its own listener.
+ *
+ * Registered *before* the backend is terminated, so the wait is event-driven: there is no
+ * polling, no sleep and no duration in any assertion. If the event never arrives the test's own
+ * timeout reports it, which is a liveness bound rather than a correctness oracle.
+ */
+function nextPoolError(pool: PgPool): Promise<Error> {
+  return new Promise((resolve) => {
+    pool.on("error", resolve);
+  });
+}
+
 /**
  * The narrow slice of `pg` this file reaches directly, to build a **logging** boundary.
  *
@@ -216,7 +265,24 @@ async function sessionsInTransaction(): Promise<number> {
  * module is described here — the pattern `migrate.ts` and the listing suite established.
  */
 interface PgModule {
-  readonly Pool: new (config: Record<string, unknown>) => unknown;
+  readonly Pool: new (config: Record<string, unknown>) => PgPool;
+}
+
+/**
+ * The narrow slice of `pg`'s `Pool` this file touches (issue #201).
+ *
+ * Previously the constructor returned `unknown`, which was enough while the pool was only ever
+ * handed to Kysely. Attaching an `error` listener and asserting the pool's own lifecycle both
+ * need a shape, so the three facts used are declared — and **nothing more**, keeping this a
+ * description of the driver rather than a second source of truth about it.
+ */
+interface PgPool {
+  on(event: "error", listener: (error: Error) => void): unknown;
+  /** Used only to prove a listener is attached before any client can become idle. */
+  listenerCount(event: string): number;
+  readonly idleCount: number;
+  readonly totalCount: number;
+  readonly waitingCount: number;
 }
 
 const pg = createRequire(import.meta.url)("pg") as PgModule;
@@ -242,6 +308,10 @@ interface CapturedStatement {
 function createCapturingPersistence(database: string): {
   readonly db: Kysely<ListingDatabase>;
   readonly statements: readonly CapturedStatement[];
+  /** Exposed for issue #201's assertions only; no test may use it to drive the boundary. */
+  readonly pool: PgPool;
+  /** The errors the pool handed to its own listener, so a test can prove it got them. */
+  readonly idlePoolErrors: readonly Error[];
   reset(): void;
   shutdown(): Promise<void>;
 } {
@@ -252,6 +322,41 @@ function createCapturingPersistence(database: string): {
     max: 2,
     types: createTimestamptzTypeOverrides(),
     options: startupOptionsFor({ application_name: "revision_approval_capture" }),
+  });
+
+  /**
+   * Every error this pool delivered to its own listener, newest last (issue #201).
+   *
+   * Recorded **only** so a test can prove the event arrived **here** rather than at the
+   * process. It changes nothing about how the pool behaves.
+   */
+  const idlePoolErrors: Error[] = [];
+
+  /**
+   * The listener issue #201 exists for, attached **immediately** after construction — before
+   * any client can be checked out, become idle, or be terminated by the server.
+   *
+   * `connection.ts` attaches the same listener on every application pool and records the
+   * reason: *"an idle client killed by the server raises the pool's `error` event, and an
+   * unhandled `EventEmitter` `error` throws"*. `embedded-cluster.ts` does it too, *"the same
+   * reason `connection.ts` handles this"*. This pool is built directly from `pg` and so had
+   * neither — the one pool in this file outside both factories — which is how a `57P01` at
+   * cluster shutdown became an unhandled error that failed a run in which every test passed.
+   *
+   * **Handled by doing nothing**, exactly as production does: there is nothing to do about a
+   * lost idle connection — the pool discards the client and opens another on demand — and
+   * `ADR-016` selects no observability, so a log line or a telemetry hook here would decide
+   * something nobody has ruled on. Recording into an array is a **test** observation, not a
+   * behaviour change.
+   *
+   * **It conceals nothing.** This event fires only for a client that was already idle in the
+   * pool. A failing query rejects its own promise and reaches the caller unchanged, and a pool
+   * that cannot connect still fails every checkout — so no operation failure is hidden and no
+   * broken pool can report a query as successful. Nothing here retries, reconnects or
+   * recovers.
+   */
+  pool.on("error", (error) => {
+    idlePoolErrors.push(error);
   });
 
   const db = new Kysely<ListingDatabase>({
@@ -269,6 +374,8 @@ function createCapturingPersistence(database: string): {
   return {
     db,
     statements,
+    pool,
+    idlePoolErrors,
     reset: () => {
       statements.length = 0;
     },
@@ -349,6 +456,90 @@ async function awaitLockWaiter(attempts = 2_000): Promise<void> {
 }
 
 /**
+ * Hold the listing lock for the duration of `body`, and **always** settle and release it
+ * (issue #201).
+ *
+ * ## Why the `finally` is not tidiness
+ *
+ * A held row lock also holds a table-level lock on `listing`, and this file's `afterEach`
+ * runs `drop trigger … on listing`, which needs `ACCESS EXCLUSIVE`. So a test that threw
+ * while still holding the lock would make cleanup block **indefinitely** and bury the real
+ * failure under a timeout. Issue #199 demonstrated exactly that in the sibling rejection
+ * suite: a mutation removing the `PS-11` lock made the lock-wait sentinel fire, and the
+ * leaked transaction turned a clean 30-second failure into a hang. The five call sites in
+ * this file previously had no `finally` at all.
+ *
+ * ## Why acquisition is inside the `try`
+ *
+ * Only `startTransaction()` sits outside it. A `SELECT … FOR UPDATE` that throws leaves the
+ * transaction **open and aborted**, still holding whatever it managed to acquire, and the
+ * client still checked out — so taking the lock before the `try` would leak it on a setup
+ * failure, one statement earlier than the escaping-assertion case. If `startTransaction()`
+ * itself throws there is no transaction to release and nothing to guard.
+ *
+ * ## Failure reporting
+ *
+ * The **body's** failure is primary and always propagates. If cleanup *also* fails, both are
+ * reported through an `AggregateError` whose **first** error is the body's — the scheme
+ * `embedded-cluster.ts`'s own `withEmbeddedPostgres` established, reused rather than
+ * re-invented. Neither failure is ever swallowed, and a noisy release never replaces the
+ * original. If only cleanup fails, that failure stands alone.
+ *
+ * `body` may commit the transaction itself — the usual case, since these interleavings need
+ * the rival to commit at a chosen moment — so the release is conditional on the transaction
+ * still being open. The helper does not return until it has settled.
+ *
+ * `seams` exists for this file's own failure-path tests, following the same seam convention
+ * the embedded-cluster harness uses for its cleanup. Production code has no equivalent and
+ * none is introduced.
+ */
+async function withRivalLock(
+  listing: Listing,
+  body: (trx: ControlledTransaction<ListingDatabase>) => Promise<void>,
+  seams: { release?: (trx: ControlledTransaction<ListingDatabase>) => Promise<void> } = {},
+): Promise<void> {
+  const trx = await rival.db
+    .startTransaction()
+    .setIsolationLevel("read committed")
+    .execute();
+
+  let bodyError: unknown;
+  let threw = false;
+
+  try {
+    // Inside the `try` on purpose — see the header.
+    await trx
+      .selectFrom("listing")
+      .select("id")
+      .where("id", "=", listingText(listing))
+      .forUpdate()
+      .execute();
+
+    await body(trx);
+  } catch (error) {
+    threw = true;
+    bodyError = error;
+    throw error;
+  } finally {
+    try {
+      if (trx.isCommitted === false && trx.isRolledBack === false) {
+        await (seams.release ?? ((open) => open.rollback().execute().then(() => undefined)))(trx);
+      }
+    } catch (releaseError) {
+      if (!threw) {
+        throw releaseError;
+      }
+
+      throw new AggregateError(
+        [bodyError, releaseError],
+        "the test body failed and releasing the rival lock also failed; the first error is " +
+          "the original failure",
+      );
+    }
+  }
+}
+
+/**
  * Suppress every row operation of one kind on one table, for the duration of `body`.
  *
  * A `BEFORE … FOR EACH ROW` trigger returning `NULL` makes PostgreSQL skip the operation and
@@ -388,6 +579,10 @@ beforeAll(async () => {
 
   rival = createListingPersistence({
     pool: { connectionString: cluster.connectionStringFor(VERIFIED_DATABASE), max: 2 },
+    // Labelled so issue #201's failure-path tests can **count** this pool's sessions rather
+    // than infer them from a total. `application_name` is a label: it changes no behaviour,
+    // no concurrency semantics and no barrier.
+    startupParameters: { application_name: RIVAL_APPLICATION_NAME },
   });
 
   observer = createListingPersistence({
@@ -402,7 +597,47 @@ beforeAll(async () => {
 
   cluster.closeBeforeShutdown("capturing persistence", () => capturing.shutdown());
   cluster.closeBeforeShutdown("verified persistence", () => persistence.shutdown());
-  cluster.closeBeforeShutdown("rival persistence", () => rival.shutdown());
+  // The rival pool's closer is **bounded**, because a leaked `withRivalLock` body keeps its
+  // client checked out and `pool.end()` waits for checked-out clients — so an unguarded
+  // `rival.shutdown()` would hang the whole file's teardown for ever instead of reporting the
+  // leak. Found exactly that way: with the helper's `finally` removed, the probe below failed
+  // in seconds and then `afterAll` stalled until Vitest's 300s hook timeout.
+  //
+  // Any rival session still inside a transaction is terminated first, from `persistence.db` —
+  // which the cluster closes **after** this one, so it is still available here — and the leak
+  // is then reported as a **failure** rather than absorbed. Terminating is what makes teardown
+  // finish; throwing is what keeps the leak visible. Only this pool's own sessions are named,
+  // by `application_name`, and each is ended by its own `pid`.
+  cluster.closeBeforeShutdown("rival persistence", async () => {
+    const stray = await sql<{ pid: number }>`
+      select pid
+        from pg_stat_activity
+       where datname = current_database()
+         and application_name = ${RIVAL_APPLICATION_NAME}
+         and state in ('idle in transaction', 'idle in transaction (aborted)')
+    `.execute(persistence.db);
+
+    for (const row of stray.rows) {
+      await sql`select pg_terminate_backend(${row.pid})`.execute(persistence.db);
+    }
+
+    if (stray.rows.length > 0) {
+      // **`pool.end()` is deliberately not awaited here.** Terminating the backend ends the
+      // *server* session, but it does not return a **checked-out** client to the pool: `pg`
+      // waits for the borrower to release it, and a controlled transaction that was never
+      // settled never does. Awaiting `shutdown()` would therefore hang this closer for ever —
+      // measured, not assumed, and the reason the first attempt at this guard still stalled.
+      //
+      // The cluster's own shutdown closes the sockets a moment later, so nothing is left
+      // running. What matters is that the leak is reported rather than waited on.
+      throw new Error(
+        `${stray.rows.length} rival session(s) were still inside a transaction at teardown: a ` +
+          `withRivalLock body leaked its transaction instead of settling it`,
+      );
+    }
+
+    await rival.shutdown();
+  });
   cluster.closeBeforeShutdown("observer persistence", () => observer.shutdown());
   cluster.closeBeforeShutdown("hostile persistence", () => hostile.shutdown());
 
@@ -415,16 +650,53 @@ beforeAll(async () => {
   await sql`alter table listing drop constraint listing_category_check`.execute(hostile.db);
 }, CLUSTER_TIMEOUT_MS);
 
+
+/**
+ * The bounded lock wait every test-only `DROP TRIGGER` runs under (issue #201, requirement 8).
+ *
+ * `DROP TRIGGER` needs `ACCESS EXCLUSIVE` on the table, which conflicts with the table-level
+ * lock any open transaction holds on `listing`. So a **leaked** rival transaction makes cleanup
+ * wait for ever: the run stalls, and whatever assertion actually failed is buried under a
+ * timeout instead of reported. That is the hazard this issue exists to close, and leaving
+ * cleanup unbounded would leave one instance of it open one level up.
+ *
+ * `lock_timeout` is `SET LOCAL`, so it lasts exactly as long as this transaction and changes no
+ * session or server setting. It is a **cleanup safety bound, not a correctness oracle**: when
+ * the helpers release correctly it never fires, and no assertion anywhere depends on a duration.
+ * When something does leak, PostgreSQL raises `55P03` immediately and cleanup fails **loudly**,
+ * naming the leak instead of hiding it. Proven by mutation: removing the helper's `finally`
+ * turns a hang into a named failure.
+ */
+const CLEANUP_LOCK_TIMEOUT = "5s";
+
+async function dropTestTriggersWithBoundedLockWait(
+  statements: readonly string[],
+): Promise<void> {
+  await persistence.db.transaction().execute(async (trx) => {
+    await sql.raw(`set local lock_timeout = '${CLEANUP_LOCK_TIMEOUT}'`).execute(trx);
+
+    for (const statement of statements) {
+      await sql.raw(statement).execute(trx);
+    }
+  });
+}
+
 afterEach(async () => {
   // A stranded trigger would silently corrupt every later case, so removal is unconditional
   // rather than left to the test that created it.
+  //
+  // Under a **bounded** lock wait, so a leaked rival transaction cannot turn cleanup into a
+  // hang (issue #201, requirement 8).
+  const drops: string[] = [];
+
   for (const table of ["listing", "listing_revision"] as const) {
     for (const operation of ["update", "delete"] as const) {
-      await sql
-        .raw(`drop trigger if exists cdp_test_suppress_${table}_${operation} on ${table}`)
-        .execute(persistence.db);
+      drops.push(`drop trigger if exists cdp_test_suppress_${table}_${operation} on ${table}`);
+      drops.push(`drop trigger if exists cdp_test_noop_${table}_${operation} on ${table}`);
     }
   }
+
+  await dropTestTriggersWithBoundedLockWait(drops);
 });
 
 describe("approving and applying the sole pending revision (OP-10)", () => {
@@ -1023,22 +1295,6 @@ describe("the impossible outcomes, forced by test-only triggers", () => {
 });
 
 describe("the ADR-024 protocol, under real concurrency", () => {
-  /** Take and hold the listing lock, without modifying the row. Caller decides when to commit. */
-  async function rivalHoldingTheLock(listing: Listing) {
-    const trx = await rival.db
-      .startTransaction()
-      .setIsolationLevel("read committed")
-      .execute();
-
-    await trx
-      .selectFrom("listing")
-      .select("id")
-      .where("id", "=", listingText(listing))
-      .forUpdate()
-      .execute();
-
-    return trx;
-  }
 
   it(
     "interleaving 1 — approve versus approve: exactly one applies",
@@ -1083,37 +1339,38 @@ describe("the ADR-024 protocol, under real concurrency", () => {
       // test-only SQL participant performing what a rejection would: the proposal leaves the
       // pending state and gains its write-once anchor, while the listing is untouched.
       const listing = await seedWithProposal();
-      const trx = await rivalHoldingTheLock(listing);
 
-      await sql`
-        update listing_revision
-           set state = 'rejected',
-               rejected_at = to_timestamp(0)
-                 + ((${APPROVED_AT + 5}::bigint)::text || ' milliseconds')::interval
-         where listing_id = ${listingText(listing)}::uuid and state = 'pending'
-      `.execute(trx);
+      await withRivalLock(listing, async (trx) => {
+        await sql`
+          update listing_revision
+             set state = 'rejected',
+                 rejected_at = to_timestamp(0)
+                   + ((${APPROVED_AT + 5}::bigint)::text || ' milliseconds')::interval
+           where listing_id = ${listingText(listing)}::uuid and state = 'pending'
+        `.execute(trx);
 
-      const blocked = approveAndApplyPendingRevision(persistence.db, {
-        listingId: listing.id,
-        approvedAt: instant(APPLIED_AT),
+        const blocked = approveAndApplyPendingRevision(persistence.db, {
+          listingId: listing.id,
+          approvedAt: instant(APPLIED_AT),
+        });
+
+        await awaitLockWaiter();
+        await trx.commit().execute();
+
+        const applied = await blocked;
+
+        expect(applied.ok).toBe(false);
+
+        if (applied.ok) return;
+
+        // The post-lock read sees committed state, so there is nothing pending to approve.
+        expect(applied.error).toEqual({ code: "PENDING_REVISION_NOT_FOUND" });
+
+        const row = await storedListingRow(listing);
+
+        expect(row.name).toBe(ORIGINAL_CONTENT.name);
+        expect(await revisionRowCount(listing)).toBe(1);
       });
-
-      await awaitLockWaiter();
-      await trx.commit().execute();
-
-      const applied = await blocked;
-
-      expect(applied.ok).toBe(false);
-
-      if (applied.ok) return;
-
-      // The post-lock read sees committed state, so there is nothing pending to approve.
-      expect(applied.error).toEqual({ code: "PENDING_REVISION_NOT_FOUND" });
-
-      const row = await storedListingRow(listing);
-
-      expect(row.name).toBe(ORIGINAL_CONTENT.name);
-      expect(await revisionRowCount(listing)).toBe(1);
     },
     CLUSTER_TIMEOUT_MS,
   );
@@ -1125,37 +1382,38 @@ describe("the ADR-024 protocol, under real concurrency", () => {
       // change that advances `last_updated_at`. The approver must then refuse as **stale**,
       // because the proposal was prepared against a version that no longer exists.
       const listing = await seedWithProposal();
-      const trx = await rivalHoldingTheLock(listing);
 
-      await sql`
-        update listing
-           set description = 'Corrected by an administrator.',
-               last_updated_at = to_timestamp(0)
-                 + ((${APPROVED_AT + 9}::bigint)::text || ' milliseconds')::interval
-         where id = ${listingText(listing)}::uuid
-      `.execute(trx);
+      await withRivalLock(listing, async (trx) => {
+        await sql`
+          update listing
+             set description = 'Corrected by an administrator.',
+                 last_updated_at = to_timestamp(0)
+                   + ((${APPROVED_AT + 9}::bigint)::text || ' milliseconds')::interval
+           where id = ${listingText(listing)}::uuid
+        `.execute(trx);
 
-      const blocked = approveAndApplyPendingRevision(persistence.db, {
-        listingId: listing.id,
-        approvedAt: instant(APPLIED_AT),
+        const blocked = approveAndApplyPendingRevision(persistence.db, {
+          listingId: listing.id,
+          approvedAt: instant(APPLIED_AT),
+        });
+
+        await awaitLockWaiter();
+        await trx.commit().execute();
+
+        const applied = await blocked;
+
+        expect(applied.ok).toBe(false);
+
+        if (applied.ok) return;
+
+        expect(applied.error).toEqual({ code: "STALE_LISTING_VERSION" });
+
+        const row = await storedListingRow(listing);
+
+        expect(row.last_updated_at).toBe(APPROVED_AT + 9);
+        expect(row.name).toBe(ORIGINAL_CONTENT.name);
+        expect(await revisionRowCount(listing)).toBe(1);
       });
-
-      await awaitLockWaiter();
-      await trx.commit().execute();
-
-      const applied = await blocked;
-
-      expect(applied.ok).toBe(false);
-
-      if (applied.ok) return;
-
-      expect(applied.error).toEqual({ code: "STALE_LISTING_VERSION" });
-
-      const row = await storedListingRow(listing);
-
-      expect(row.last_updated_at).toBe(APPROVED_AT + 9);
-      expect(row.name).toBe(ORIGINAL_CONTENT.name);
-      expect(await revisionRowCount(listing)).toBe(1);
     },
     CLUSTER_TIMEOUT_MS,
   );
@@ -1164,28 +1422,29 @@ describe("the ADR-024 protocol, under real concurrency", () => {
     "interleaving 4 — the pending revision disappears before the lock is granted",
     async () => {
       const listing = await seedWithProposal();
-      const trx = await rivalHoldingTheLock(listing);
 
-      await sql`
-        delete from listing_revision where listing_id = ${listingText(listing)}::uuid
-      `.execute(trx);
+      await withRivalLock(listing, async (trx) => {
+        await sql`
+          delete from listing_revision where listing_id = ${listingText(listing)}::uuid
+        `.execute(trx);
 
-      const blocked = approveAndApplyPendingRevision(persistence.db, {
-        listingId: listing.id,
-        approvedAt: instant(APPLIED_AT),
+        const blocked = approveAndApplyPendingRevision(persistence.db, {
+          listingId: listing.id,
+          approvedAt: instant(APPLIED_AT),
+        });
+
+        await awaitLockWaiter();
+        await trx.commit().execute();
+
+        const applied = await blocked;
+
+        expect(applied.ok).toBe(false);
+
+        if (applied.ok) return;
+
+        expect(applied.error).toEqual({ code: "PENDING_REVISION_NOT_FOUND" });
+        expect((await storedListingRow(listing)).name).toBe(ORIGINAL_CONTENT.name);
       });
-
-      await awaitLockWaiter();
-      await trx.commit().execute();
-
-      const applied = await blocked;
-
-      expect(applied.ok).toBe(false);
-
-      if (applied.ok) return;
-
-      expect(applied.error).toEqual({ code: "PENDING_REVISION_NOT_FOUND" });
-      expect((await storedListingRow(listing)).name).toBe(ORIGINAL_CONTENT.name);
     },
     CLUSTER_TIMEOUT_MS,
   );
@@ -1260,10 +1519,9 @@ describe("the ADR-024 protocol, under real concurrency", () => {
       expect(applied.error).toEqual({ code: "APPROVAL_INSTANT_NOT_LATER" });
       expect(await sessionsInTransaction()).toBe(0);
 
-      // The lock really was released: a rival can take it immediately.
-      const trx = await rivalHoldingTheLock(listing);
-
-      await trx.rollback().execute();
+      // The lock really was released: a rival can take it immediately. The helper rolls its
+      // own transaction back, so this site no longer does it by hand.
+      await withRivalLock(listing, async () => {});
 
       expect((await storedListingRow(listing)).last_updated_at).toBe(APPROVED_AT);
       expect(await revisionRowCount(listing)).toBe(1);
@@ -1288,15 +1546,15 @@ describe("the ADR-024 protocol, under real concurrency", () => {
         ).ok,
       ).toBe(true);
 
-      const trx = await rivalHoldingTheLock(listing);
+      let observed: readonly { id: string }[] = [];
 
-      const observed = await trx
-        .selectFrom("listing_revision")
-        .select("id")
-        .where("listing_id", "=", listingText(listing))
-        .execute();
-
-      await trx.rollback().execute();
+      await withRivalLock(listing, async (trx) => {
+        observed = await trx
+          .selectFrom("listing_revision")
+          .select("id")
+          .where("listing_id", "=", listingText(listing))
+          .execute();
+      });
 
       // Whatever a rival sees after the fact, it is never the half-applied state.
       expect(observed).toHaveLength(0);
@@ -1494,5 +1752,374 @@ describe("the guarded UPDATE, as PostgreSQL actually received it (issue #197)", 
           .setsForbiddenColumn,
       ).toBe("status");
     },
+  );
+});
+
+/**
+ * The capturing pool's idle-client error handling (issue #201).
+ *
+ * This file's capturing pool is built directly from `pg` and so sits outside **both** factories
+ * that handle pool errors — `connection.ts` for every application pool, and
+ * `embedded-cluster.ts` for the migration runner's. Without a listener, a `57P01` raised when
+ * the server terminates an idle client becomes an unhandled `EventEmitter` error: Node throws,
+ * and the run fails even though every test passed. That is exactly how PR #200's CI failed, at
+ * `26 passed`, `1170 passed`, `1 error`.
+ *
+ * These cases pin the listener's existence and prove the behaviour it buys, using **owned
+ * resources only**: one specific backend, identified by its own `pid`, ended through
+ * `pg_terminate_backend`. No process is signalled, no database is dropped, and nothing broader
+ * than that single backend is touched — which the pid-set comparison below asserts rather than
+ * assumes.
+ */
+describe("the capturing pool's idle-client errors", () => {
+  it(
+    "attaches an error listener at construction, before any client can become idle",
+    async () => {
+      const fresh = createCapturingPersistence(VERIFIED_DATABASE);
+
+      try {
+        // Asserted before a single query runs: no client has been checked out yet, so this is
+        // genuinely "before any client can become idle" and not merely "eventually".
+        expect(fresh.pool.listenerCount("error")).toBeGreaterThanOrEqual(1);
+        expect(fresh.pool.totalCount).toBe(0);
+        expect(fresh.idlePoolErrors).toEqual([]);
+      } finally {
+        await fresh.shutdown();
+      }
+
+      // The pool this file actually uses, for the same reason.
+      expect(capturing.pool.listenerCount("error")).toBeGreaterThanOrEqual(1);
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "survives the server terminating one owned idle backend, and stays governed",
+    async () => {
+      // The file-level `capturing` pool shares this label and is torn down by the cluster
+      // helper, not here — so residue is measured as a **return to baseline**, not as zero.
+      const baseline = await sessionsNamed("revision_approval_capture");
+      const owned = createCapturingPersistence(VERIFIED_DATABASE);
+
+      try {
+        // Establish one connection and learn **its** backend pid from the backend itself.
+        const pidRows = await sql<{ pid: number }>`select pg_backend_pid() as pid`.execute(
+          owned.db,
+        );
+        const ownedPid = pidRows.rows[0]?.pid;
+
+        expect(typeof ownedPid).toBe("number");
+
+        if (typeof ownedPid !== "number") return;
+
+        // The query is done, so that client is back in the pool and idle — the precise state
+        // the production comment describes.
+        expect(owned.pool.idleCount).toBeGreaterThanOrEqual(1);
+
+        const before = await livePids();
+
+        expect(before).toContain(ownedPid);
+
+        // Registered **before** the termination, so the wait is event-driven rather than polled.
+        const delivered = nextPoolError(owned.pool);
+
+        // Exactly one backend, named by the pid it reported for itself. This is the only
+        // termination in this suite, and it is scoped to a connection this test owns.
+        const ended = await sql<{ terminated: boolean }>`
+          select pg_terminate_backend(${ownedPid}) as terminated
+        `.execute(observer.db);
+
+        expect(ended.rows[0]?.terminated).toBe(true);
+
+        // The event reached the pool's own listener — not the process. If the listener were
+        // absent, Node would have thrown before this line could run.
+        const error = await delivered;
+
+        expect((error as { readonly code?: unknown }).code).toBe("57P01");
+        expect(owned.idlePoolErrors.length).toBeGreaterThanOrEqual(1);
+
+        // **Only** the owned backend went. Every other session that was live before is still
+        // live, which is what makes "no broad termination" a proof rather than a promise.
+        const after = await livePids();
+
+        expect(after).not.toContain(ownedPid);
+        expect(before.filter((pid) => pid !== ownedPid).every((pid) => after.includes(pid))).toBe(
+          true,
+        );
+
+        // The pool remains governed: it opens a replacement on demand, and that replacement is
+        // configured exactly as before — the `timestamptz` overrides still deliver epoch
+        // milliseconds rather than a `Date` (`ADR-022`), so a lost client cannot silently
+        // downgrade the boundary.
+        const roundTrip = await sql<{ at: number }>`
+          select to_timestamp(0)
+            + ((${APPROVED_AT}::bigint)::text || ' milliseconds')::interval as at
+        `.execute(owned.db);
+
+        expect(roundTrip.rows[0]?.at).toBe(APPROVED_AT);
+        expect(roundTrip.rows[0]?.at).not.toBeInstanceOf(Date);
+
+        // Nothing was retried or recovered on our behalf: a *failing* query still fails.
+        await expect(sql`select 1 / 0`.execute(owned.db)).rejects.toThrow();
+      } finally {
+        await owned.shutdown();
+      }
+
+      // Shutdown completed and left no client or session behind.
+      // This instance's own sessions are gone: the label is back to where it started.
+      expect(await sessionsNamed("revision_approval_capture")).toBe(baseline);
+      expect(await sessionsInTransaction()).toBe(0);
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+});
+
+/**
+ * `withRivalLock`'s failure paths (issue #201).
+ *
+ * The helper's whole purpose is the **unhappy** path, which no interleaving above exercises:
+ * those all succeed, and a leak only appears when something throws. Each case below proves one
+ * release guarantee through owned sessions and `pg_stat_activity`, with no sleep and no duration
+ * in any assertion.
+ */
+describe("the rival-lock helper's release guarantees", () => {
+  const RIVAL = RIVAL_APPLICATION_NAME;
+
+  /** No rival transaction open, no rival session blocked. The invariant every case asserts. */
+  async function rivalIsQuiet(): Promise<void> {
+    expect(await sessionsInTransaction()).toBe(0);
+    expect(await blockedSessionsNamed(RIVAL)).toBe(0);
+  }
+
+  /**
+   * Run `withRivalLock` as a **probe**, and release whatever it failed to release.
+   *
+   * A probe that asserts the helper settles its transaction must survive the helper *not*
+   * settling it. A never-settled controlled transaction keeps its client **checked out**, and
+   * `pg`'s `pool.end()` waits for the borrower to release it — terminating the backend does not
+   * hand it back. So a failing probe would otherwise stall the file's teardown for ever and bury
+   * its own assertion, which is the exact hazard this issue closes.
+   *
+   * The captured state is read **before** any cleanup, so what is asserted is the helper's own
+   * behaviour and not this function's repair. The repair is reported too: if cleanup had to step
+   * in, `leakedBeyondHelper` says so.
+   */
+  async function probeRivalLock(
+    listing: Listing,
+    body: (trx: ControlledTransaction<ListingDatabase>) => Promise<void>,
+    seams?: { release?: (trx: ControlledTransaction<ListingDatabase>) => Promise<void> },
+  ): Promise<{
+    readonly thrown: unknown;
+    readonly settledOnReturn: boolean;
+    readonly leakedBeyondHelper: boolean;
+  }> {
+    let seen: ControlledTransaction<ListingDatabase> | undefined;
+    let thrown: unknown;
+    let threw = false;
+
+    try {
+      await withRivalLock(
+        listing,
+        async (trx) => {
+          seen = trx;
+          await body(trx);
+        },
+        seams ?? {},
+      );
+    } catch (error) {
+      threw = true;
+      thrown = error;
+    }
+
+    // Read before repairing: this is the helper's behaviour, not the repair's.
+    const settledOnReturn =
+      seen === undefined || seen.isCommitted === true || seen.isRolledBack === true;
+    const leakedBeyondHelper = !settledOnReturn;
+
+    if (seen !== undefined && seen.isCommitted === false && seen.isRolledBack === false) {
+      await seen.rollback().execute();
+    }
+
+    return { thrown: threw ? thrown : undefined, settledOnReturn, leakedBeyondHelper };
+  }
+
+  /** A listing whose identifier the `uuid` column cannot accept, so acquisition fails. */
+  function unusableListing(): Listing {
+    return { ...approvedListing(), id: listingIdOf("not-a-uuid") };
+  }
+
+  it(
+    "settles and releases on a normal body",
+    async () => {
+      const listing = await seedWithProposal();
+
+      const probe = await probeRivalLock(listing, async () => {
+        // While the body runs, the lock is genuinely held.
+        expect(await sessionsInTransaction()).toBe(1);
+      });
+
+      expect(probe.thrown).toBeUndefined();
+      // Settled **before** the helper returned, not eventually. Read before any repair.
+      expect(probe.settledOnReturn).toBe(true);
+      expect(probe.leakedBeyondHelper).toBe(false);
+      await rivalIsQuiet();
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "rolls back and releases when the body throws, and the body's failure is what propagates",
+    async () => {
+      const listing = await seedWithProposal();
+
+      const probe = await probeRivalLock(listing, async () => {
+        throw new Error("the body failed on purpose");
+      });
+
+      // The body's failure is what propagates, unchanged.
+      expect((probe.thrown as Error | undefined)?.message).toBe("the body failed on purpose");
+      // …and the helper itself rolled back; cleanup had nothing to repair.
+      expect(probe.settledOnReturn).toBe(true);
+      expect(probe.leakedBeyondHelper).toBe(false);
+
+      await rivalIsQuiet();
+
+      // The lock is genuinely free: a second rival takes it without blocking.
+      await withRivalLock(listing, async () => {});
+      await rivalIsQuiet();
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "releases the checked-out client when lock acquisition itself fails",
+    async () => {
+      // The `SELECT … FOR UPDATE` is rejected by the server, so the transaction is open and
+      // aborted with the client still checked out — the case that leaks if acquisition sits
+      // outside the `try`.
+      let bodyRan = false;
+
+      await expect(
+        withRivalLock(unusableListing(), async () => {
+          bodyRan = true;
+        }),
+      ).rejects.toThrow();
+
+      // Setup failed before the body: it never ran, and nothing leaked.
+      expect(bodyRan).toBe(false);
+      await rivalIsQuiet();
+
+      // The pool is still usable afterwards, which a leaked checkout would eventually prevent.
+      const listing = await seedWithProposal();
+
+      await withRivalLock(listing, async () => {});
+      await rivalIsQuiet();
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "reports the body failure first and the cleanup failure too, hiding neither",
+    async () => {
+      const listing = await seedWithProposal();
+
+      const thrown = await withRivalLock(
+        listing,
+        async () => {
+          throw new Error("the body failed on purpose");
+        },
+        {
+          release: async (open) => {
+            // Settle it honestly first, so the suppressed rollback cannot leak a held lock,
+            // then fail — the failure is what this case is about, not the leak.
+            await open.rollback().execute();
+            throw new Error("releasing the rival lock failed on purpose");
+          },
+        },
+      ).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      // The scheme `embedded-cluster.ts` established: both failures, the body's first.
+      expect(thrown).toBeInstanceOf(AggregateError);
+
+      const aggregate = thrown as AggregateError;
+
+      expect(aggregate.errors).toHaveLength(2);
+      expect((aggregate.errors[0] as Error).message).toBe("the body failed on purpose");
+      expect((aggregate.errors[1] as Error).message).toBe(
+        "releasing the rival lock failed on purpose",
+      );
+
+      await rivalIsQuiet();
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "reports a cleanup failure on its own when the body succeeded",
+    async () => {
+      const listing = await seedWithProposal();
+
+      await expect(
+        withRivalLock(listing, async () => {}, {
+          release: async (open) => {
+            await open.rollback().execute();
+            throw new Error("releasing the rival lock failed on purpose");
+          },
+        }),
+      ).rejects.toThrow("releasing the rival lock failed on purpose");
+
+      await rivalIsQuiet();
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "does not return before the rival transaction has settled, even when the body commits",
+    async () => {
+      const listing = await seedWithProposal();
+
+      const probe = await probeRivalLock(listing, async (trx) => {
+        await trx.commit().execute();
+      });
+
+      expect(probe.thrown).toBeUndefined();
+      expect(probe.settledOnReturn).toBe(true);
+      expect(probe.leakedBeyondHelper).toBe(false);
+      await rivalIsQuiet();
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "leaves trigger cleanup free to run, rather than blocked behind a held lock",
+    async () => {
+      // The concrete consequence of a leak: `afterEach` drops a trigger on `listing`, which
+      // needs `ACCESS EXCLUSIVE` and would block for ever behind a rival's row lock. Proving
+      // the DDL completes immediately after a *failed* body is proving the hang cannot recur.
+      const listing = await seedWithProposal();
+
+      const probe = await probeRivalLock(listing, async () => {
+        throw new Error("the body failed on purpose");
+      });
+
+      expect((probe.thrown as Error | undefined)?.message).toBe("the body failed on purpose");
+      expect(probe.leakedBeyondHelper).toBe(false);
+
+      await sql`
+        create or replace function cdp_test_noop() returns trigger
+          language plpgsql as $$ begin return new; end $$
+      `.execute(persistence.db);
+      await sql`
+        create trigger cdp_test_noop_listing_update before update on listing
+          for each row execute function cdp_test_noop()
+      `.execute(persistence.db);
+      await sql`drop trigger cdp_test_noop_listing_update on listing`.execute(persistence.db);
+
+      await rivalIsQuiet();
+    },
+    CLUSTER_TIMEOUT_MS,
   );
 });
