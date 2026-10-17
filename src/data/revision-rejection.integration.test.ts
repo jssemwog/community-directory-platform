@@ -85,6 +85,9 @@ let hostile: ListingPersistence;
 /** The same boundary, with every executed statement captured. */
 let capturing: ReturnType<typeof createCapturingPersistence>;
 
+/** The rival pool's label, so its own sessions can be counted and named at teardown. */
+const RIVAL_APPLICATION_NAME = "revision_rejection_rival";
+
 const APPROVED_AT = 1_767_323_045_123;
 /** The rejection instant. Deliberately **not** required to be later than anything. */
 const REJECTED_AT = APPROVED_AT + 4_000;
@@ -248,6 +251,39 @@ async function sessionsInTransaction(): Promise<number> {
   return rows.rows[0]?.count ?? 0;
 }
 
+/** Every live backend on this database, by `pid`. Used to prove *only* an owned one was ended. */
+async function livePids(): Promise<readonly number[]> {
+  const rows = await sql<{ pid: number }>`
+    select pid from pg_stat_activity where datname = current_database() and pid is not null
+  `.execute(observer.db);
+
+  return rows.rows.map((row) => row.pid);
+}
+
+/** Sessions belonging to one labelled pool, whatever their state. */
+async function sessionsNamed(applicationName: string): Promise<number> {
+  const rows = await sql<{ count: number }>`
+    select count(*)::int as count
+      from pg_stat_activity
+     where datname = current_database() and application_name = ${applicationName}
+  `.execute(observer.db);
+
+  return rows.rows[0]?.count ?? 0;
+}
+
+/**
+ * Resolve with the **next** error this pool hands to its own listener.
+ *
+ * Registered *before* the backend is terminated, so the wait is event-driven: no polling, no
+ * sleep, and no duration in any assertion. If the event never arrives the test's own timeout
+ * reports it, which is a liveness bound rather than a correctness oracle.
+ */
+function nextPoolError(pool: PgPool): Promise<Error> {
+  return new Promise((resolve) => {
+    pool.on("error", resolve);
+  });
+}
+
 /**
  * The narrow slice of `pg` this file reaches directly, to build a **logging** boundary.
  *
@@ -255,7 +291,24 @@ async function sessionsInTransaction(): Promise<number> {
  * module is described here — the pattern `migrate.ts` and the earlier suites established.
  */
 interface PgModule {
-  readonly Pool: new (config: Record<string, unknown>) => unknown;
+  readonly Pool: new (config: Record<string, unknown>) => PgPool;
+}
+
+/**
+ * The narrow slice of `pg`'s `Pool` this file touches (issue #201).
+ *
+ * Previously the constructor returned `unknown`, which was enough while the pool was only ever
+ * handed to Kysely. Attaching an `error` listener and asserting the pool's own lifecycle both
+ * need a shape, so the three facts used are declared — and **nothing more**, keeping this a
+ * description of the driver rather than a second source of truth about it.
+ */
+interface PgPool {
+  on(event: "error", listener: (error: Error) => void): unknown;
+  /** Used only to prove a listener is attached before any client can become idle. */
+  listenerCount(event: string): number;
+  readonly idleCount: number;
+  readonly totalCount: number;
+  readonly waitingCount: number;
 }
 
 const pg = createRequire(import.meta.url)("pg") as PgModule;
@@ -278,6 +331,10 @@ interface CapturedStatement {
 function createCapturingPersistence(database: string): {
   readonly db: Kysely<ListingDatabase>;
   readonly statements: readonly CapturedStatement[];
+  /** Exposed for issue #201's assertions only; no test may use it to drive the boundary. */
+  readonly pool: PgPool;
+  /** The errors the pool handed to its own listener, so a test can prove it got them. */
+  readonly idlePoolErrors: readonly Error[];
   reset(): void;
   shutdown(): Promise<void>;
 } {
@@ -288,6 +345,41 @@ function createCapturingPersistence(database: string): {
     max: 2,
     types: createTimestamptzTypeOverrides(),
     options: startupOptionsFor({ application_name: "revision_rejection_capture" }),
+  });
+
+  /**
+   * Every error this pool delivered to its own listener, newest last (issue #201).
+   *
+   * Recorded **only** so a test can prove the event arrived **here** rather than at the
+   * process. It changes nothing about how the pool behaves.
+   */
+  const idlePoolErrors: Error[] = [];
+
+  /**
+   * The listener issue #201 exists for, attached **immediately** after construction — before
+   * any client can be checked out, become idle, or be terminated by the server.
+   *
+   * `connection.ts` attaches the same listener on every application pool and records the
+   * reason: *"an idle client killed by the server raises the pool's `error` event, and an
+   * unhandled `EventEmitter` `error` throws"*. `embedded-cluster.ts` does it too, *"the same
+   * reason `connection.ts` handles this"*. This pool is built directly from `pg` and so had
+   * neither — the one pool in this file outside both factories — which is how a `57P01` at
+   * cluster shutdown became an unhandled error that failed a run in which every test passed.
+   *
+   * **Handled by doing nothing**, exactly as production does: there is nothing to do about a
+   * lost idle connection — the pool discards the client and opens another on demand — and
+   * `ADR-016` selects no observability, so a log line or a telemetry hook here would decide
+   * something nobody has ruled on. Recording into an array is a **test** observation, not a
+   * behaviour change.
+   *
+   * **It conceals nothing.** This event fires only for a client that was already idle in the
+   * pool. A failing query rejects its own promise and reaches the caller unchanged, and a pool
+   * that cannot connect still fails every checkout — so no operation failure is hidden and no
+   * broken pool can report a query as successful. Nothing here retries, reconnects or
+   * recovers.
+   */
+  pool.on("error", (error) => {
+    idlePoolErrors.push(error);
   });
 
   const db = new Kysely<ListingDatabase>({
@@ -302,6 +394,8 @@ function createCapturingPersistence(database: string): {
   return {
     db,
     statements,
+    pool,
+    idlePoolErrors,
     reset: () => {
       statements.length = 0;
     },
@@ -441,6 +535,9 @@ beforeAll(async () => {
 
   rival = createListingPersistence({
     pool: { connectionString: cluster.connectionStringFor(VERIFIED_DATABASE), max: 2 },
+    // Labelled so its own sessions can be named at teardown. `application_name` is a label:
+    // it changes no behaviour, no concurrency semantics and no barrier.
+    startupParameters: { application_name: RIVAL_APPLICATION_NAME },
   });
 
   observer = createListingPersistence({
@@ -455,7 +552,47 @@ beforeAll(async () => {
 
   cluster.closeBeforeShutdown("capturing persistence", () => capturing.shutdown());
   cluster.closeBeforeShutdown("verified persistence", () => persistence.shutdown());
-  cluster.closeBeforeShutdown("rival persistence", () => rival.shutdown());
+  // The rival pool's closer is **bounded**, because a leaked `withRivalLock` body keeps its
+  // client checked out and `pool.end()` waits for checked-out clients — so an unguarded
+  // `rival.shutdown()` would hang the whole file's teardown for ever instead of reporting the
+  // leak. Found exactly that way: with the helper's `finally` removed, the probe below failed
+  // in seconds and then `afterAll` stalled until Vitest's 300s hook timeout.
+  //
+  // Any rival session still inside a transaction is terminated first, from `persistence.db` —
+  // which the cluster closes **after** this one, so it is still available here — and the leak
+  // is then reported as a **failure** rather than absorbed. Terminating is what makes teardown
+  // finish; throwing is what keeps the leak visible. Only this pool's own sessions are named,
+  // by `application_name`, and each is ended by its own `pid`.
+  cluster.closeBeforeShutdown("rival persistence", async () => {
+    const stray = await sql<{ pid: number }>`
+      select pid
+        from pg_stat_activity
+       where datname = current_database()
+         and application_name = ${RIVAL_APPLICATION_NAME}
+         and state in ('idle in transaction', 'idle in transaction (aborted)')
+    `.execute(persistence.db);
+
+    for (const row of stray.rows) {
+      await sql`select pg_terminate_backend(${row.pid})`.execute(persistence.db);
+    }
+
+    if (stray.rows.length > 0) {
+      // **`pool.end()` is deliberately not awaited here.** Terminating the backend ends the
+      // *server* session, but it does not return a **checked-out** client to the pool: `pg`
+      // waits for the borrower to release it, and a controlled transaction that was never
+      // settled never does. Awaiting `shutdown()` would therefore hang this closer for ever —
+      // measured, not assumed, and the reason the first attempt at this guard still stalled.
+      //
+      // The cluster's own shutdown closes the sockets a moment later, so nothing is left
+      // running. What matters is that the leak is reported rather than waited on.
+      throw new Error(
+        `${stray.rows.length} rival session(s) were still inside a transaction at teardown: a ` +
+          `withRivalLock body leaked its transaction instead of settling it`,
+      );
+    }
+
+    await rival.shutdown();
+  });
   cluster.closeBeforeShutdown("observer persistence", () => observer.shutdown());
   cluster.closeBeforeShutdown("hostile persistence", () => hostile.shutdown());
 
@@ -470,21 +607,56 @@ beforeAll(async () => {
   await sql`drop index listing_revision_one_pending_per_listing`.execute(hostile.db);
 }, CLUSTER_TIMEOUT_MS);
 
+
+/**
+ * The bounded lock wait every test-only `DROP TRIGGER` runs under (issue #201, requirement 8).
+ *
+ * `DROP TRIGGER` needs `ACCESS EXCLUSIVE` on the table, which conflicts with the table-level
+ * lock any open transaction holds on `listing`. So a **leaked** rival transaction makes cleanup
+ * wait for ever: the run stalls, and whatever assertion actually failed is buried under a
+ * timeout instead of reported. That is the hazard this issue exists to close, and leaving
+ * cleanup unbounded would leave one instance of it open one level up.
+ *
+ * `lock_timeout` is `SET LOCAL`, so it lasts exactly as long as this transaction and changes no
+ * session or server setting. It is a **cleanup safety bound, not a correctness oracle**: when
+ * the helpers release correctly it never fires, and no assertion anywhere depends on a duration.
+ * When something does leak, PostgreSQL raises `55P03` immediately and cleanup fails **loudly**,
+ * naming the leak instead of hiding it. Proven by mutation: removing the helper's `finally`
+ * turns a hang into a named failure.
+ */
+const CLEANUP_LOCK_TIMEOUT = "5s";
+
+async function dropTestTriggersWithBoundedLockWait(
+  statements: readonly string[],
+): Promise<void> {
+  await persistence.db.transaction().execute(async (trx) => {
+    await sql.raw(`set local lock_timeout = '${CLEANUP_LOCK_TIMEOUT}'`).execute(trx);
+
+    for (const statement of statements) {
+      await sql.raw(statement).execute(trx);
+    }
+  });
+}
+
 afterEach(async () => {
   // A stranded trigger would silently corrupt every later case, so removal is unconditional
   // rather than left to the test that created it. **Every** test-only trigger family is swept,
   // not only the suppressors: each is also dropped in its own `finally`, but a `finally` that
   // itself failed would otherwise leave a raising or rewriting trigger armed for the rest of
   // the file, and the resulting failures would point anywhere but here.
+  //
+  // Under a **bounded** lock wait, so a leaked transaction cannot turn cleanup into a hang.
+  const drops: string[] = [];
+
   for (const table of ["listing", "listing_revision"] as const) {
     for (const operation of ["update", "delete"] as const) {
       for (const family of ["suppress", "raise", "break_check"] as const) {
-        await sql
-          .raw(`drop trigger if exists cdp_test_${family}_${table}_${operation} on ${table}`)
-          .execute(persistence.db);
+        drops.push(`drop trigger if exists cdp_test_${family}_${table}_${operation} on ${table}`);
       }
     }
   }
+
+  await dropTestTriggersWithBoundedLockWait(drops);
 });
 
 describe("rejecting the sole pending revision", () => {
@@ -1736,6 +1908,108 @@ describe("the statements PostgreSQL actually received", () => {
           { sql: 'update "listing_revision" set "state" = $1', parameters: [] },
         ]),
       ).toHaveLength(0);
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+});
+
+/**
+ * The capturing pool's idle-client error handling (issue #201).
+ *
+ * This suite inherited the gap along with the factory: PR #200 copied
+ * `createCapturingPersistence` from the approval suite verbatim, including its missing `error`
+ * listener. The same `57P01` at cluster shutdown was therefore reachable from here too, so the
+ * same listener and the same proof belong in both files.
+ *
+ * Owned resources only: one specific backend, named by the `pid` it reports for itself, ended
+ * through `pg_terminate_backend`. No process is signalled and no database is dropped, and the
+ * pid-set comparison proves nothing broader was touched.
+ */
+describe("the capturing pool's idle-client errors", () => {
+  it(
+    "attaches an error listener at construction, before any client can become idle",
+    async () => {
+      const fresh = createCapturingPersistence(VERIFIED_DATABASE);
+
+      try {
+        expect(fresh.pool.listenerCount("error")).toBeGreaterThanOrEqual(1);
+        expect(fresh.pool.totalCount).toBe(0);
+        expect(fresh.idlePoolErrors).toEqual([]);
+      } finally {
+        await fresh.shutdown();
+      }
+
+      expect(capturing.pool.listenerCount("error")).toBeGreaterThanOrEqual(1);
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "survives the server terminating one owned idle backend, and stays governed",
+    async () => {
+      // The file-level `capturing` pool shares this label and is torn down by the cluster
+      // helper, not here — so residue is measured as a **return to baseline**, not as zero.
+      const baseline = await sessionsNamed("revision_rejection_capture");
+      const owned = createCapturingPersistence(VERIFIED_DATABASE);
+
+      try {
+        const pidRows = await sql<{ pid: number }>`select pg_backend_pid() as pid`.execute(
+          owned.db,
+        );
+        const ownedPid = pidRows.rows[0]?.pid;
+
+        expect(typeof ownedPid).toBe("number");
+
+        if (typeof ownedPid !== "number") return;
+
+        expect(owned.pool.idleCount).toBeGreaterThanOrEqual(1);
+
+        const before = await livePids();
+
+        expect(before).toContain(ownedPid);
+
+        // Registered before the termination, so the wait is event-driven rather than polled.
+        const delivered = nextPoolError(owned.pool);
+
+        const ended = await sql<{ terminated: boolean }>`
+          select pg_terminate_backend(${ownedPid}) as terminated
+        `.execute(observer.db);
+
+        expect(ended.rows[0]?.terminated).toBe(true);
+
+        // Delivered to the pool's own listener, not to the process: without the listener, Node
+        // would have thrown before this line.
+        const error = await delivered;
+
+        expect((error as { readonly code?: unknown }).code).toBe("57P01");
+        expect(owned.idlePoolErrors.length).toBeGreaterThanOrEqual(1);
+
+        const after = await livePids();
+
+        expect(after).not.toContain(ownedPid);
+        expect(before.filter((pid) => pid !== ownedPid).every((pid) => after.includes(pid))).toBe(
+          true,
+        );
+
+        // Still governed: the replacement connection keeps the `timestamptz` overrides, so a
+        // lost client cannot silently downgrade the boundary to `Date` (`ADR-022`).
+        const roundTrip = await sql<{ at: number }>`
+          select to_timestamp(0)
+            + ((${APPROVED_AT}::bigint)::text || ' milliseconds')::interval as at
+        `.execute(owned.db);
+
+        expect(roundTrip.rows[0]?.at).toBe(APPROVED_AT);
+        expect(roundTrip.rows[0]?.at).not.toBeInstanceOf(Date);
+
+        // Nothing retried or recovered on our behalf: a failing query still fails.
+        await expect(sql`select 1 / 0`.execute(owned.db)).rejects.toThrow();
+      } finally {
+        await owned.shutdown();
+      }
+
+      // This instance's own sessions are gone: the label is back to where it started.
+      expect(await sessionsNamed("revision_rejection_capture")).toBe(baseline);
+      expect(await sessionsInTransaction()).toBe(0);
     },
     CLUSTER_TIMEOUT_MS,
   );
