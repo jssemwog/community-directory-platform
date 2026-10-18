@@ -419,8 +419,14 @@ value's designation. **What counts as a replacement is since defined** by `Accep
 current persisted value by exact comparison** — **no normalization is governed or authorized** —
 an **addition** counts as a replacement, an absent value in `OP-6`'s **complete** proposed
 content is an **explicit removal** rather than an omission, and an attempted private→public
-widening is **refused explicitly before any mutation**. **`OP-6` does not yet enforce any of
-this**; enforcement is separately authorized work. On an approved listing a designation change is part of the pending
+widening is **refused explicitly before any mutation**. ~~**`OP-6` does not yet enforce any of
+this**; enforcement is separately authorized work.~~ **`OP-6` enforces it since issue #207**:
+the pending-revision write compares the proposal against the **listing content read under the
+existing `PS-11` lock** — never caller-supplied or pre-lock content — **after** the lifecycle,
+`DI-11` and stale-token decisions and **before the insert**, refusing a widening with the
+complete set of offending fields and **writing nothing**. **No normalization and no silent
+privatization** were introduced, and **`OP-10` does not revalidate the policy**; `FR-ADM-04`
+and `FR-ADM-10b` remain **unimplemented**. On an approved listing a designation change is part of the pending
 revision like any other change, and follows the same approval path (`OP-10`,
 `FR-ADM-10b`) — the revision lifecycle, `DI-11` and rollback are unchanged
 (`FR-DATA-11c`).

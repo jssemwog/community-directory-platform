@@ -23,7 +23,8 @@
  * `pg_stat_activity` can never itself be the backend that is blocked.
  */
 import { beforeAll, describe, expect, it } from "vitest";
-import { sql } from "kysely";
+import { Kysely, PostgresDialect, sql } from "kysely";
+import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -34,9 +35,16 @@ import {
 
 import { instantOf, type Instant } from "../domain/listing/instant";
 import { listingIdOf } from "../domain/listing/listing-id";
-import type { Listing } from "../domain/listing/listing";
+import type { DesignatableValue, Listing, ListingContent } from "../domain/listing/listing";
 import type { ListingRevision, PendingListingRevision } from "../domain/listing/revision";
-import { createListingPersistence, type ListingPersistence } from "./connection";
+import type { DesignatableField } from "../domain/listing/designation";
+import {
+  createListingPersistence,
+  startupOptionsFor,
+  type ListingPersistence,
+} from "./connection";
+import { createTimestamptzTypeOverrides } from "./timestamp-parser";
+import type { ListingDatabase } from "./listing-table";
 import { insertSubmittedListing } from "./listing-repository";
 import {
   createPendingRevision,
@@ -62,6 +70,8 @@ let rival: ListingPersistence;
 let observer: ListingPersistence;
 /** A database that will store rows the domain cannot represent. */
 let hostile: ListingPersistence;
+/** The same boundary, with every executed statement captured (#207). */
+let capturing: ReturnType<typeof createCapturingPersistence>;
 
 const APPROVED_AT = 1_767_323_045_123;
 
@@ -96,7 +106,19 @@ function approvedListing(overrides: Partial<Listing> = {}): Listing {
   };
 }
 
-/** A proposal prepared against the listing's current version (`ADR-023` item 10). */
+/**
+ * A proposal prepared against the listing's current version (`ADR-023` item 10).
+ *
+ * **Every designatable value is private** (issue #207). `approvedListing()` carries none of the
+ * four, so each of these is an **addition** — and `ADR-025` makes an addition a replacement for
+ * designation purposes, which *"defaults to private and cannot be made public"*. Before `OP-6`
+ * enforced the policy this fixture proposed a **public** `postalCode` and `email`; those two
+ * defaults were only ever accepted because the rule was not yet wired, and correcting them
+ * makes the shared fixture describe a **lawful** proposal rather than weakening a test.
+ *
+ * Refusal cases override these defaults explicitly, so what each one attempts is visible in the
+ * test that attempts it rather than inherited from here.
+ */
 function proposalFor(
   listing: Listing,
   overrides: Partial<PendingListingRevision> = {},
@@ -111,9 +133,9 @@ function proposalFor(
       locality: "Kinsale",
       country: "IE",
       administrativeArea: "Co. Cork",
-      postalCode: { value: "P17 AB12", designatedPublic: true },
+      postalCode: { value: "P17 AB12", designatedPublic: false },
       phone: { value: "+353 21 123 4567", designatedPublic: false },
-      email: { value: "hello@example.ie", designatedPublic: true },
+      email: { value: "hello@example.ie", designatedPublic: false },
       website: { value: "https://example.ie", designatedPublic: false },
     },
     baseListingLastUpdatedAt: listing.timestamps.lastUpdatedAt,
@@ -169,6 +191,103 @@ async function sessionsInTransaction(): Promise<number> {
 
   return rows.rows[0]?.count ?? 0;
 }
+
+/**
+ * The narrow slice of `pg` this file reaches directly, to build a **logging** boundary (#207).
+ *
+ * `pg` ships no type declarations and `@types/pg` is deliberately absent (`ADR-017`), so the
+ * module is described here — the pattern `migrate.ts`, the listing suite and
+ * `revision-approval.integration.test.ts` established.
+ */
+interface PgModule {
+  readonly Pool: new (config: Record<string, unknown>) => PgPool;
+}
+
+/** The three facts this file uses, and nothing more. */
+interface PgPool {
+  on(event: "error", listener: (error: Error) => void): unknown;
+  listenerCount(event: string): number;
+}
+
+const pg = createRequire(import.meta.url)("pg") as PgModule;
+
+interface CapturedStatement {
+  readonly sql: string;
+  readonly parameters: readonly unknown[];
+}
+
+/**
+ * A `C9` boundary identical to the production one, with every executed statement captured.
+ *
+ * **No production change buys this**, and it is the `revision-approval.integration.test.ts`
+ * precedent reused rather than a new mechanism: `createPendingRevision` accepts any
+ * `Kysely<ListingDatabase>`, and Kysely's own `log` option reports each statement it executes as
+ * compiled SQL plus bound parameters. That is how statement *order* — which the lock makes
+ * invisible to behaviour alone — is proved without a fault-injection hook, a source-text
+ * assertion, or any weakening of the lock.
+ *
+ * The pool is configured exactly as `createListingPersistence` configures its own: the governed
+ * `timestamptz` overrides so instants arrive as epoch milliseconds (`ADR-022` decision 9), and
+ * the governed `DateStyle` in the startup packet. Anything less would be testing a different
+ * boundary from the one that runs in production.
+ */
+function createCapturingPersistence(database: string): {
+  readonly db: Kysely<ListingDatabase>;
+  readonly statements: readonly CapturedStatement[];
+  reset(): void;
+  shutdown(): Promise<void>;
+} {
+  const statements: CapturedStatement[] = [];
+
+  const pool = new pg.Pool({
+    connectionString: cluster.connectionStringFor(database),
+    max: 2,
+    types: createTimestamptzTypeOverrides(),
+    options: startupOptionsFor({ application_name: "revision_persistence_capture" }),
+  });
+
+  // The listener issue #201 exists for, attached **immediately** after construction — before any
+  // client can be checked out, become idle, or be terminated by the server. `connection.ts`
+  // attaches the same one on every application pool; this pool is built directly from `pg` and
+  // so would otherwise have none, and an unhandled `EventEmitter` `error` throws. Handled by
+  // doing nothing, exactly as production does.
+  pool.on("error", () => {});
+
+  const db = new Kysely<ListingDatabase>({
+    dialect: new PostgresDialect({ pool: pool as never }),
+    log: (event) => {
+      if (event.level === "query") {
+        statements.push({ sql: event.query.sql, parameters: event.query.parameters });
+      }
+    },
+  });
+
+  return {
+    db,
+    statements,
+    reset: () => {
+      statements.length = 0;
+    },
+    shutdown: () => db.destroy(),
+  };
+}
+
+/** Statements that write, in execution order. `OP-6` may execute exactly one, and only on success. */
+function writesIn(statements: readonly CapturedStatement[]): readonly CapturedStatement[] {
+  return statements.filter((statement) => /^\s*(insert|update|delete)\b/i.test(statement.sql));
+}
+
+/** The index of the first statement matching `pattern`, or `-1`. */
+function indexOfStatement(
+  statements: readonly CapturedStatement[],
+  pattern: RegExp,
+): number {
+  return statements.findIndex((statement) => pattern.test(statement.sql));
+}
+
+const LISTING_LOCK = /^\s*select\b[\s\S]*\bfrom\s+"listing"[\s\S]*\bfor update\b/i;
+const PENDING_READ = /\bfrom\s+"listing_revision"[\s\S]*\bfor update\b/i;
+const REVISION_INSERT = /^\s*insert\s+into\s+"listing_revision"/i;
 
 const LOCK_WAIT_SENTINEL = "no backend ever blocked on a lock";
 
@@ -238,6 +357,12 @@ beforeAll(async () => {
   await sql`alter table listing_revision drop constraint listing_revision_rejected_at_check`.execute(
     hostile.db,
   );
+  // And so that a *listing* the domain cannot represent can be stored, which is the only way to
+  // reach `STORED_LISTING_UNREADABLE` end to end rather than against a hand-built row (#207).
+  await sql`alter table listing drop constraint listing_category_check`.execute(hostile.db);
+
+  capturing = createCapturingPersistence(VERIFIED_DATABASE);
+  cluster.closeBeforeShutdown("capturing persistence", () => capturing.shutdown());
 }, CLUSTER_TIMEOUT_MS);
 
 describe("creating a pending revision (OP-6)", () => {
@@ -1359,6 +1484,77 @@ describe("the ADR-024 protocol, under real concurrency", () => {
   );
 });
 
+describe("ADR-025 enforcement under real concurrency (issue #207)", () => {
+  /**
+   * The one interleaving this unit adds, and the only one it needs.
+   *
+   * Everything else is already proved and is **relied upon rather than duplicated**: create
+   * versus create and `DI-11` under the lock by *interleaving 1*; `PS-11` visibility of a
+   * lock-only participant's committed revision by *interleaving 2*; the stale token after a
+   * lock wait by *interleaving 3*; a missing listing by *interleaving 4*; the `DI-11` backstop
+   * by *interleavings 5 and 6*; an un-approved listing by *interleaving 7*; and lock-first
+   * behaviour by *"holds the listing lock through commit"*. None of them becomes weaker because
+   * a designation check now runs later in the same transaction.
+   *
+   * What none of them can show is **which listing content the policy compared against**, because
+   * before this unit no content was read at all. So: a rival takes the lock and **commits a
+   * designation change without inserting any revision**, while the boundary under test is
+   * already blocked on that lock. The proposal under test is lawful against the rival's
+   * committed content and **unlawful against the content that existed before it** — so the
+   * outcome itself discriminates, with no inspection of internals.
+   */
+  it(
+    "compares against the content a rival committed while the operation waited for the lock",
+    async () => {
+      // Stored private. A proposal to publish this value would be a refused widening.
+      const listing = await seed(listingWith({ phone: at("phone", false) }));
+
+      const trx = await rival.db
+        .startTransaction()
+        .setIsolationLevel("read committed")
+        .execute();
+
+      await trx
+        .selectFrom("listing")
+        .select("id")
+        .where("id", "=", listingText(listing))
+        .forUpdate()
+        .execute();
+
+      // The business publishes its own phone. `last_updated_at` deliberately does **not** move:
+      // this case is about designation, and advancing the token would make the proposal stale
+      // and prove nothing about which content was compared.
+      await sql`
+        update listing
+           set phone_designated_public = true
+         where id = ${listingText(listing)}::uuid
+      `.execute(trx);
+
+      // The proposal keeps that value exactly, public and unchanged — lawful only against the
+      // rival's committed row.
+      const attempt = createPendingRevision(persistence.db, {
+        revisionId: randomUUID(),
+        revision: proposalWith(listing, { phone: at("phone", true) }),
+      });
+
+      // Observable lock state, read from `pg_stat_activity` through the named sentinel — not a
+      // sleep, not a poll of the business outcome.
+      await awaitLockWaiter();
+      await trx.commit().execute();
+
+      const created = await attempt;
+
+      // Pre-lock content would have made this a `DESIGNATION_POLICY_REFUSED` widening of a
+      // private value. It is accepted, so the comparison used the post-lock hydrated row.
+      expect(created.ok, JSON.stringify(created)).toBe(true);
+      expect(await pendingRowCount(listing)).toBe(1);
+      expect(await storedLastUpdatedAt(listing)).toBe(APPROVED_AT);
+      expect(await sessionsInTransaction()).toBe(0);
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+});
+
 describe("the typed database still forbids what this slice did not authorize", () => {
   it("permits no revision update, and no rejected revision insert", () => {
     // The compile-time guards live in `second-schema-migration.test.ts`, where the declaration
@@ -1368,5 +1564,857 @@ describe("the typed database still forbids what this slice did not authorize", (
     // than repository operations.
     expect(typeof createPendingRevision).toBe("function");
     expect(typeof findPendingRevisionByListing).toBe("function");
+  });
+});
+
+/**
+ * `ADR-025` enforcement at `OP-6` (issue #207).
+ *
+ * Every case here drives the **real** boundary against the **real** schema. The policy itself is
+ * proved exhaustively in `src/domain/listing/designation.test.ts`; what these cases prove is the
+ * *integration*: that the rule is reached, that it is handed the **locked, stored** listing
+ * rather than anything the caller supplied, that a refusal happens **before** any write, and
+ * that every pre-existing outcome keeps its place ahead of it.
+ */
+
+/** The four fields `ADR-025` governs, in the order the rule reports them. */
+const DESIGNATABLE: readonly DesignatableField[] = ["postalCode", "phone", "email", "website"];
+
+/** A value for each governed field, so a case can speak about one field without inventing data. */
+const VALUE: Readonly<Record<DesignatableField, string>> = {
+  postalCode: "P17 AB12",
+  phone: "+353 21 123 4567",
+  email: "hello@example.ie",
+  website: "https://example.ie",
+};
+
+/** The listing's required content, so a case varies only the designatable fields. */
+function baseContent(): ListingContent {
+  return {
+    name: "Harbour Bakery",
+    category: "food-drink",
+    description: "A small bakery.",
+    locality: "Kinsale",
+    country: "IE",
+  };
+}
+
+type Designations = Partial<Record<DesignatableField, DesignatableValue>>;
+
+/** A designatable value at the canonical carrier, with the designation a case asks for. */
+function at(field: DesignatableField, designatedPublic: boolean): DesignatableValue {
+  return { value: VALUE[field], designatedPublic };
+}
+
+/** An approved listing whose stored content carries exactly the designations supplied. */
+function listingWith(designations: Designations): Listing {
+  return approvedListing({ content: { ...baseContent(), ...designations } });
+}
+
+/** A proposal against `listing` carrying exactly the designations supplied, and nothing else. */
+function proposalWith(listing: Listing, designations: Designations): PendingListingRevision {
+  return proposalFor(listing, {
+    proposedContent: { ...baseContent(), ...designations },
+  });
+}
+
+/** Create through the production boundary, with a fresh application-supplied identifier. */
+async function create(revision: PendingListingRevision) {
+  return await createPendingRevision(persistence.db, {
+    revisionId: randomUUID(),
+    revision,
+  });
+}
+
+/**
+ * The listing row exactly as stored, so a refusal can be proved to have changed **nothing**.
+ *
+ * `select *` rather than named columns: a case that asserted only the columns it thought of
+ * could not notice a write to one it did not.
+ */
+async function listingRow(listing: Listing): Promise<Record<string, unknown>> {
+  const rows = await sql<Record<string, unknown>>`
+    select * from listing where id = ${listingText(listing)}::uuid
+  `.execute(persistence.db);
+
+  const row = rows.rows[0];
+
+  if (row === undefined) {
+    throw new Error("the seeded listing is missing");
+  }
+
+  return row;
+}
+
+/** The sole stored revision row, or `undefined`. */
+async function revisionRow(listing: Listing): Promise<Record<string, unknown> | undefined> {
+  const rows = await sql<Record<string, unknown>>`
+    select * from listing_revision where listing_id = ${listingText(listing)}::uuid
+  `.execute(persistence.db);
+
+  return rows.rows[0];
+}
+
+describe("OP-6 enforces ADR-025 when the revision is created", () => {
+  describe("proposals ADR-025 permits", () => {
+    it(
+      "accepts a proposal in which all four designatable values are absent and unchanged",
+      async () => {
+        const listing = await seed(listingWith({}));
+
+        const created = await create(proposalWith(listing, {}));
+
+        expect(created.ok, JSON.stringify(created)).toBe(true);
+        expect(await pendingRowCount(listing)).toBe(1);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it(
+      "accepts exact-equal values whose designations are unchanged, public ones included",
+      async () => {
+        // The business's own public designation, carried forward on an unchanged value. The
+        // policy permits it, and nothing here may quietly restrict it either.
+        const designations: Designations = {
+          postalCode: at("postalCode", true),
+          phone: at("phone", false),
+          email: at("email", true),
+          website: at("website", false),
+        };
+        const listing = await seed(listingWith(designations));
+
+        const proposal = proposalWith(listing, designations);
+
+        expect((await create(proposal)).ok).toBe(true);
+
+        const found = await findPendingRevisionByListing(persistence.db, listing.id);
+
+        expect(found.ok).toBe(true);
+
+        if (!found.ok) return;
+
+        expect(found.value.proposedContent).toEqual(proposal.proposedContent);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it.each(DESIGNATABLE)(
+      "accepts restricting an exact-equal public %s to private",
+      async (field) => {
+        const listing = await seed(listingWith({ [field]: at(field, true) }));
+
+        const proposal = proposalWith(listing, { [field]: at(field, false) });
+
+        expect((await create(proposal)).ok).toBe(true);
+
+        const found = await findPendingRevisionByListing(persistence.db, listing.id);
+
+        expect(found.ok).toBe(true);
+
+        if (!found.ok) return;
+
+        expect(found.value.proposedContent[field]).toEqual({
+          value: VALUE[field],
+          designatedPublic: false,
+        });
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it.each(DESIGNATABLE)(
+      "accepts an explicit removal of a public %s",
+      async (field) => {
+        // `ADR-017` makes the proposal a complete set, so an absent value is the caller saying
+        // *remove it* — and a removal publishes nothing, so the policy always permits it.
+        const listing = await seed(listingWith({ [field]: at(field, true) }));
+
+        expect((await create(proposalWith(listing, {}))).ok).toBe(true);
+
+        const found = await findPendingRevisionByListing(persistence.db, listing.id);
+
+        expect(found.ok).toBe(true);
+
+        if (!found.ok) return;
+
+        expect(Object.keys(found.value.proposedContent)).not.toContain(field);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it.each(DESIGNATABLE)(
+      "accepts a private addition of %s",
+      async (field) => {
+        const listing = await seed(listingWith({}));
+
+        expect((await create(proposalWith(listing, { [field]: at(field, false) }))).ok).toBe(true);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it.each(DESIGNATABLE)(
+      "accepts a private replacement of %s",
+      async (field) => {
+        const listing = await seed(listingWith({ [field]: at(field, true) }));
+
+        const replacement: DesignatableValue = { value: "something else", designatedPublic: false };
+
+        expect((await create(proposalWith(listing, { [field]: replacement }))).ok).toBe(true);
+
+        const found = await findPendingRevisionByListing(persistence.db, listing.id);
+
+        expect(found.ok).toBe(true);
+
+        if (!found.ok) return;
+
+        // No inheritance: the replaced value's public designation did not travel with it.
+        expect(found.value.proposedContent[field]).toEqual(replacement);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it(
+      "accepts several valid changes at once — a restriction, a removal, an addition and a replacement",
+      async () => {
+        const listing = await seed(
+          listingWith({
+            postalCode: at("postalCode", true),
+            phone: at("phone", true),
+            website: at("website", true),
+          }),
+        );
+
+        const proposal = proposalWith(listing, {
+          // restricted
+          postalCode: at("postalCode", false),
+          // removed: phone is absent
+          // added
+          email: at("email", false),
+          // replaced
+          website: { value: "https://example.ie/new", designatedPublic: false },
+        });
+
+        expect((await create(proposal)).ok).toBe(true);
+
+        const found = await findPendingRevisionByListing(persistence.db, listing.id);
+
+        expect(found.ok).toBe(true);
+
+        if (!found.ok) return;
+
+        expect(found.value.proposedContent).toEqual(proposal.proposedContent);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it(
+      "stores the accepted proposal exactly as supplied, with the original base token",
+      async () => {
+        const listing = await seed(listingWith({ email: at("email", true) }));
+        const proposal = proposalWith(listing, {
+          email: at("email", true),
+          phone: at("phone", false),
+        });
+
+        expect((await create(proposal)).ok).toBe(true);
+
+        const row = await revisionRow(listing);
+
+        // The carriers are stored verbatim — nothing trimmed, folded, re-spelled or re-cased —
+        // and the captured token is the caller's own, not the value just read under the lock.
+        expect(row?.email).toBe(VALUE.email);
+        expect(row?.email_designated_public).toBe(true);
+        expect(row?.phone).toBe(VALUE.phone);
+        expect(row?.phone_designated_public).toBe(false);
+        expect(row?.base_listing_last_updated_at).toBe(APPROVED_AT);
+
+        const found = await findPendingRevisionByListing(persistence.db, listing.id);
+
+        expect(found.ok).toBe(true);
+
+        if (!found.ok) return;
+
+        expect(found.value).toEqual(proposal);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it(
+      "writes no listing row on the accepted path, and returns the existing success value",
+      async () => {
+        const listing = await seed(listingWith({ phone: at("phone", true) }));
+        const before = await listingRow(listing);
+
+        const created = await create(proposalWith(listing, { phone: at("phone", false) }));
+
+        // `OP-6` changes content, never the effective public version: the success value carries
+        // nothing, no identity escapes the adapter, and the listing row is bit-identical.
+        expect(created).toEqual({ ok: true, value: undefined });
+        expect(await listingRow(listing)).toEqual(before);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+  });
+
+  describe("proposals ADR-025 refuses", () => {
+    it.each(DESIGNATABLE)(
+      "refuses widening an unchanged private %s to public",
+      async (field) => {
+        const listing = await seed(listingWith({ [field]: at(field, false) }));
+
+        const created = await create(proposalWith(listing, { [field]: at(field, true) }));
+
+        expect(created.ok).toBe(false);
+
+        if (created.ok) return;
+
+        expect(created.error).toEqual({
+          code: "DESIGNATION_POLICY_REFUSED",
+          violations: [{ code: "DESIGNATION_WIDENING_REFUSED", field, change: "unchanged" }],
+        });
+        expect(await pendingRowCount(listing)).toBe(0);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it.each(DESIGNATABLE)(
+      "refuses a public addition of %s",
+      async (field) => {
+        const listing = await seed(listingWith({}));
+
+        const created = await create(proposalWith(listing, { [field]: at(field, true) }));
+
+        expect(created.ok).toBe(false);
+
+        if (created.ok) return;
+
+        expect(created.error).toEqual({
+          code: "DESIGNATION_POLICY_REFUSED",
+          violations: [{ code: "DESIGNATION_WIDENING_REFUSED", field, change: "added" }],
+        });
+        expect(await pendingRowCount(listing)).toBe(0);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it.each(DESIGNATABLE)(
+      "refuses a public replacement of %s, with no inheritance from the public original",
+      async (field) => {
+        const listing = await seed(listingWith({ [field]: at(field, true) }));
+
+        const created = await create(
+          proposalWith(listing, { [field]: { value: "different", designatedPublic: true } }),
+        );
+
+        expect(created.ok).toBe(false);
+
+        if (created.ok) return;
+
+        expect(created.error).toEqual({
+          code: "DESIGNATION_POLICY_REFUSED",
+          violations: [{ code: "DESIGNATION_WIDENING_REFUSED", field, change: "replaced" }],
+        });
+        expect(await pendingRowCount(listing)).toBe(0);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it(
+      "returns every violation, in the rule's deterministic field order",
+      async () => {
+        const listing = await seed(
+          listingWith({ postalCode: at("postalCode", false), email: at("email", true) }),
+        );
+
+        const created = await create(
+          proposalWith(listing, {
+            // unchanged private, widened
+            postalCode: at("postalCode", true),
+            // added public
+            phone: at("phone", true),
+            // replaced, asking to stay public
+            email: { value: "other@example.ie", designatedPublic: true },
+            // added public
+            website: at("website", true),
+          }),
+        );
+
+        expect(created.ok).toBe(false);
+
+        if (created.ok) return;
+        if (created.error.code !== "DESIGNATION_POLICY_REFUSED") {
+          throw new Error(`expected a designation refusal, got ${created.error.code}`);
+        }
+
+        // Not merely "all four present": the **order** is the rule's own and is pinned here, so
+        // a reordering in the adapter is a failure rather than a cosmetic difference.
+        expect(created.error.violations).toEqual([
+          { code: "DESIGNATION_WIDENING_REFUSED", field: "postalCode", change: "unchanged" },
+          { code: "DESIGNATION_WIDENING_REFUSED", field: "phone", change: "added" },
+          { code: "DESIGNATION_WIDENING_REFUSED", field: "email", change: "replaced" },
+          { code: "DESIGNATION_WIDENING_REFUSED", field: "website", change: "added" },
+        ]);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it(
+      "refuses the whole proposal when one prohibited field accompanies otherwise valid changes",
+      async () => {
+        const listing = await seed(
+          listingWith({ postalCode: at("postalCode", true), phone: at("phone", false) }),
+        );
+
+        const created = await create(
+          proposalWith(listing, {
+            // valid: restricted
+            postalCode: at("postalCode", false),
+            // valid: private replacement
+            phone: { value: "+353 21 000 0000", designatedPublic: false },
+            // the single offence
+            email: at("email", true),
+          }),
+        );
+
+        expect(created.ok).toBe(false);
+
+        if (created.ok) return;
+
+        // There is **no partial success**: the valid changes are not applied either.
+        expect(created.error).toEqual({
+          code: "DESIGNATION_POLICY_REFUSED",
+          violations: [{ code: "DESIGNATION_WIDENING_REFUSED", field: "email", change: "added" }],
+        });
+        expect(await pendingRowCount(listing)).toBe(0);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it(
+      "writes nothing at all: no revision row, no listing change, no timestamp advance, no coercion",
+      async () => {
+        const listing = await seed(listingWith({ website: at("website", false) }));
+        const before = await listingRow(listing);
+
+        const created = await create(proposalWith(listing, { website: at("website", true) }));
+
+        expect(created.ok).toBe(false);
+        // Not partially written, and not silently privatized and stored: there is no row.
+        expect(await pendingRowCount(listing)).toBe(0);
+        expect(await revisionRow(listing)).toBeUndefined();
+        expect(await listingRow(listing)).toEqual(before);
+        expect(await storedLastUpdatedAt(listing)).toBe(APPROVED_AT);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it(
+      "keeps the refusal distinct from invalid input and from staleness",
+      async () => {
+        const listing = await seed(listingWith({ phone: at("phone", false) }));
+
+        const created = await create(proposalWith(listing, { phone: at("phone", true) }));
+
+        expect(created.ok).toBe(false);
+
+        if (created.ok) return;
+
+        const code: string = created.error.code;
+
+        expect(code).toBe("DESIGNATION_POLICY_REFUSED");
+        expect(code).not.toBe("INVALID_PENDING_REVISION");
+        expect(code).not.toBe("STALE_LISTING_VERSION");
+        // And it carries no value — only the field and what happened to it.
+        expect(JSON.stringify(created.error)).not.toContain(VALUE.phone);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+  });
+
+  describe("no normalization, in the integrated path", () => {
+    /** Carrier differences `ADR-025` refuses to treat as equality. Each is a replacement. */
+    const DIFFERENCES: readonly {
+      readonly label: string;
+      readonly field: DesignatableField;
+      readonly stored: string;
+      readonly proposed: string;
+    }[] = [
+      { label: "whitespace", field: "postalCode", stored: "P17 AB12", proposed: "P17AB12" },
+      { label: "case", field: "postalCode", stored: "P17 AB12", proposed: "p17 ab12" },
+      {
+        label: "phone formatting",
+        field: "phone",
+        stored: "+353 21 123 4567",
+        proposed: "+353211234567",
+      },
+      {
+        label: "email case",
+        field: "email",
+        stored: "hello@example.ie",
+        proposed: "Hello@Example.ie",
+      },
+      {
+        label: "URL spelling",
+        field: "website",
+        stored: "https://example.ie",
+        proposed: "https://example.ie/",
+      },
+    ];
+
+    it.each(DIFFERENCES)(
+      "treats a $label difference as a replacement and refuses it public",
+      async ({ field, stored, proposed }) => {
+        const listing = await seed(
+          listingWith({ [field]: { value: stored, designatedPublic: true } }),
+        );
+
+        const created = await create(
+          proposalWith(listing, { [field]: { value: proposed, designatedPublic: true } }),
+        );
+
+        expect(created.ok).toBe(false);
+
+        if (created.ok) return;
+
+        // `"replaced"`, not `"unchanged"` — which is the whole of the no-normalization rule,
+        // observed through the classification the refusal carries.
+        expect(created.error).toEqual({
+          code: "DESIGNATION_POLICY_REFUSED",
+          violations: [{ code: "DESIGNATION_WIDENING_REFUSED", field, change: "replaced" }],
+        });
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it.each(DIFFERENCES)(
+      "persists a $label difference exactly when it is designated private",
+      async ({ field, stored, proposed }) => {
+        const listing = await seed(
+          listingWith({ [field]: { value: stored, designatedPublic: true } }),
+        );
+
+        expect(
+          (
+            await create(
+              proposalWith(listing, { [field]: { value: proposed, designatedPublic: false } }),
+            )
+          ).ok,
+        ).toBe(true);
+
+        const found = await findPendingRevisionByListing(persistence.db, listing.id);
+
+        expect(found.ok).toBe(true);
+
+        if (!found.ok) return;
+
+        // Stored byte for byte as supplied: the adapter normalizes nothing on the way in either.
+        expect(found.value.proposedContent[field]).toEqual({
+          value: proposed,
+          designatedPublic: false,
+        });
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+  });
+
+  describe("failure precedence — designation never displaces an earlier outcome", () => {
+    /** A proposal that is designation-invalid, so each case below is genuinely ambiguous. */
+    function widening(listing: Listing): PendingListingRevision {
+      return proposalWith(listing, { email: at("email", true) });
+    }
+
+    it(
+      "reports a missing listing rather than the designation refusal",
+      async () => {
+        const absent = listingWith({});
+
+        const created = await create(widening(absent));
+
+        expect(created.ok).toBe(false);
+
+        if (created.ok) return;
+
+        expect(created.error).toEqual({ code: "LISTING_NOT_FOUND" });
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it(
+      "reports an ineligible lifecycle state rather than the designation refusal",
+      async () => {
+        const listing = await seed(
+          approvedListing({
+            content: baseContent(),
+            status: "pending",
+            publication: undefined,
+          }),
+        );
+
+        const created = await create(widening(listing));
+
+        expect(created.ok).toBe(false);
+
+        if (created.ok) return;
+
+        expect(created.error).toEqual({ code: "LISTING_NOT_APPROVED", status: "pending" });
+        expect(await pendingRowCount(listing)).toBe(0);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it(
+      "reports an existing pending revision rather than the designation refusal",
+      async () => {
+        const listing = await seed(listingWith({}));
+
+        expect((await create(proposalWith(listing, {}))).ok).toBe(true);
+
+        const created = await create(widening(listing));
+
+        expect(created.ok).toBe(false);
+
+        if (created.ok) return;
+
+        expect(created.error).toEqual({ code: "PENDING_REVISION_ALREADY_EXISTS" });
+        expect(await pendingRowCount(listing)).toBe(1);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it(
+      "reports a stale base token rather than the designation refusal",
+      async () => {
+        // `ADR-023` requires staleness never be mislabelled. Read the other way: a proposal
+        // prepared against a version that no longer exists is *stale*, whatever else is wrong
+        // with it, because the comparison it would fail was made against the wrong listing.
+        const listing = await seed(listingWith({}));
+        const stale = proposalFor(listing, {
+          proposedContent: { ...baseContent(), email: at("email", true) },
+          baseListingLastUpdatedAt: instant(APPROVED_AT - 1),
+        });
+
+        const created = await create(stale);
+
+        expect(created.ok).toBe(false);
+
+        if (created.ok) return;
+
+        expect(created.error).toEqual({ code: "STALE_LISTING_VERSION" });
+        expect(await pendingRowCount(listing)).toBe(0);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it(
+      "reports unreadable content through the existing pre-transaction validation path",
+      async () => {
+        const listing = await seed(listingWith({}));
+        const malformed = proposalFor(listing, {
+          proposedContent: { ...baseContent(), name: 42 } as unknown as ListingContent,
+        });
+
+        const created = await create(malformed);
+
+        expect(created.ok).toBe(false);
+
+        if (created.ok) return;
+
+        // Refused before a transaction is even opened, and therefore before the policy could
+        // have been asked about content it is not allowed to judge.
+        expect(created.error).toEqual({
+          code: "INVALID_PENDING_REVISION",
+          reason: "unreadable-revision",
+        });
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it(
+      "keeps the existing storage classification when a valid proposal collides on identity",
+      async () => {
+        const listing = await seed(listingWith({}));
+        const revisionId = randomUUID();
+
+        expect(
+          (
+            await createPendingRevision(persistence.db, {
+              revisionId,
+              revision: proposalWith(listing, { phone: at("phone", false) }),
+            })
+          ).ok,
+        ).toBe(true);
+
+        const other = await seed(listingWith({}));
+
+        // Designation-valid, so enforcement succeeds and the failure can only come from the
+        // write itself — which must still be classified exactly as it was before this unit.
+        const created = await createPendingRevision(persistence.db, {
+          revisionId,
+          revision: proposalWith(other, { phone: at("phone", false) }),
+        });
+
+        expect(created.ok).toBe(false);
+
+        if (created.ok) return;
+
+        expect(created.error).toEqual({ code: "REVISION_ALREADY_EXISTS" });
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it(
+      "reports a stored listing the domain cannot represent, safely and as its own outcome",
+      async () => {
+        const listing = approvedListing({ content: baseContent() });
+
+        expect((await insertSubmittedListing(hostile.db, listing)).ok).toBe(true);
+
+        // A category no governed key admits — storable only because this database's `CHECK`
+        // was dropped, which is how a corrupt row reaches hydration at all.
+        await sql`
+          update listing
+             set category = 'not-a-governed-category'
+           where id = ${listingText(listing)}::uuid
+        `.execute(hostile.db);
+
+        const created = await createPendingRevision(hostile.db, {
+          revisionId: randomUUID(),
+          revision: proposalFor(listing, { proposedContent: baseContent() }),
+        });
+
+        expect(created.ok).toBe(false);
+
+        if (created.ok) return;
+
+        // Its own outcome: not "missing", not a caller error, not a storage failure.
+        expect(created.error).toEqual({
+          code: "STORED_LISTING_UNREADABLE",
+          failure: { code: "UNAPPROVED_CATEGORY", column: "category" },
+        });
+
+        // Safe: a code and a column, and nothing of the row, the value, the SQL or the server.
+        const rendered = JSON.stringify(created.error);
+
+        expect(rendered).not.toContain("not-a-governed-category");
+        expect(rendered).not.toContain(CLUSTER_PASSWORD);
+        expect(rendered).not.toContain("select");
+
+        const rows = await sql<{ count: number }>`
+          select count(*)::int as count
+            from listing_revision
+           where listing_id = ${listingText(listing)}::uuid
+        `.execute(hostile.db);
+
+        expect(rows.rows[0]?.count).toBe(0);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+  });
+
+  describe("the statements PostgreSQL actually received", () => {
+    it(
+      "locks the complete listing row first, and inserts exactly once on the accepted path",
+      async () => {
+        const listing = await seed(listingWith({ email: at("email", true) }));
+
+        capturing.reset();
+
+        const created = await createPendingRevision(capturing.db, {
+          revisionId: randomUUID(),
+          revision: proposalWith(listing, { email: at("email", false) }),
+        });
+
+        expect(created.ok, JSON.stringify(created)).toBe(true);
+
+        const statements = [...capturing.statements];
+        const lock = indexOfStatement(statements, LISTING_LOCK);
+        const pending = indexOfStatement(statements, PENDING_READ);
+        const insert = indexOfStatement(statements, REVISION_INSERT);
+
+        // The lock is the first *state* read — nothing but transaction control precedes it.
+        expect(lock).toBeGreaterThanOrEqual(0);
+        expect(
+          statements
+            .slice(0, lock)
+            .every((statement) => /^\s*(begin|set|start)\b/i.test(statement.sql)),
+        ).toBe(true);
+
+        // It now reads the whole row, which is what makes the designation comparison possible.
+        const locked = statements[lock] as CapturedStatement;
+
+        expect(locked.sql).toMatch(/for update/i);
+        // The whole row, not the three columns this statement used to project. `selectAll()`
+        // compiles to `select *`, so the evidence is the projection itself: the designation
+        // columns are in the result set, which is what the policy comparison consumes.
+        expect(locked.sql).toMatch(/^\s*select\s+\*\s+from\s+"listing"/i);
+        expect(locked.sql).not.toContain("last_updated_at");
+
+        // Governed order, unmoved: lock, then the pending read, then the single write.
+        expect(pending).toBeGreaterThan(lock);
+        expect(insert).toBeGreaterThan(pending);
+        expect(writesIn(statements)).toHaveLength(1);
+        expect(writesIn(statements)[0]?.sql).toMatch(REVISION_INSERT);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it(
+      "executes no write at all when the designation policy refuses, and rolls back",
+      async () => {
+        const listing = await seed(listingWith({ website: at("website", false) }));
+
+        capturing.reset();
+
+        const created = await createPendingRevision(capturing.db, {
+          revisionId: randomUUID(),
+          revision: proposalWith(listing, { website: at("website", true) }),
+        });
+
+        expect(created.ok).toBe(false);
+
+        const statements = [...capturing.statements];
+
+        // The decisive statement-level fact: the rule ran after the lock and the pending read,
+        // and **nothing** was prepared or executed that writes.
+        expect(indexOfStatement(statements, LISTING_LOCK)).toBeGreaterThanOrEqual(0);
+        expect(indexOfStatement(statements, PENDING_READ)).toBeGreaterThan(
+          indexOfStatement(statements, LISTING_LOCK),
+        );
+        expect(writesIn(statements)).toHaveLength(0);
+        expect(indexOfStatement(statements, REVISION_INSERT)).toBe(-1);
+        // And the operation ran **once**: `ADR-024` authorizes no retry, so a second attempt
+        // would show here as a second lock even though the returned failure looked identical.
+        expect(statements.filter((statement) => LISTING_LOCK.test(statement.sql))).toHaveLength(1);
+        expect(statements.some((statement) => /^\s*commit\b/i.test(statement.sql))).toBe(false);
+
+        // The listing is untouched, and no session is left holding a transaction open.
+        expect(await pendingRowCount(listing)).toBe(0);
+        expect(await storedLastUpdatedAt(listing)).toBe(APPROVED_AT);
+        expect(await sessionsInTransaction()).toBe(0);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
+
+    it(
+      "writes no listing UPDATE on either path",
+      async () => {
+        const listing = await seed(listingWith({ phone: at("phone", false) }));
+
+        capturing.reset();
+
+        await createPendingRevision(capturing.db, {
+          revisionId: randomUUID(),
+          revision: proposalWith(listing, { phone: at("phone", true) }),
+        });
+        await createPendingRevision(capturing.db, {
+          revisionId: randomUUID(),
+          revision: proposalWith(listing, { phone: at("phone", false) }),
+        });
+
+        expect(
+          capturing.statements.filter((statement) => /^\s*update\s+"listing"/i.test(statement.sql)),
+        ).toHaveLength(0);
+      },
+      CLUSTER_TIMEOUT_MS,
+    );
   });
 });

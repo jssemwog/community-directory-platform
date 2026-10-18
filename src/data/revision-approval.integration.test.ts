@@ -104,7 +104,15 @@ const ORIGINAL_CONTENT: ListingContent = {
   country: "IE",
 };
 
-/** The content the proposal would apply — different in every field that can differ. */
+/**
+ * The content the proposal would apply — different in every field that can differ.
+ *
+ * **Every designatable value is private** (issue #207). `ORIGINAL_CONTENT` carries none of the
+ * four, so each of these is an **addition**, which `ADR-025` makes private and unpublishable.
+ * This fixture proposed a **public** `postalCode` and `email` while `OP-6` did not yet enforce
+ * the policy; now that it does, the proposal must be lawful to be created at all. Nothing else
+ * changed, and no assertion about approval behaviour was weakened.
+ */
 const PROPOSED_CONTENT: ListingContent = {
   name: "Harbour Bakery & Cafe",
   category: "retail-shopping",
@@ -112,9 +120,9 @@ const PROPOSED_CONTENT: ListingContent = {
   locality: "Cobh",
   country: "IE",
   administrativeArea: "Co. Cork",
-  postalCode: { value: "P17 AB12", designatedPublic: true },
+  postalCode: { value: "P17 AB12", designatedPublic: false },
   phone: { value: "+353 21 123 4567", designatedPublic: false },
-  email: { value: "hello@example.ie", designatedPublic: true },
+  email: { value: "hello@example.ie", designatedPublic: false },
   website: { value: "https://example.ie", designatedPublic: false },
 };
 

@@ -25,6 +25,26 @@
  * participant may create a revision while **locking but not modifying** the listing row, so
  * conflict detection must never be assumed from lock acquisition alone.
  *
+ * ## `ADR-025`, enforced here (issue #207)
+ *
+ * `OP-6` **does** enforce the designation policy, as of this unit. The locked listing read is
+ * widened to the complete row and hydrated with the governed mapper, and
+ * `enforceDesignationPolicy` is invoked **once**, with the **authoritative post-lock stored
+ * content** as the current side and the caller's **original** proposed content as the other.
+ * A prohibited widening, public addition or public replacement is refused as
+ * `DESIGNATION_POLICY_REFUSED` **before any persistence mutation**, carrying every offending
+ * field in the rule's own deterministic order.
+ *
+ * **Nothing is normalized and nothing is privatized.** `ADR-025` governs no canonicalization for
+ * these four fields, so an unequal carrier is a replacement however it differs, and a refused
+ * proposal is refused rather than quietly rewritten — `FR-VAL-03`/`FR-CONF-04` and `ADR-023`'s
+ * refusal posture both require the caller be told.
+ *
+ * The rule runs **after** the lifecycle, `DI-11` and stale-token decisions, so none of those
+ * outcomes moves: a stale proposal is stale even when it also widens a designation, which is
+ * `ADR-023`'s requirement that staleness never be mislabelled, read in the other direction.
+ * **`OP-10` does not revalidate the policy** — that is separately sequenced work.
+ *
  * ## What `OP-6` deliberately does not do
  *
  * **No listing write.** `docs/09` is explicit that `OP-6` changes content, never the effective
@@ -69,10 +89,15 @@
 
 import type { Kysely, Transaction } from "kysely";
 
+import {
+  enforceDesignationPolicy,
+  type DesignationViolation,
+} from "../domain/listing/designation";
 import { instantEquals, isInstant, instantOf } from "../domain/listing/instant";
 import type { ListingId } from "../domain/listing/listing-id";
 import { err, ok, type Result } from "../domain/listing/result";
 import { isPendingRevision, type ListingRevision } from "../domain/listing/revision";
+import { hydrateListing, type ListingHydrationFailure } from "./listing-mapping";
 import {
   hydratePendingRevision,
   serializePendingRevision,
@@ -124,6 +149,38 @@ export type CreatePendingRevisionFailure =
    * failure, which this operation cannot reach at all.
    */
   | { readonly code: "STALE_LISTING_VERSION" }
+  /**
+   * `ADR-025` — the proposal would publish a value the policy requires to be private.
+   *
+   * The **complete** violation array the pure rule produced, in its own deterministic field
+   * order, carried intact: `FR-VAL-02`/`VR-5` require the specific fields at fault, and a caller
+   * that widened two of them is told about both. Each entry names a **field** and the **change
+   * classification** that produced the refusal — never a value, so nothing private travels in a
+   * failure.
+   *
+   * **Distinct from every neighbour, by construction.** `ADR-025` requires this refusal stay
+   * separate from malformed content (`INVALID_PENDING_REVISION`), stale input
+   * (`STALE_LISTING_VERSION`), timestamp advancement (unreachable here), lifecycle failure
+   * (`LISTING_NOT_APPROVED`) and storage failure, and the type system holds that apart:
+   * `DesignationViolation` is not assignable to `ValidationViolation` in either direction.
+   *
+   * It is **not** retryable. The proposal is refused, not deferred.
+   */
+  | {
+      readonly code: "DESIGNATION_POLICY_REFUSED";
+      readonly violations: readonly DesignationViolation[];
+    }
+  /**
+   * The locked listing row exists but cannot be represented (`ADR-025` enforcement input).
+   *
+   * **Never reported as not found**, and never as a caller error: the row is present and the
+   * caller supplied nothing wrong — the *stored state* disagrees with the governed model, which
+   * is the louder problem `listing-repository.ts` and `approveAndApplyPendingRevision` already
+   * treat as its own outcome. The carrier is the mapper's own `ListingHydrationFailure`, which
+   * names a **code and a column** and carries no row content, no value, no SQL and no
+   * credential. Nothing retries it.
+   */
+  | { readonly code: "STORED_LISTING_UNREADABLE"; readonly failure: ListingHydrationFailure }
   /** The supplied revision is not a usable pending proposal; refused before any transaction. */
   | {
       readonly code: "INVALID_PENDING_REVISION";
@@ -194,13 +251,6 @@ class PendingRevisionRefused extends Error {
   }
 }
 
-/** The listing columns the `PS-11` lock reads — `ADR-024` step 1, and nothing more. */
-interface LockedListing {
-  readonly id: string;
-  readonly status: string;
-  readonly last_updated_at: number;
-}
-
 /**
  * Whether the supplied value is a usable pending proposal, checked before anything is opened.
  *
@@ -260,14 +310,24 @@ function refusePendingRevision(
   return undefined;
 }
 
-/** `ADR-024` step 1 — the `PS-11` lock, taken first and held through commit. */
-async function lockListing(
-  trx: Transaction<ListingDatabase>,
-  listingId: string,
-): Promise<LockedListing | undefined> {
+/**
+ * `ADR-024` step 1 — the `PS-11` lock, taken first and held through commit.
+ *
+ * **`selectAll`, not three columns** (issue #207). `ADR-025` compares the proposal against *"the
+ * listing's current persisted value"*, so enforcement needs the **complete** stored content, and
+ * the only authority for it is the row this statement locks. Reading it here rather than in a
+ * second query is what makes the comparison unforgeable: there is no window between the lock and
+ * the read in which a rival could change what is compared.
+ *
+ * This is `approveAndApplyPendingRevision`'s `lockListingRow` precedent, for the same reason it
+ * records — *"the domain's operation requires the complete readable aggregate"*. It is still
+ * **one statement**, still the **first state read**, and still `SELECT … FOR UPDATE` on the
+ * listing row, so `ADR-024`'s lock-first ordering is unchanged; only the projection widened.
+ */
+async function lockListing(trx: Transaction<ListingDatabase>, listingId: string) {
   return await trx
     .selectFrom("listing")
-    .select(["id", "status", "last_updated_at"])
+    .selectAll()
     .where("id", "=", listingId)
     .forUpdate()
     .executeTakeFirst();
@@ -378,7 +438,45 @@ export async function createPendingRevision(
           throw new PendingRevisionRefused({ code: "STALE_LISTING_VERSION" } as const);
         }
 
-        // (7) Insert, carrying the ORIGINAL captured token — never the value just read. No
+        // (7) Hydrate the locked listing — the authority `ADR-025` compares against (issue
+        // #207). It happens **here**, after every pre-existing refusal, because only the
+        // designation rule needs it: placing it earlier would add a failure mode to paths that
+        // are already decided, and would move outcomes no part of this unit is authorized to
+        // move. `approveAndApplyPendingRevision` hydrates earlier for the opposite reason — its
+        // domain operation needs the whole aggregate from the start.
+        //
+        // A row that exists but cannot be represented is a different, louder problem than one
+        // that is absent, and it is never a caller error: the proposal is fine, the store is
+        // not.
+        const storedListing = hydrateListing(locked);
+
+        if (!storedListing.ok) {
+          throw new PendingRevisionRefused({
+            code: "STORED_LISTING_UNREADABLE",
+            failure: storedListing.error,
+          } as const);
+        }
+
+        // (8) `ADR-025`, enforced **before any mutation** and exactly once. The current side is
+        // the **locked, stored** listing's content — never the caller's, never a pre-lock read —
+        // and the proposed side is the caller's **original** content, unnormalized and
+        // unmodified. Nothing is coerced to private: a widening is refused, with every offending
+        // field reported in the rule's own deterministic order.
+        const designation = enforceDesignationPolicy(
+          storedListing.value.content,
+          pending.proposedContent,
+        );
+
+        if (!designation.ok) {
+          // Thrown, so the transaction genuinely **rolls back**: no revision row is inserted,
+          // the listing is not written, and no timestamp moves.
+          throw new PendingRevisionRefused({
+            code: "DESIGNATION_POLICY_REFUSED",
+            violations: designation.error,
+          } as const);
+        }
+
+        // (9) Insert, carrying the ORIGINAL captured token — never the value just read. No
         // listing write, no timestamp advance, no recapture, no retry, no external side effect.
         await trx
           .insertInto("listing_revision")
