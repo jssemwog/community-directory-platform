@@ -184,11 +184,21 @@ implementation**:
   complete content sets exactly, classifies each governed field as unchanged,
   removed, added or replaced, and refuses any private→public widening as
   `DESIGNATION_WIDENING_REFUSED`, accumulated per field and kept distinct from
-  `ValidationViolation`. **No production write path calls it**: `OP-6` still does
-  **not** enforce `ADR-025`, and `FR-ADM-04` and `FR-ADM-10b` remain
-  unimplemented. Privacy enforcement is therefore **not live** — see *What does
-  not exist* below. *Outstanding:* the public
-  projection form (a view or a single `C9` query module).
+  `ValidationViolation`. ~~**No production write path calls it**: `OP-6` still does
+  **not** enforce `ADR-025`~~ — **`OP-6` now enforces it** (issue #207):
+  `createPendingRevision` reads the **complete** listing row under the existing
+  `PS-11` lock, hydrates it with the governed mapper, and invokes
+  `enforceDesignationPolicy` **once** against that **authoritative post-lock
+  stored content** and the caller's **original** proposed content, **after** the
+  lifecycle, `DI-11` and stale-token decisions and **before the insert**. A
+  prohibited widening is refused as `DESIGNATION_POLICY_REFUSED`, carrying every
+  offending field in the rule's deterministic order; an unreadable stored listing
+  is its own `STORED_LISTING_UNREADABLE` outcome. **Nothing is normalized and
+  nothing is silently privatized**, and **`OP-10` does not revalidate the policy**
+  — that remains separately sequenced work. `FR-ADM-04` and `FR-ADM-10b` remain
+  **unimplemented**, so privacy enforcement is live on `OP-6` **only**.
+  *Outstanding:* the public projection form (a view or a single `C9` query
+  module).
 - **`DDM-8`** revision storage and the representation of the effective public
   version. ~~*Outstanding:* the isolation level for revision transactions, and
   replacement-value semantics.~~ **Both are now decided** — the isolation level
