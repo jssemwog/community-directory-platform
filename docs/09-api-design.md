@@ -431,6 +431,24 @@ revision like any other change, and follows the same approval path (`OP-10`,
 `FR-ADM-10b`) — the revision lifecycle, `DI-11` and rollback are unchanged
 (`FR-DATA-11c`).
 
+**No-op edits on the pending-record half of `OP-6`** (ungated Product Owner policy
+clarification — issue #213). An otherwise valid administrative edit of a **pending**
+record whose **fully materialized content and designations exactly equal** the record's
+current content **succeeds and returns the current listing unchanged**, which is the
+resulting state `FR-CONF-04` reports. **No-op is determined from the materialized content
+and designations, never from the syntax of the edit**: a busy edit can materialize to a
+no-op, and a small one can be material. It **does not advance `lastUpdatedAt`** and **does
+not inspect or validate the supplied instant**, so an equal, earlier or malformed instant
+**must not** turn a valid no-op into a timestamp failure. **Lifecycle eligibility, edit
+validity and materialization, content validation and `ADR-025` enforcement all precede
+that determination** — **no invalid edit and no attempted widening may be laundered into
+no-op success**. A **material** edit remains subject to `DI-6`: `lastUpdatedAt` advances
+**exactly once** on a **strictly later** instant, and an equal or earlier one is refused
+with the existing advancement failure, **distinct** from stale input and from a
+designation refusal. The clarification settles **behaviour only** — **`FR-ADM-04` and
+`FR-ADM-10b` remain unimplemented**, and **no partial-edit input type, operation or
+transport exists or is authorized by it**.
+
 **The named exception — `FR-ADM-10b`, and it is narrow.** An authorized administrator
 may create and approve a revision within **one atomic authorized operation**. This is a
 path *through* the revision lifecycle, not around it, and it is permitted only on these
@@ -879,6 +897,18 @@ second transition** — it is a no-op that returns the current state. This falls
 of `DI-1` and `DI-2`: a record has exactly one status, and only defined transitions occur.
 A double-click in the moderation queue must not produce two audit entries or two
 last-updated bumps.
+
+**The same posture extends to a content edit that changes nothing** (ungated Product
+Owner policy clarification — issue #213). An otherwise valid `FR-ADM-04` edit of a
+pending record whose **fully materialized content and designations exactly equal** the
+current content is **a no-op that returns the current state** rather than an error, and
+it **advances no last-updated moment** and **does not inspect the supplied instant**.
+Unlike the status case above, this does **not** fall out of `DI-1`/`DI-2` — a content
+edit is not a status transition — so it rests on the ruling, and it is judged from the
+**materialized content**, not from the shape of the edit. It is **not** a licence to
+accept an invalid edit or a prohibited designation widening: both are refused before the
+no-op question is reached. A **material** edit still advances `lastUpdatedAt` exactly
+once under `DI-6`.
 
 ---
 
