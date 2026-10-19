@@ -57,8 +57,11 @@
  *   value is therefore an **explicit removal**, never a patch-style omission. The three-state
  *   partial-edit boundary `ADR-025` requires before `FR-ADM-04` is a later unit's problem, and
  *   nothing here invents it.
- * - It has **no production consumer yet**, and that is deliberate: `ADR-025` sequences this as
- *   step 3 and `OP-6` reconciliation as step 4. **`OP-6` still does not enforce this policy.**
+ * - It is **not** a persistence, transport, normalization or authorization boundary, and gains
+ *   none of those by having a consumer. `ADR-025` sequenced this module as step 3 and `OP-6`
+ *   reconciliation as step 4; **step 4 landed with issue #207 (PR #208)**, so
+ *   `createPendingRevision` now **consumes and enforces** this policy when a pending revision is
+ *   created. `FR-ADM-04` and `FR-ADM-10b` remain **unimplemented** future consumers.
  */
 
 import type { DesignatableValue, ListingContent } from "./listing";
