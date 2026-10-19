@@ -426,7 +426,10 @@ existing `PS-11` lock** — never caller-supplied or pre-lock content — **afte
 `DI-11` and stale-token decisions and **before the insert**, refusing a widening with the
 complete set of offending fields and **writing nothing**. **No normalization and no silent
 privatization** were introduced, and **`OP-10` does not revalidate the policy**; `FR-ADM-04`
-and `FR-ADM-10b` remain **unimplemented**.
+and `FR-ADM-10b` remain **unimplemented**. On an approved listing a designation change is part of the pending
+revision like any other change, and follows the same approval path (`OP-10`,
+`FR-ADM-10b`) — the revision lifecycle, `DI-11` and rollback are unchanged
+(`FR-DATA-11c`).
 
 **No-op edits on the pending-record half of `OP-6`** (ungated Product Owner policy
 clarification — issue #213). An otherwise valid administrative edit of a **pending**
@@ -444,10 +447,7 @@ no-op success**. A **material** edit remains subject to `DI-6`: `lastUpdatedAt` 
 with the existing advancement failure, **distinct** from stale input and from a
 designation refusal. The clarification settles **behaviour only** — **`FR-ADM-04` and
 `FR-ADM-10b` remain unimplemented**, and **no partial-edit input type, operation or
-transport exists or is authorized by it**. On an approved listing a designation change is part of the pending
-revision like any other change, and follows the same approval path (`OP-10`,
-`FR-ADM-10b`) — the revision lifecycle, `DI-11` and rollback are unchanged
-(`FR-DATA-11c`).
+transport exists or is authorized by it**.
 
 **The named exception — `FR-ADM-10b`, and it is narrow.** An authorized administrator
 may create and approve a revision within **one atomic authorized operation**. This is a

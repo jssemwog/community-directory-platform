@@ -446,10 +446,11 @@ never make public**, and that a new or replacement value **defaults to private**
 **That designation rule now exists**: `enforceDesignationPolicy` landed as a pure domain
 operation with issue #206 and is enforced on `OP-6` since issue #207 — the strikethrough
 records that this paragraph was written before either, not that the rule was ever absent
-from `ADR-025`. What `FR-ADM-04` still awaits is its **own** pure-domain administrative-
-edit operation and the **three-state partial-edit input** `ADR-025` §C.4 requires; its
-**no-op outcome is ruled** (ungated Product Owner policy clarification — issue #213), and
-**no such type or operation exists or is authorized**.
+from `ADR-025`. What `FR-ADM-04` still awaits is its **own** pure-domain
+administrative-edit operation and the **three-state partial-edit input** `ADR-025`
+§C.4 requires; its **no-op outcome is ruled** (ungated Product Owner policy
+clarification — issue #213), and **no such type or operation exists or is
+authorized**.
 
 **Only `OP-10` compares a token, and that is deliberate.** `ADR-024` items 6–8 bind the
 comparison to the listing write it guards, so rejection — which *"the listing row is not
