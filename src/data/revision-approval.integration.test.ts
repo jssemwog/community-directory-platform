@@ -32,7 +32,13 @@
  * function.
  */
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { Kysely, PostgresDialect, sql, type ControlledTransaction } from "kysely";
+import {
+  Kysely,
+  PostgresDialect,
+  sql,
+  type CompiledQuery,
+  type ControlledTransaction,
+} from "kysely";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 
@@ -80,6 +86,25 @@ let capturing: ReturnType<typeof createCapturingPersistence>;
 
 /** The rival pool's label, so its own sessions can be counted and named at teardown. */
 const RIVAL_APPLICATION_NAME = "revision_approval_rival";
+
+/**
+ * How long `pg_terminate_backend` may wait for the backend it signalled to actually exit
+ * (issue #211).
+ *
+ * **This is a ceiling, not a delay.** `pg_terminate_backend(pid, timeout)` is PostgreSQL's
+ * documented two-argument form: with a positive `timeout` in milliseconds it waits until the
+ * process has terminated and returns `true`, or gives up at the ceiling and returns `false`
+ * with a `WARNING`. It returns as soon as the backend is gone — measured at ~110ms against the
+ * bundled PostgreSQL 17.10 — so the number below is never spent, and nothing here sleeps.
+ *
+ * **Why it is needed at all.** Defaulted to `0` — which is what the one-argument call this
+ * replaced compiled to — the function only *sends* the signal and returns immediately. The
+ * backend hands its `FATAL` to the client **before** it finishes `proc_exit`, so the pool's
+ * `57P01` event can arrive while the server still reports the `pid` in `pg_stat_activity`. That
+ * is client-side evidence of a server-side transition, and it failed once in CI for exactly
+ * that reason. A positive timeout makes the function's own return the completion boundary.
+ */
+const TERMINATION_WAIT_MS = 5_000;
 
 const APPROVED_AT = 1_767_323_045_123;
 /** Strictly later than `APPROVED_AT`, as `DI-6` requires of an approval. */
@@ -264,6 +289,34 @@ function nextPoolError(pool: PgPool): Promise<Error> {
   return new Promise((resolve) => {
     pool.on("error", resolve);
   });
+}
+
+/**
+ * The shape of a termination statement, read from the **compiled artifact** (issue #211).
+ *
+ * The original race is low frequency and does not reproduce reliably on a fast host, so
+ * "the timeout is still there" cannot be left to a behavioural assertion that may pass either
+ * way. This reads the `CompiledQuery` that is **actually executed** — its SQL text and its
+ * bound parameters — so removing or zeroing the timeout fails deterministically.
+ *
+ * It reads the compiled statement and nothing else: no comment, no source string and no
+ * identifier name reaches it, and `placeholders` is what separates the two-argument call from
+ * the defaulted one-argument call it replaced.
+ */
+function terminationShape(compiled: CompiledQuery): {
+  readonly normalized: string;
+  readonly calls: number;
+  readonly placeholders: number;
+  readonly parameters: readonly unknown[];
+} {
+  const normalized = compiled.sql.replace(/\s+/g, " ").trim();
+
+  return {
+    normalized,
+    calls: (normalized.match(/pg_terminate_backend/g) ?? []).length,
+    placeholders: (normalized.match(/\$\d+/g) ?? []).length,
+    parameters: compiled.parameters,
+  };
 }
 
 /**
@@ -1833,10 +1886,41 @@ describe("the capturing pool's idle-client errors", () => {
 
         // Exactly one backend, named by the pid it reported for itself. This is the only
         // termination in this suite, and it is scoped to a connection this test owns.
-        const ended = await sql<{ terminated: boolean }>`
-          select pg_terminate_backend(${ownedPid}) as terminated
-        `.execute(observer.db);
+        // Compiled first so the statement-level proof below reads the **same artifact** the
+        // server then runs — not a second compilation that could drift from it.
+        const termination = sql<{ terminated: boolean }>`
+          select pg_terminate_backend(${ownedPid}, ${TERMINATION_WAIT_MS}) as terminated
+        `.compile(observer.db);
+        const shape = terminationShape(termination);
 
+        // One call, the two-argument form, the owned pid first and a positive ceiling second.
+        // Both values are **bound parameters**, so nothing is interpolated into SQL text.
+        expect(shape.calls).toBe(1);
+        expect(shape.normalized).toBe("select pg_terminate_backend($1, $2) as terminated");
+        expect(shape.placeholders).toBe(2);
+        expect(shape.parameters).toEqual([ownedPid, TERMINATION_WAIT_MS]);
+        expect(shape.parameters[1]).toBe(5_000);
+        expect(TERMINATION_WAIT_MS).toBeGreaterThan(0);
+
+        // The analyser's **positive control**: the defaulted one-argument call this replaced
+        // must not satisfy the assertions above, or they would pass whatever was written. It is
+        // only ever compiled — never executed — so no second backend is signalled.
+        const defaulted = terminationShape(
+          sql<{ terminated: boolean }>`
+            select pg_terminate_backend(${ownedPid}) as terminated
+          `.compile(observer.db),
+        );
+
+        expect(defaulted.placeholders).toBe(1);
+        expect(defaulted.parameters).toEqual([ownedPid]);
+        expect(defaulted.normalized).not.toBe(shape.normalized);
+
+        const ended = await observer.db.executeQuery(termination);
+
+        // **Now** a completion proof rather than a send receipt: with a positive timeout the
+        // function returns only once the backend has actually terminated. Every assertion
+        // below therefore reads state the server has already finished changing, and the
+        // `pg_stat_activity` check needs no wait of its own.
         expect(ended.rows[0]?.terminated).toBe(true);
 
         // The event reached the pool's own listener — not the process. If the listener were
