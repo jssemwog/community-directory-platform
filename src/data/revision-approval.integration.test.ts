@@ -38,6 +38,7 @@ import {
   sql,
   type CompiledQuery,
   type ControlledTransaction,
+  type QueryResult,
 } from "kysely";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
@@ -245,11 +246,21 @@ async function sessionsInTransaction(): Promise<number> {
   return rows.rows[0]?.count ?? 0;
 }
 
-/** Every live backend on this database, by `pid`. Used to prove *only* an owned one was ended. */
-async function livePids(): Promise<readonly number[]> {
-  const rows = await sql<{ pid: number }>`
+/**
+ * Every live backend on this database, by `pid`. Used to prove *only* an owned one was ended.
+ *
+ * Split into a compiled query and a runner (issue #211) so one test can execute **this exact
+ * statement** through its own tracer and so observe when it ran. There is one source of truth
+ * for the SQL either way.
+ */
+function livePidsQuery(): CompiledQuery<{ pid: number }> {
+  return sql<{ pid: number }>`
     select pid from pg_stat_activity where datname = current_database() and pid is not null
-  `.execute(observer.db);
+  `.compile(observer.db);
+}
+
+async function livePids(): Promise<readonly number[]> {
+  const rows = await observer.db.executeQuery(livePidsQuery());
 
   return rows.rows.map((row) => row.pid);
 }
@@ -316,6 +327,44 @@ function terminationShape(compiled: CompiledQuery): {
     calls: (normalized.match(/pg_terminate_backend/g) ?? []).length,
     placeholders: (normalized.match(/\$\d+/g) ?? []).length,
     parameters: compiled.parameters,
+  };
+}
+
+/**
+ * Execute compiled statements on the observer, recording when each one really started and
+ * finished (issue #211).
+ *
+ * **Why this exists.** Two of this test's guarantees are about *execution*, not about SQL text,
+ * and neither can be read off the compiled artifact: that the terminating statement runs
+ * **exactly once**, and that `pg_stat_activity` is inspected **only after** that statement has
+ * settled. Asserting them on a fast host is worthless — the backend usually disappears within a
+ * millisecond, so an inspection started too early still finds it gone, which is precisely why
+ * the original race survived twenty local runs. Recording the real execution boundaries makes
+ * both properties fail deterministically instead, whatever the host's speed.
+ *
+ * It is a **test-only** observer: it adds no production seam, wraps no production code, and
+ * changes nothing about how the statements are compiled or run. `executeQuery` is Kysely's own
+ * public entry point, and each statement is still executed once, on the same connection as
+ * before.
+ */
+function observerExecutionTrace(): {
+  /** Labels in the order execution actually began and ended, e.g. `terminate:start`. */
+  readonly events: readonly string[];
+  run: <O>(label: string, compiled: CompiledQuery<O>) => Promise<QueryResult<O>>;
+} {
+  const events: string[] = [];
+
+  return {
+    events,
+    run: async <O>(label: string, compiled: CompiledQuery<O>): Promise<QueryResult<O>> => {
+      events.push(`${label}:start`);
+
+      const result = await observer.db.executeQuery(compiled);
+
+      events.push(`${label}:end`);
+
+      return result;
+    },
   };
 }
 
@@ -1915,7 +1964,16 @@ describe("the capturing pool's idle-client errors", () => {
         expect(defaulted.parameters).toEqual([ownedPid]);
         expect(defaulted.normalized).not.toBe(shape.normalized);
 
-        const ended = await observer.db.executeQuery(termination);
+        // The listener must already be attached **before** anything is terminated: the factory
+        // attaches one (issue #201) and `nextPoolError` the second. Registering either of them
+        // after this point would leave the `57P01` with nowhere to go, and this reads the count
+        // rather than trusting the order the lines happen to appear in.
+        expect(owned.pool.listenerCount("error")).toBe(2);
+
+        // Both statements run through one tracer, so the **order they really executed in** is
+        // observable — not inferred from where the lines sit in this function.
+        const trace = observerExecutionTrace();
+        const ended = await trace.run("terminate", termination);
 
         // **Now** a completion proof rather than a send receipt: with a positive timeout the
         // function returns only once the backend has actually terminated. Every assertion
@@ -1932,7 +1990,20 @@ describe("the capturing pool's idle-client errors", () => {
 
         // **Only** the owned backend went. Every other session that was live before is still
         // live, which is what makes "no broad termination" a proof rather than a promise.
-        const after = await livePids();
+        const after = (await trace.run("inspect", livePidsQuery())).rows.map((row) => row.pid);
+
+        // Deterministic ordering: the inspection cannot have begun until the terminating
+        // statement had **settled**. Starting it earlier — the mutation that recreates the
+        // original race class — reorders these events and fails here regardless of host speed.
+        expect(trace.events).toEqual([
+          "terminate:start",
+          "terminate:end",
+          "inspect:start",
+          "inspect:end",
+        ]);
+
+        // And it was terminated **exactly once**: a second execution appends another pair.
+        expect(trace.events.filter((event) => event === "terminate:start")).toHaveLength(1);
 
         expect(after).not.toContain(ownedPid);
         expect(before.filter((pid) => pid !== ownedPid).every((pid) => after.includes(pid))).toBe(
