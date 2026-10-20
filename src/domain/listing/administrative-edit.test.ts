@@ -475,6 +475,14 @@ describe("the module's structural boundary", () => {
     expect(stripped).not.toContain("y`");
   });
 
+  it("the module contains no template literal, so the scanner's weakest path is unreachable", () => {
+    // The scanner's one known limitation, inherited with it: a `}` inside a string inside a
+    // `${…}` interpolation closes the interpolation early, dropping the rest of the template —
+    // which would fail **open** for the denylist above. That path cannot be taken here, and this
+    // pins the reason: the module has no template literal in its executable source at all.
+    expect(executableSource(SOURCE)).not.toContain("`");
+  });
+
   it("the specifier extractor finds every import form it claims to", () => {
     const sample =
       'import x from "./a";\nimport type { Y } from "./b";\nimport "./c";\n' +
@@ -954,6 +962,41 @@ describe("the issue #213 no-op ruling", () => {
     expect(error).toEqual({
       code: "DESIGNATION_POLICY_REFUSED",
       violations: [widening("phone", "unchanged")],
+    });
+  });
+
+  it("a no-op reads nothing from listing.timestamps at all", () => {
+    // Stronger than asserting the moment is unchanged: the bundle is never *touched*, which is
+    // what proves the no-op returns before `withListingContent` rather than after a cheap check.
+    let reads = 0;
+    const listing = pendingListing(FULL);
+    const watched = { ...listing };
+
+    Object.defineProperty(watched, "timestamps", {
+      get() {
+        reads += 1;
+        return listing.timestamps;
+      },
+    });
+
+    const result = applyAdministrativeEdit(watched as Listing, {}, LATER);
+
+    expect(expectOk(result)).toBe(watched);
+    expect(reads).toBe(0);
+  });
+
+  it("a no-op on a record with an unreadable timestamp bundle still succeeds by reference", () => {
+    // The documented consequence of returning before `withListingContent`: the no-op path cannot
+    // report a timestamp defect, because it never looks. The same edit made material does report
+    // it, which is the half that keeps this from being a silent hole.
+    const broken: Listing = {
+      ...pendingListing(FULL),
+      timestamps: undefined as unknown as Listing["timestamps"],
+    };
+
+    expect(expectOk(applyAdministrativeEdit(broken, {}, LATER))).toBe(broken);
+    expect(expectErr(applyAdministrativeEdit(broken, { locality: supply("Clonakilty") }, LATER))).toEqual({
+      code: "LISTING_TIMESTAMPS_MISSING",
     });
   });
 

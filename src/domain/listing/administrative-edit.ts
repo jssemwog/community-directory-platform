@@ -577,6 +577,16 @@ function contentIsUnchanged(current: ListingContent, materialized: ListingConten
  * **The listing's content is assumed readable**, on the same terms `withListingContent` and
  * `enforceDesignationPolicy` already assume it: the readable-content guard belongs to the caller
  * that hydrated the record, and inventing a second one here would duplicate `INVALID_LISTING`.
+ *
+ * **A no-op does not consult the timestamp bundle either, and that is a consequence worth
+ * stating rather than leaving to be discovered.** The instant is reached only through
+ * `withListingContent`, which the no-op path returns before, so a record whose `timestamps`
+ * are absent or unreadable is returned **successfully, by reference** when the edit changes
+ * nothing — the same edit on the material path reports `LISTING_TIMESTAMPS_MISSING`. The
+ * asymmetry is the ruling's, not an oversight: a no-op must not fail on timestamp grounds,
+ * and the operation did not introduce the record's defect. A caller must therefore not read
+ * a successful result as proof that the listing's moments are usable. Both halves are pinned
+ * by test.
  */
 export function applyAdministrativeEdit(
   listing: Listing,
