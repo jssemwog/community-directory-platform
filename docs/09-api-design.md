@@ -445,9 +445,9 @@ that determination** — **no invalid edit and no attempted widening may be laun
 no-op success**. A **material** edit remains subject to `DI-6`: `lastUpdatedAt` advances
 **exactly once** on a **strictly later** instant, and an equal or earlier one is refused
 with the existing advancement failure, **distinct** from stale input and from a
-designation refusal. The clarification settles **behaviour only** — **`FR-ADM-04` and
+designation refusal. ~~The clarification settles **behaviour only** — **`FR-ADM-04` and
 `FR-ADM-10b` remain unimplemented**, and **no partial-edit input type, operation or
-transport exists or is authorized by it**.
+transport exists or is authorized by it**.~~ **The pure-domain operation now exists** (issue #215): `applyAdministrativeEdit` in `src/domain/listing/administrative-edit.ts`, over the three-state partial-edit input `ADR-025` §C.4 requires, implements this ruling exactly — lifecycle → patch validity and materialization → `validateInitialSubmission` → `ADR-025` → no-op → `DI-6`, returning the listing **by exact reference** on a no-op without inspecting the instant. **No persistence path calls it**, so `FR-ADM-04` **persistence**, `FR-ADM-10b`, transport, authorization, messaging, audit, schema, migrations and deployment all remain **unimplemented**.
 
 **The named exception — `FR-ADM-10b`, and it is narrow.** An authorized administrator
 may create and approve a revision within **one atomic authorized operation**. This is a
@@ -908,7 +908,8 @@ edit is not a status transition — so it rests on the ruling, and it is judged 
 **materialized content**, not from the shape of the edit. It is **not** a licence to
 accept an invalid edit or a prohibited designation widening: both are refused before the
 no-op question is reached. A **material** edit still advances `lastUpdatedAt` exactly
-once under `DI-6`.
+once under `DI-6`. **This is implemented as a pure-domain operation since issue #215** —
+`applyAdministrativeEdit`; **no persistence, transport or authorization path reaches it.**
 
 ---
 
