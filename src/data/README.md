@@ -198,7 +198,9 @@ implementation**:
   — that remains separately sequenced work. `FR-ADM-04` and `FR-ADM-10b` remain
   **unimplemented** *as persistence paths*, so privacy enforcement is live on `OP-6`
   **only** — `FR-ADM-04`'s **pure-domain** edit enforces the same policy since issue
-  #215, but no stored write reaches it.
+  #215, ~~but no stored write reaches it~~ **and its stored write reaches it since
+  issue #217**, so enforcement is now live on `OP-6` **and** `FR-ADM-04`.
+  `FR-ADM-10b` remains **unimplemented**.
   *Outstanding:* the public projection form (a view or a single `C9` query
   module).
 - **`DDM-8`** revision storage and the representation of the effective public
@@ -441,7 +443,8 @@ or retry code exists**, and the four governed paths — `OP-6`, `OP-10`, `FR-ADM
 **Three `PS-11` transactions now exist**, each at `READ COMMITTED` set explicitly, each taking
 the listing-row lock **first** and holding it to commit: **`OP-6`** revision creation (issue
 #195), **`OP-10`** approval and application (issue #197) and **revision rejection** (issue
-#199). **`FR-ADM-04`** and **`FR-ADM-10b`** remain **unimplemented**. ~~`FR-ADM-04`
+#199). ~~**`FR-ADM-04`** and **`FR-ADM-10b`** remain **unimplemented**.~~ **`FR-ADM-04` landed with issue #217** as a fourth `PS-11` transaction, on the
+**listing** row of a pending record; **`FR-ADM-10b`** remains **unimplemented**. ~~`FR-ADM-04`
 additionally awaits a pure-domain operation that does not exist — the
 `FR-DATA-11c`/`ADR-017` Q-4 designation rule that an administrator may **restrict but
 never make public**, and that a new or replacement value **defaults to private**.~~
@@ -455,8 +458,12 @@ clarification — issue #213), and **no such type or operation exists or is
 authorized**.~~ **Both landed with issue #215**: `applyAdministrativeEdit` and the
 three-state `PatchField` live in `src/domain/listing/administrative-edit.ts` and
 implement the issue #213 ruling. They are **pure domain**: nothing in `src/data/`
-imports or calls them, **no persistence path exists for `FR-ADM-04`**, and
-`FR-ADM-10b` remains **unimplemented**.
+imports or calls them, ~~**no persistence path exists for `FR-ADM-04`**~~, and
+`FR-ADM-10b` remains **unimplemented**. **The persistence path landed with issue
+#217**: `listing-administrative-edit.ts` is `ADR-024`'s **third** governed write path,
+and the first that edits the **listing row of a pending record** rather than a
+revision. A valid no-op **writes nothing and commits**; a material edit performs
+**one** guarded `UPDATE`. No transport, authorization, messaging or audit exists.
 
 **Only `OP-10` compares a token, and that is deliberate.** `ADR-024` items 6–8 bind the
 comparison to the listing write it guards, so rejection — which *"the listing row is not
