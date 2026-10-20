@@ -41,6 +41,7 @@ import type { AdministrativeEdit } from "../domain/listing/administrative-edit";
 import { instantOf, type Instant } from "../domain/listing/instant";
 import { listingIdOf } from "../domain/listing/listing-id";
 import type { Listing, ListingContent } from "../domain/listing/listing";
+import type { PendingListingRevision } from "../domain/listing/revision";
 import {
   createListingPersistence,
   startupOptionsFor,
@@ -49,6 +50,7 @@ import {
 import { createTimestamptzTypeOverrides } from "./timestamp-parser";
 import type { ListingDatabase } from "./listing-table";
 import { insertSubmittedListing } from "./listing-repository";
+import { createPendingRevision } from "./revision-repository";
 import {
   applyAdministrativeEditToPendingListing,
   type AdministrativeEditPersistenceFailure,
@@ -763,6 +765,38 @@ describe("refusals", () => {
     });
   });
 
+  it("refuses an approved listing with a NORMAL pending revision as a lifecycle error", async () => {
+    // Production-reachable with no hostile state at all: `OP-6` creates exactly this. Reading
+    // the revision before deciding the lifecycle would report it as the loud invariant failure
+    // and assert something false about it, collapsing two of `ADR-024` item 17's kinds.
+    const listing = await seed(SUBMITTED_CONTENT, persistence.db, {
+      status: "approved",
+      publication: { value: "publicly_available" },
+    });
+
+    expect(
+      (
+        await createPendingRevision(persistence.db, {
+          revisionId: randomUUID(),
+          revision: {
+            listingId: listing.id,
+            state: "pending",
+            proposedContent: { ...SUBMITTED_CONTENT, locality: "Cobh" },
+            baseListingLastUpdatedAt: BASE,
+          } as PendingListingRevision,
+        })
+      ).ok,
+    ).toBe(true);
+
+    expect(expectRefusal(await edit(listing, { locality: supply("Cobh") }))).toEqual({
+      code: "LISTING_NOT_PENDING",
+      status: "approved",
+    });
+
+    // The ordinary pending revision is untouched by the refusal.
+    expect(await revisionRowCount(listing)).toBe(1);
+  });
+
   it("refuses a stale token, distinctly from every neighbour, and writes nothing", async () => {
     const listing = await seed();
     const before = await storedRow(listing);
@@ -774,6 +808,23 @@ describe("refusals", () => {
     ).toEqual({ code: "STALE_LISTING_VERSION" });
 
     expect(await storedRow(listing)).toEqual(before);
+  });
+
+  it("decides the lifecycle before the stale token, as the sibling PS-11 paths do", async () => {
+    const listing = await seed();
+
+    // `insertSubmittedListing` stores pending submissions only, so the lifecycle is moved by SQL,
+    // exactly as the non-pending test above does.
+    await sql`update listing set status = 'rejected', rejected_at = to_timestamp(${BASE_AT}::double precision / 1000) where id = ${listingText(listing)}::uuid`.execute(
+      persistence.db,
+    );
+
+    // Both would refuse. The lifecycle one wins, decided from the locked row.
+    expect(
+      expectRefusal(
+        await edit(listing, { locality: supply("Cobh") }, { base: instant(BASE_AT - 1) }),
+      ),
+    ).toEqual({ code: "LISTING_NOT_PENDING", status: "rejected" });
   });
 
   it("refuses a malformed patch", async () => {

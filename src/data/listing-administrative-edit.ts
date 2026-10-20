@@ -46,7 +46,14 @@
  * `INVALID_LIFECYCLE_STATE`, on `ADR-024` item 8's own posture for an unreachable case and on
  * `MULTIPLE_PENDING_REVISIONS`'s precedent that *"the state is invalid, and resolution refuses
  * it"*. The ADR is followed as written, the invariant is enforced rather than assumed, and no new
- * decision was taken. The integration suite proves the branch is live by constructing the state
+ * decision was taken.
+ *
+ * **The lifecycle check runs first, and that ordering is load-bearing.** An *approved* listing
+ * carrying a pending revision is ordinary — `OP-6` creates exactly that — so a revision read
+ * placed ahead of the lifecycle decision would report a caller's wrong-lifecycle mistake as a
+ * loud invariant violation and assert something false about it. Deciding the lifecycle from the
+ * locked row first, as `revision-approval.ts` does and as `ADR-024`'s own projection of `status`
+ * invites, is what leaves the invariant reachable only where it is actually an invariant. The integration suite proves the branch is live by constructing the state
  * in a disposable database that no production path can produce.
  *
  * ## Stale input is this module's, not the domain's
@@ -151,6 +158,11 @@ export type AdministrativeEditPersistenceFailure =
    *
    * Unreachable through any production path (see the module header), and therefore refused
    * **loudly** rather than reported as an ordinary outcome or quietly tolerated.
+   *
+   * **Distinct from `LISTING_NOT_PENDING`, and decided after it.** An *approved* listing with a
+   * pending revision is an entirely ordinary state that `OP-6` creates on purpose; it is simply
+   * not this operation's subject, and it is reported as the lifecycle refusal it is. Only a
+   * *pending* listing can reach this code, which is what makes the claim it carries true.
    */
   | { readonly code: "INVALID_LIFECYCLE_STATE"; readonly detail: string }
   /** `FR-ADM-04` governs editing **before approval**; the domain refused the lifecycle state. */
@@ -347,9 +359,28 @@ export async function applyAdministrativeEditToPendingListing(
           } as const);
         }
 
-        // (4) `ADR-024`'s prescribed post-lock revision read, after the listing lock (item 5) and
-        // itself locked. On a pending listing it finds nothing — see the module header — so this
-        // is the invariant check that proves it, not a lifecycle decision this path can make.
+        // (4) The lifecycle check, decided from the locked row — **before** the revision read.
+        // `revision-approval.ts` reports its own lifecycle here for the same reason ("before a
+        // revision read that would be pointless"), and `ADR-024`'s `FR-ADM-04` projection selects
+        // `status` precisely so it can be decided at this point.
+        //
+        // Ordering it here is what makes step (5)'s invariant **true**. An *approved* listing with
+        // a pending revision is an ordinary, production-reachable state, not a broken one; reading
+        // the revision first would report that caller's wrong-lifecycle mistake as a loud protocol
+        // violation and assert something false about it. `ADR-024` item 17 keeps *invalid lifecycle
+        // state* and an integrity fault apart, and this is where that separation is made.
+        //
+        // The domain enforces the same rule again at step (7); this is not a substitute for it.
+        if (listingRow.status !== "pending") {
+          throw new AdministrativeEditRefused({
+            code: "LISTING_NOT_PENDING",
+            status: listingRow.status,
+          } as const);
+        }
+
+        // (5) `ADR-024`'s prescribed post-lock revision read, after the listing lock (item 5) and
+        // itself locked. Reached only for a **pending** listing, where it finds nothing — see the
+        // module header — so this is the invariant check that proves it.
         const pendingRevisions = await trx
           .selectFrom("listing_revision")
           .select("id")
@@ -365,7 +396,7 @@ export async function applyAdministrativeEditToPendingListing(
           } as const);
         }
 
-        // (5) The stale check, **before any mutation** (`ADR-023` item 12, `ADR-024` item 6). The
+        // (6) The stale check, **before any mutation** (`ADR-023` item 12, `ADR-024` item 6). The
         // token is the **caller's original** capture — never recaptured from the row being
         // compared — against the locked listing's current version, by exact epoch-millisecond
         // equality on the same `Instant` carrier, so the comparison cannot drift between
@@ -385,7 +416,7 @@ export async function applyAdministrativeEditToPendingListing(
           throw new AdministrativeEditRefused({ code: "STALE_LISTING_VERSION" } as const);
         }
 
-        // (6) The merged **pure** domain operation, unchanged and unassisted. Lifecycle, patch
+        // (7) The merged **pure** domain operation, unchanged and unassisted. Lifecycle, patch
         // validity, `VR-S1` validation, `ADR-025` enforcement, the no-op ruling and `DI-6` are
         // all decided there, in that order. Nothing above or below re-implements any of them.
         const result = applyAdministrativeEdit(listing.value, edit, at);
@@ -394,7 +425,7 @@ export async function applyAdministrativeEditToPendingListing(
           throw new AdministrativeEditRefused(editFailureFrom(result.error));
         }
 
-        // (7) The ruling, read through the contract the domain actually offers: it returns the
+        // (8) The ruling, read through the contract the domain actually offers: it returns the
         // **exact object** it was handed when the materialized content equals the current
         // content. Reference identity is therefore the whole test — re-comparing content here
         // would duplicate the ruling in adapter code and could disagree with it.
@@ -406,7 +437,7 @@ export async function applyAdministrativeEditToPendingListing(
           return result.value;
         }
 
-        // (8) The guarded update — the **original** caller token in the predicate, never a
+        // (9) The guarded update — the **original** caller token in the predicate, never a
         // refreshed one and never the edit instant, and only the columns the domain changed.
         const update = await trx
           .updateTable("listing")
@@ -425,7 +456,7 @@ export async function applyAdministrativeEditToPendingListing(
 
         const updatedRows = Number(update.numUpdatedRows);
 
-        // (9) Exactly one row. Zero — after the lock was held and the comparison succeeded — is a
+        // (10) Exactly one row. Zero — after the lock was held and the comparison succeeded — is a
         // loud protocol failure and never stale input, which the comparison already ruled out.
         if (updatedRows === 0) {
           throw new AdministrativeEditRefused({
@@ -441,7 +472,7 @@ export async function applyAdministrativeEditToPendingListing(
           } as const);
         }
 
-        // (10) Commit. The edited listing is the domain's own value, not a re-read.
+        // (11) Commit. The edited listing is the domain's own value, not a re-read.
         return result.value;
       });
 
