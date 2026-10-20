@@ -196,7 +196,9 @@ implementation**:
   is its own `STORED_LISTING_UNREADABLE` outcome. **Nothing is normalized and
   nothing is silently privatized**, and **`OP-10` does not revalidate the policy**
   — that remains separately sequenced work. `FR-ADM-04` and `FR-ADM-10b` remain
-  **unimplemented**, so privacy enforcement is live on `OP-6` **only**.
+  **unimplemented** *as persistence paths*, so privacy enforcement is live on `OP-6`
+  **only** — `FR-ADM-04`'s **pure-domain** edit enforces the same policy since issue
+  #215, but no stored write reaches it.
   *Outstanding:* the public projection form (a view or a single `C9` query
   module).
 - **`DDM-8`** revision storage and the representation of the effective public
@@ -446,11 +448,15 @@ never make public**, and that a new or replacement value **defaults to private**
 **That designation rule now exists**: `enforceDesignationPolicy` landed as a pure domain
 operation with issue #206 and is enforced on `OP-6` since issue #207 — the strikethrough
 records that this paragraph was written before either, not that the rule was ever absent
-from `ADR-025`. What `FR-ADM-04` still awaits is its **own** pure-domain
+from `ADR-025`. ~~What `FR-ADM-04` still awaits is its **own** pure-domain
 administrative-edit operation and the **three-state partial-edit input** `ADR-025`
 §C.4 requires; its **no-op outcome is ruled** (ungated Product Owner policy
 clarification — issue #213), and **no such type or operation exists or is
-authorized**.
+authorized**.~~ **Both landed with issue #215**: `applyAdministrativeEdit` and the
+three-state `PatchField` live in `src/domain/listing/administrative-edit.ts` and
+implement the issue #213 ruling. They are **pure domain**: nothing in `src/data/`
+imports or calls them, **no persistence path exists for `FR-ADM-04`**, and
+`FR-ADM-10b` remains **unimplemented**.
 
 **Only `OP-10` compares a token, and that is deliberate.** `ADR-024` items 6–8 bind the
 comparison to the listing write it guards, so rejection — which *"the listing row is not
