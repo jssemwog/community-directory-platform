@@ -200,7 +200,10 @@ implementation**:
   **only** — `FR-ADM-04`'s **pure-domain** edit enforces the same policy since issue
   #215, ~~but no stored write reaches it~~ **and its stored write reaches it since
   issue #217**, so enforcement is now live on `OP-6` **and** `FR-ADM-04`.
-  `FR-ADM-10b` remains **unimplemented**.
+  ~~`FR-ADM-10b` remains **unimplemented**.~~ **`FR-ADM-10b` landed with issue
+  #219** and enforces the same policy once, against the authoritative post-lock
+  stored content, before its transient revision insert — so privacy enforcement
+  is now live on `OP-6`, `FR-ADM-04` **and** `FR-ADM-10b`.
   *Outstanding:* the public projection form (a view or a single `C9` query
   module).
 - **`DDM-8`** revision storage and the representation of the effective public
@@ -444,7 +447,10 @@ or retry code exists**, and the four governed paths — `OP-6`, `OP-10`, `FR-ADM
 the listing-row lock **first** and holding it to commit: **`OP-6`** revision creation (issue
 #195), **`OP-10`** approval and application (issue #197) and **revision rejection** (issue
 #199). ~~**`FR-ADM-04`** and **`FR-ADM-10b`** remain **unimplemented**.~~ **`FR-ADM-04` landed with issue #217** as a fourth `PS-11` transaction, on the
-**listing** row of a pending record; **`FR-ADM-10b`** remains **unimplemented**. ~~`FR-ADM-04`
+**listing** row of a pending record; ~~**`FR-ADM-10b`** remains **unimplemented**~~ **and
+`FR-ADM-10b` landed with issue #219**, which is the **fifth** such transaction here and
+`ADR-024`'s **fourth and last** named path — rejection is a `PS-11` transaction but not one of the
+four paths that ADR enumerates, which is the whole of the difference between the two counts. ~~`FR-ADM-04`
 additionally awaits a pure-domain operation that does not exist — the
 `FR-DATA-11c`/`ADR-017` Q-4 designation rule that an administrator may **restrict but
 never make public**, and that a new or replacement value **defaults to private**.~~
@@ -464,6 +470,8 @@ imports or calls them, ~~**no persistence path exists for `FR-ADM-04`**~~, and
 and the first that edits the **listing row of a pending record** rather than a
 revision. A valid no-op **writes nothing and commits**; a material edit performs
 **one** guarded `UPDATE`. No transport, authorization, messaging or audit exists.
+
+**`FR-ADM-10b` landed with issue #219** as `ADR-024`'s **fourth and last** governed `PS-11` write path: `createAndApproveRevisionAtomically` in `src/data/revision-atomic-approval.ts` creates, validates, approves, applies and removes a **transient** pending revision inside **one** transaction (`ADR-017` Q-3) — explicit `READ COMMITTED`, the complete listing `SELECT … FOR UPDATE` first and held to commit, the post-lock locked pending read that decides the issue #137 refusal **under the lock**, exact comparison with the caller's **original** `ADR-023` token, `enforceDesignationPolicy` and the merged pure-domain `admitPendingRevision` and `approvePendingRevision` as the sole content authorities, then **one** `INSERT`, **one** guarded `UPDATE` carrying that same token and **one** `DELETE`, each with its affected-row count checked. The proposal is **complete replacement content**, never `FR-ADM-04`'s three-state patch; an **equal-content** proposal is an ordinary revision that **advances `last_updated_at`**, because the issue #213 no-op ruling governs `FR-ADM-04` only. **Revision identity stays adapter-private** — supplied under `ADR-019`, never in the domain, never returned, no `RETURNING` — so `DDM-2` remains open. **No retry is performed**, and **schema and migrations are unchanged**. **Transport, authorization, administrator confirmation and conflict messaging, and audit storage do not exist**, and rejected-history retrieval and retention/purge remain deferred.
 
 **Only `OP-10` compares a token, and that is deliberate.** `ADR-024` items 6–8 bind the
 comparison to the listing write it guards, so rejection — which *"the listing row is not

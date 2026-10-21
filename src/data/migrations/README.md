@@ -49,7 +49,9 @@ refresh the captured token `ADR-023` forbids refreshing.
 outcome — a **stale proposal is rejectable**. **Still absent:** **no API
 transport, no administrator message, no authorization, no audit storage, no
 rejection reason column, no rejected-history retrieval and no purge scheduling
-or execution**, and **`FR-ADM-04`/`FR-ADM-10b` are unimplemented**. **No
+or execution**, and ~~**`FR-ADM-04`/`FR-ADM-10b` are unimplemented**~~ **`FR-ADM-04`
+(issue #217) and `FR-ADM-10b` (issue #219) are now implemented — both against this
+schema exactly as it stands, adding and altering nothing**. **No
 migration was added, altered or re-run by any of the three** — both migrations
 remain exactly as authored. ~~and **no `pg` timestamp
 parser** (`ADR-022` requires one, explicitly and tested, before persistence
