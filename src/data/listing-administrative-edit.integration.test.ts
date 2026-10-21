@@ -467,22 +467,75 @@ async function withRivalLock(
   }
 }
 
-/** Test-only triggers share one prefix, so the unconditional sweep can find every one. */
+/** Test-only triggers and their functions share one prefix, so the sweep can find every one. */
 const TRIGGER_PREFIX = "admin_edit_probe_";
 
+/**
+ * How long the cleanup sweep may wait for a lock before failing (issue #221).
+ *
+ * **A safety ceiling, not a delay and not an oracle.** When the helpers release correctly it
+ * never fires, and no assertion anywhere depends on a duration. When something does leak,
+ * PostgreSQL raises `55P03` at this bound and cleanup fails **loudly**, naming the leak instead
+ * of hiding it. The two sibling `PS-11` suites use the same constant for the same reason
+ * (issue #201).
+ */
+const CLEANUP_LOCK_TIMEOUT = "5s";
+
+/**
+ * Remove every object this suite created, inside **one bounded transaction**.
+ *
+ * ## Why the transaction is the correction, not decoration (issue #221)
+ *
+ * `lock_timeout` is set with `SET LOCAL`, which applies to **the current transaction**. Issued
+ * through a pooled connection in **autocommit** — as this helper did when it arrived with issue
+ * #217 — it is discarded with the very statement that set it, and every statement after it runs
+ * at the server default of `0`, meaning **unbounded**. The comment claiming a bound was then the
+ * only bounded thing about it.
+ *
+ * That was measured rather than assumed, against the bundled PostgreSQL 17.10: `show
+ * lock_timeout` reports `0` on the next statement in autocommit and `5s` inside a transaction,
+ * and with a rival holding a `listing` row lock the unbounded `DROP TRIGGER` was observed
+ * **waiting on a `Lock`** in `pg_stat_activity` until it was cancelled — it never timed out,
+ * because nothing bounded it.
+ *
+ * **Why that matters here.** `DROP TRIGGER` needs `ACCESS EXCLUSIVE` on `listing`, the row every
+ * `PS-11` participant in this file locks, and this sweep runs in `afterEach`. So a leaked rival
+ * transaction turned cleanup into an indefinite block, burying the real assertion failure under a
+ * hook timeout and risking a cluster that teardown never reached. Bounded, the same leak fails
+ * conspicuously and names itself.
+ *
+ * **Both families, unconditionally.** Triggers and their `…_fn()` functions are swept by prefix,
+ * so nothing depends on the test that created them reaching its own `finally`, and **no cleanup
+ * statement runs outside the bound**. PostgreSQL DDL is transactional, so the sweep is also
+ * all-or-nothing.
+ */
 async function dropProbeTriggers(db: Kysely<ListingDatabase>): Promise<void> {
-  // Bounded, so a leaked lock makes cleanup fail loudly instead of hanging the run.
-  await sql`set local lock_timeout = '5s'`.execute(db);
+  await db.transaction().execute(async (trx) => {
+    // First statement in the transaction, so it governs every statement below.
+    await sql.raw(`set local lock_timeout = '${CLEANUP_LOCK_TIMEOUT}'`).execute(trx);
 
-  const triggers = await sql<{ tgname: string; relname: string }>`
-    select t.tgname, c.relname
-      from pg_trigger t join pg_class c on c.oid = t.tgrelid
-     where not t.tgisinternal and t.tgname like ${`${TRIGGER_PREFIX}%`}
-  `.execute(db);
+    const triggers = await sql<{ tgname: string; relname: string }>`
+      select t.tgname, c.relname
+        from pg_trigger t join pg_class c on c.oid = t.tgrelid
+       where not t.tgisinternal and t.tgname like ${`${TRIGGER_PREFIX}%`}
+    `.execute(trx);
 
-  for (const trigger of triggers.rows) {
-    await sql.raw(`drop trigger if exists "${trigger.tgname}" on "${trigger.relname}"`).execute(db);
-  }
+    for (const trigger of triggers.rows) {
+      await sql
+        .raw(`drop trigger if exists "${trigger.tgname}" on "${trigger.relname}"`)
+        .execute(trx);
+    }
+
+    const functions = await sql<{ proname: string }>`
+      select p.proname from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public' and p.proname like ${`${TRIGGER_PREFIX}%`}
+    `.execute(trx);
+
+    for (const routine of functions.rows) {
+      await sql.raw(`drop function if exists "${routine.proname}"()`).execute(trx);
+    }
+  });
 }
 
 beforeAll(async () => {
@@ -1299,8 +1352,8 @@ describe("outcomes the protocol says are unreachable", () => {
       expect(failure.code).toBe("GUARDED_UPDATE_PROTOCOL_FAILURE");
       expect(await storedRow(listing)).toEqual(before);
     } finally {
+      // The sweep drops the trigger **and** its function, inside its bounded transaction.
       await dropProbeTriggers(persistence.db);
-      await sql.raw(`drop function if exists ${trigger}_fn()`).execute(persistence.db);
     }
   });
 
@@ -1326,8 +1379,8 @@ describe("outcomes the protocol says are unreachable", () => {
       expect(failure).toMatchObject({ sqlState: "23514" });
       expect(await storedRow(listing)).toEqual(before);
     } finally {
+      // The sweep drops the trigger **and** its function, inside its bounded transaction.
       await dropProbeTriggers(persistence.db);
-      await sql.raw(`drop function if exists ${trigger}_fn()`).execute(persistence.db);
     }
   });
 });
@@ -1445,4 +1498,183 @@ describe("the PS-11 lock, under contention", () => {
 
     expect(await sessionsInTransaction()).toBe(0);
   });
+});
+
+/* ------------------------------------------------------------------------------------------- */
+/* The cleanup sweep's own bound (issue #221)                                                    */
+/* ------------------------------------------------------------------------------------------- */
+
+/**
+ * Proof for the correction itself, not for the operation under test.
+ *
+ * Every case below is bounded and decides on a fact the server publishes. **Nothing here proves
+ * anything by hanging**, and the `5s` constant is never treated as an oracle: the only test that
+ * waits for it asserts the `SQLSTATE` PostgreSQL raises, not an elapsed time.
+ */
+describe("the cleanup sweep is bounded where it matters", () => {
+  /** A probe trigger and its function, created exactly as the fault-injection tests create them. */
+  async function createProbeObjects(name: string): Promise<void> {
+    await sql
+      .raw(
+        `create or replace function ${name}_fn() returns trigger as $$ begin return null; end; $$ language plpgsql`,
+      )
+      .execute(persistence.db);
+    await sql
+      .raw(
+        `create trigger "${name}" before update on "listing" for each row execute function ${name}_fn()`,
+      )
+      .execute(persistence.db);
+  }
+
+  async function probeObjectCounts(): Promise<{ triggers: number; functions: number }> {
+    const triggers = await sql<{ count: number }>`
+      select count(*)::int as count from pg_trigger
+       where not tgisinternal and tgname like ${`${TRIGGER_PREFIX}%`}
+    `.execute(persistence.db);
+    const functions = await sql<{ count: number }>`
+      select count(*)::int as count from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public' and p.proname like ${`${TRIGGER_PREFIX}%`}
+    `.execute(persistence.db);
+
+    return {
+      triggers: triggers.rows[0]?.count ?? 0,
+      functions: functions.rows[0]?.count ?? 0,
+    };
+  }
+
+  it("runs SET LOCAL and every cleanup statement inside one transaction", async () => {
+    // Something to drop, created **before** the capture starts and through a different pool, so
+    // the trace below is guaranteed to contain real `DROP`s. Without this the sweep would find an
+    // empty catalogue, emit no `DROP` at all, and the placement assertion over them would hold
+    // vacuously — proving only where the discovery reads ran.
+    await createProbeObjects(`${TRIGGER_PREFIX}capture_placement`);
+
+    capturing.reset();
+    await dropProbeTriggers(capturing.db);
+
+    const sqls = capturing.statements.map((statement) => statement.sql.trim().toLowerCase());
+    const begin = sqls.findIndex((statement) => statement.startsWith("begin"));
+    const bound = sqls.findIndex((statement) => statement.includes("set local lock_timeout"));
+    const settle = sqls.findIndex(
+      (statement) => statement.startsWith("commit") || statement.startsWith("rollback"),
+    );
+
+    // A transaction exists, the bound is its first statement, and it settles.
+    expect(begin).toBeGreaterThanOrEqual(0);
+    expect(bound).toBe(begin + 1);
+    expect(settle).toBeGreaterThan(bound);
+
+    // And it is the **transaction-local** form. A bare `set lock_timeout` would bound this sweep
+    // too, but would leave the setting on the pooled connection for every later test — a session
+    // leak masquerading as a fix, which this assertion refuses.
+    expect(sqls[bound]).toMatch(/^set local lock_timeout = '5s'$/);
+
+    // Every catalogue read and every DROP sits between the bound and the settlement — so no
+    // cleanup statement can run unbounded, and none runs after the transaction ends.
+    const cleanup = sqls
+      .map((statement, index) => ({ statement, index }))
+      .filter(
+        ({ statement }) =>
+          statement.startsWith("drop ") ||
+          statement.includes("pg_trigger") ||
+          statement.includes("pg_proc"),
+      );
+
+    expect(cleanup.length).toBeGreaterThan(0);
+
+    // At least the trigger and its function were actually dropped, so the placement check below
+    // is load-bearing for `DROP` statements and not only for the catalogue reads.
+    expect(sqls.filter((statement) => statement.startsWith("drop "))).toHaveLength(2);
+
+    for (const { index } of cleanup) {
+      expect(index).toBeGreaterThan(bound);
+      expect(index).toBeLessThan(settle);
+    }
+  });
+
+  it("makes the bound effective, which it is not in autocommit", async () => {
+    // The defect, still demonstrable: `SET LOCAL` outside a transaction is discarded with its own
+    // statement, so the next one runs at the server default.
+    await sql`set local lock_timeout = ${sql.raw(`'${CLEANUP_LOCK_TIMEOUT}'`)}`.execute(
+      persistence.db,
+    );
+
+    const autocommit = await sql<{ lock_timeout: string }>`show lock_timeout`.execute(
+      persistence.db,
+    );
+
+    expect(autocommit.rows[0]?.lock_timeout).toBe("0");
+
+    // The correction: inside the transaction the sweep opens, the same statement governs.
+    const inside = await persistence.db.transaction().execute(async (trx) => {
+      await sql.raw(`set local lock_timeout = '${CLEANUP_LOCK_TIMEOUT}'`).execute(trx);
+
+      const observed = await sql<{ lock_timeout: string }>`show lock_timeout`.execute(trx);
+
+      return observed.rows[0]?.lock_timeout;
+    });
+
+    // Pinned to the **literal** authorized bound, not to the constant: comparing the observation
+    // against the same constant the sweep used would make any mutation of that constant
+    // self-consistent, and `'0'` — unbounded — would pass.
+    expect(CLEANUP_LOCK_TIMEOUT).toBe("5s");
+    expect(inside).toBe("5s");
+  });
+
+  it("sweeps the trigger and its function together, leaving nothing behind", async () => {
+    await createProbeObjects(`${TRIGGER_PREFIX}sweep_coverage`);
+
+    const before = await probeObjectCounts();
+
+    expect(before.triggers).toBeGreaterThanOrEqual(1);
+    expect(before.functions).toBeGreaterThanOrEqual(1);
+
+    await dropProbeTriggers(persistence.db);
+
+    expect(await probeObjectCounts()).toEqual({ triggers: 0, functions: 0 });
+  });
+
+  /**
+   * An **outer safety limit**, six times the bound under test — not the oracle.
+   *
+   * The assertion is on the `SQLSTATE` PostgreSQL raises when `lock_timeout` elapses; this
+   * ceiling exists only so that a regression which reintroduces the unbounded wait fails the run
+   * instead of hanging it. Hitting it is never evidence of correctness.
+   */
+  const BOUNDED_FAILURE_CEILING_MS = 30_000;
+
+  it("fails loudly at the bound when a lock is held, instead of waiting forever", async () => {
+    const listing = await seed();
+
+    await createProbeObjects(`${TRIGGER_PREFIX}bounded_failure`);
+
+    let failure: unknown;
+
+    await withRivalLock(listing, async (trx) => {
+      // `DROP TRIGGER` needs `ACCESS EXCLUSIVE` on `listing`, which this row lock blocks. With the
+      // bound in force the sweep gives up and **reports**; unbounded it would wait indefinitely,
+      // which is what issue #221 measured before this correction.
+      failure = await dropProbeTriggers(persistence.db).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      await trx.rollback().execute();
+    });
+
+    // `55P03` is `lock_not_available` — PostgreSQL's own report that `lock_timeout` elapsed. The
+    // assertion is on the `SQLSTATE`, never on how long anything took.
+    expect((failure as { readonly code?: unknown } | undefined)?.code).toBe("55P03");
+
+    // Not swallowed: the helper rejected rather than resolving quietly.
+    expect(failure).toBeInstanceOf(Error);
+
+    // And the failed sweep left the transaction settled, with nothing checked out.
+    expect(await sessionsInTransaction()).toBe(0);
+
+    // The objects it could not drop are still there — the unconditional `afterEach` sweep removes
+    // them now that the lock is gone, which is also what makes this test self-cleaning.
+    expect((await probeObjectCounts()).triggers).toBeGreaterThanOrEqual(1);
+  }, BOUNDED_FAILURE_CEILING_MS);
 });
