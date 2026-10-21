@@ -572,28 +572,38 @@ async function withRivalLock(
 const TRIGGER_PREFIX = "atomic_probe_";
 
 async function dropProbeTriggers(db: Kysely<ListingDatabase>): Promise<void> {
-  // Bounded, so a leaked lock makes cleanup fail loudly instead of hanging the run.
-  await sql`set local lock_timeout = '5s'`.execute(db);
+  // **Inside one transaction, deliberately.** `SET LOCAL` applies to the current transaction, so
+  // issued in autocommit it governs only its own statement and the `DROP`s that follow would run
+  // unbounded — proved rather than assumed: a probe showed `show lock_timeout` back at `0` on the
+  // next statement outside a transaction, and at `5s` inside one. A `DROP TRIGGER` needs
+  // `ACCESS EXCLUSIVE`, so an unbounded sweep behind a leaked row lock would hang the run and bury
+  // the real failure; bounded, it fails loudly instead. PostgreSQL DDL is transactional, so the
+  // whole sweep is also all-or-nothing.
+  await db.transaction().execute(async (trx) => {
+    await sql`set local lock_timeout = '5s'`.execute(trx);
 
-  const triggers = await sql<{ tgname: string; relname: string }>`
-    select t.tgname, c.relname
-      from pg_trigger t join pg_class c on c.oid = t.tgrelid
-     where not t.tgisinternal and t.tgname like ${`${TRIGGER_PREFIX}%`}
-  `.execute(db);
+    const triggers = await sql<{ tgname: string; relname: string }>`
+      select t.tgname, c.relname
+        from pg_trigger t join pg_class c on c.oid = t.tgrelid
+       where not t.tgisinternal and t.tgname like ${`${TRIGGER_PREFIX}%`}
+    `.execute(trx);
 
-  for (const trigger of triggers.rows) {
-    await sql.raw(`drop trigger if exists "${trigger.tgname}" on "${trigger.relname}"`).execute(db);
-  }
+    for (const trigger of triggers.rows) {
+      await sql
+        .raw(`drop trigger if exists "${trigger.tgname}" on "${trigger.relname}"`)
+        .execute(trx);
+    }
 
-  const functions = await sql<{ proname: string }>`
-    select p.proname from pg_proc p
-      join pg_namespace n on n.oid = p.pronamespace
-     where n.nspname = 'public' and p.proname like ${`${TRIGGER_PREFIX}%`}
-  `.execute(db);
+    const functions = await sql<{ proname: string }>`
+      select p.proname from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public' and p.proname like ${`${TRIGGER_PREFIX}%`}
+    `.execute(trx);
 
-  for (const routine of functions.rows) {
-    await sql.raw(`drop function if exists "${routine.proname}"() cascade`).execute(db);
-  }
+    for (const routine of functions.rows) {
+      await sql.raw(`drop function if exists "${routine.proname}"() cascade`).execute(trx);
+    }
+  });
 }
 
 /** Install one test-only `BEFORE` trigger in the hostile database, and return its name. */
@@ -1281,9 +1291,14 @@ describe("the statements PostgreSQL actually received", () => {
     expect(shape.writesForbiddenColumn).toBeUndefined();
     // No `RETURNING`: no identity contract is invented (`DDM-2`).
     expect(shape.hasReturning).toBe(false);
-    expect(insert.parameters).toContain(revisionId);
-    expect(insert.parameters).toContain(listingText(listing));
-    expect(insert.parameters).toContain("pending");
+    // **Positions, not membership.** The revision identifier and the listing identifier are both
+    // UUIDs, so a statement that swapped them would satisfy a `toContain` pair while writing the
+    // listing's identity into `id` and the revision's into `listing_id`. The column list above is
+    // ordered, so each of the first three parameters is pinned to its own column.
+    expect(shape.columns.slice(0, 3)).toEqual(["id", "listing_id", "state"]);
+    expect(insert.parameters[0]).toBe(revisionId);
+    expect(insert.parameters[1]).toBe(listingText(listing));
+    expect(insert.parameters[2]).toBe("pending");
     expect(insert.parameters).toContain(null);
     // The caller's original token, carried unchanged — never the approval instant.
     const numbers = insert.parameters.filter(
@@ -1873,9 +1888,15 @@ describe("the PS-11 lock, under contention", () => {
       }),
     ).rejects.toBe(bodyFailure);
 
-    // The lock is gone: the boundary runs to completion without waiting for anything.
-    expectListing(await atomic(listing));
+    // **Observed before anything that could block.** If the helper's release were removed, the
+    // rival would still hold the lock and the boundary call below would wait indefinitely — a
+    // hang, which is no evidence at all. The session count is a fact the server publishes and it
+    // fails immediately and by name instead, so this assertion is the oracle and the call after
+    // it is the corroboration.
     expect(await sessionsInTransaction()).toBe(0);
+
+    // And the lock really is gone: the boundary runs to completion without waiting.
+    expectListing(await atomic(listing));
   });
 
   it("cannot be paired with FR-ADM-04 on one listing, and the refusals prove why", async () => {

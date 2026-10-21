@@ -448,7 +448,9 @@ the listing-row lock **first** and holding it to commit: **`OP-6`** revision cre
 #195), **`OP-10`** approval and application (issue #197) and **revision rejection** (issue
 #199). ~~**`FR-ADM-04`** and **`FR-ADM-10b`** remain **unimplemented**.~~ **`FR-ADM-04` landed with issue #217** as a fourth `PS-11` transaction, on the
 **listing** row of a pending record; ~~**`FR-ADM-10b`** remains **unimplemented**~~ **and
-`FR-ADM-10b` landed with issue #219 as the fifth**. ~~`FR-ADM-04`
+`FR-ADM-10b` landed with issue #219**, which is the **fifth** such transaction here and
+`ADR-024`'s **fourth and last** named path — rejection is a `PS-11` transaction but not one of the
+four paths that ADR enumerates, which is the whole of the difference between the two counts. ~~`FR-ADM-04`
 additionally awaits a pure-domain operation that does not exist — the
 `FR-DATA-11c`/`ADR-017` Q-4 designation rule that an administrator may **restrict but
 never make public**, and that a new or replacement value **defaults to private**.~~

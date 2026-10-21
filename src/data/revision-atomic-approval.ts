@@ -46,6 +46,19 @@
  * writes nothing on a no-op, because its own ruling says so. The two paths differ because their
  * rulings differ, not because one of them was optimized.
  *
+ * ## How the steps are counted
+ *
+ * Three different counts are correct about different things, and conflating them is how a review
+ * argument starts. **Protocol steps** are the numbered decisions below, `(1)`–`(16)`: they include
+ * the purely in-memory ones — hydration, the lifecycle decision, the token comparison, the
+ * designation rule, the two domain operations and every affected-row check. **Governed SQL
+ * statements** are **five**, and only five: the listing lock, the pending-revision read, the
+ * revision `INSERT`, the guarded listing `UPDATE` and the revision `DELETE`, between the `BEGIN`
+ * that carries the isolation level and the `COMMIT`. **Writes** are **three** of those five.
+ * `ADR-024`'s `FR-ADM-10b` block prescribes exactly those five statements in exactly that order;
+ * issue #219's step list is the protocol-step count, and the statement suite asserts the
+ * statement count. Both are checked, and neither is the other.
+ *
  * ## The domain owns every content decision; this module owns the transaction
  *
  * `enforceDesignationPolicy` (`ADR-025`), `admitPendingRevision` (`DI-11`, the approved-listing
