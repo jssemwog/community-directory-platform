@@ -1544,6 +1544,12 @@ describe("the cleanup sweep is bounded where it matters", () => {
   }
 
   it("runs SET LOCAL and every cleanup statement inside one transaction", async () => {
+    // Something to drop, created **before** the capture starts and through a different pool, so
+    // the trace below is guaranteed to contain real `DROP`s. Without this the sweep would find an
+    // empty catalogue, emit no `DROP` at all, and the placement assertion over them would hold
+    // vacuously — proving only where the discovery reads ran.
+    await createProbeObjects(`${TRIGGER_PREFIX}capture_placement`);
+
     capturing.reset();
     await dropProbeTriggers(capturing.db);
 
@@ -1576,6 +1582,10 @@ describe("the cleanup sweep is bounded where it matters", () => {
       );
 
     expect(cleanup.length).toBeGreaterThan(0);
+
+    // At least the trigger and its function were actually dropped, so the placement check below
+    // is load-bearing for `DROP` statements and not only for the catalogue reads.
+    expect(sqls.filter((statement) => statement.startsWith("drop "))).toHaveLength(2);
 
     for (const { index } of cleanup) {
       expect(index).toBeGreaterThan(bound);
