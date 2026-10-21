@@ -425,8 +425,9 @@ the pending-revision write compares the proposal against the **listing content r
 existing `PS-11` lock** — never caller-supplied or pre-lock content — **after** the lifecycle,
 `DI-11` and stale-token decisions and **before the insert**, refusing a widening with the
 complete set of offending fields and **writing nothing**. **No normalization and no silent
-privatization** were introduced, and **`OP-10` does not revalidate the policy**; `FR-ADM-04`
-and `FR-ADM-10b` remain **unimplemented**. On an approved listing a designation change is part of the pending
+privatization** were introduced, and **`OP-10` does not revalidate the policy**; ~~`FR-ADM-04`
+and `FR-ADM-10b` remain **unimplemented**~~ **and the policy is now enforced the same way on
+`FR-ADM-04` (issue #217) and on `FR-ADM-10b` (issue #219)**. On an approved listing a designation change is part of the pending
 revision like any other change, and follows the same approval path (`OP-10`,
 `FR-ADM-10b`) — the revision lifecycle, `DI-11` and rollback are unchanged
 (`FR-DATA-11c`).
@@ -447,7 +448,7 @@ no-op success**. A **material** edit remains subject to `DI-6`: `lastUpdatedAt` 
 with the existing advancement failure, **distinct** from stale input and from a
 designation refusal. ~~The clarification settles **behaviour only** — **`FR-ADM-04` and
 `FR-ADM-10b` remain unimplemented**, and **no partial-edit input type, operation or
-transport exists or is authorized by it**.~~ **The pure-domain operation now exists** (issue #215): `applyAdministrativeEdit` in `src/domain/listing/administrative-edit.ts`, over the three-state partial-edit input `ADR-025` §C.4 requires, implements this ruling exactly — lifecycle → patch validity and materialization → `validateInitialSubmission` → `ADR-025` → no-op → `DI-6`, returning the listing **by exact reference** on a no-op without inspecting the instant. ~~**No persistence path calls it**, so `FR-ADM-04` **persistence**, `FR-ADM-10b`, transport, authorization, messaging, audit, schema, migrations and deployment all remain **unimplemented**.~~ **`C9` persistence landed, issue #217**: `applyAdministrativeEditToPendingListing` in `src/data/listing-administrative-edit.ts` applies the edit to the **pending listing row** under `ADR-024`'s `PS-11` protocol — explicit `READ COMMITTED`, the complete listing `SELECT … FOR UPDATE` first and held to commit, the prescribed post-lock pending-revision read (whose non-empty result is refused loudly, being unreachable on a pending listing), exact comparison with the caller's **original** `ADR-023` token, the domain operation as the sole content authority, and for a material edit **one** guarded `UPDATE` carrying that same token with the affected-row count checked. A valid **no-op writes nothing**, leaves `last_updated_at` untouched and commits. **No retry is performed**, and **schema and migrations are unchanged**. **Transport, authorization, administrator messaging and audit storage do not exist**, `FR-ADM-10b` remains **unimplemented**, and there is **no rejected-record edit**.
+transport exists or is authorized by it**.~~ **The pure-domain operation now exists** (issue #215): `applyAdministrativeEdit` in `src/domain/listing/administrative-edit.ts`, over the three-state partial-edit input `ADR-025` §C.4 requires, implements this ruling exactly — lifecycle → patch validity and materialization → `validateInitialSubmission` → `ADR-025` → no-op → `DI-6`, returning the listing **by exact reference** on a no-op without inspecting the instant. ~~**No persistence path calls it**, so `FR-ADM-04` **persistence**, `FR-ADM-10b`, transport, authorization, messaging, audit, schema, migrations and deployment all remain **unimplemented**.~~ **`C9` persistence landed, issue #217**: `applyAdministrativeEditToPendingListing` in `src/data/listing-administrative-edit.ts` applies the edit to the **pending listing row** under `ADR-024`'s `PS-11` protocol — explicit `READ COMMITTED`, the complete listing `SELECT … FOR UPDATE` first and held to commit, the prescribed post-lock pending-revision read (whose non-empty result is refused loudly, being unreachable on a pending listing), exact comparison with the caller's **original** `ADR-023` token, the domain operation as the sole content authority, and for a material edit **one** guarded `UPDATE` carrying that same token with the affected-row count checked. A valid **no-op writes nothing**, leaves `last_updated_at` untouched and commits. **No retry is performed**, and **schema and migrations are unchanged**. **Transport, authorization, administrator messaging and audit storage do not exist**, ~~`FR-ADM-10b` remains **unimplemented**, and there is **no rejected-record edit**.~~ **`FR-ADM-10b` landed with issue #219** as `ADR-024`'s fourth governed path (`createAndApproveRevisionAtomically` in `src/data/revision-atomic-approval.ts`), and there is still **no rejected-record edit**.
 
 **The named exception — `FR-ADM-10b`, and it is narrow.** An authorized administrator
 may create and approve a revision within **one atomic authorized operation**. This is a
@@ -473,6 +474,18 @@ terms:
 - **The exception does not permit direct unvalidated overwriting** of the effective
   public version, and it does not make publication implicit: the combined action is
   itself the deliberate publication decision.
+
+**The internal operation now exists** (issue #219), and **only the internal operation**:
+`createAndApproveRevisionAtomically` in `src/data/revision-atomic-approval.ts` performs the whole
+exception as **one** `ADR-024` `PS-11` transaction — the transient pending revision is created,
+validated, approved, applied and removed inside it (`ADR-017` Q-3), so no proposal survives and
+none is ever externally observable. It takes **complete replacement content**, the caller's
+**original** `ADR-023` token and **one** supplied instant, decides the issue #137 refusal from the
+post-lock locked pending read, and returns the applied `Listing` — the resulting state
+`FR-CONF-04` asks for, carrying **no revision identifier**. An **equal-content** proposal is an
+ordinary revision and **advances `lastUpdatedAt`**: the issue #213 no-op ruling governs
+`FR-ADM-04` only. **No HTTP route, request or response shape, authorization check, administrator
+message, audit record or retry exists**, and `DDM-2` revision identity remains open.
 
 **This document selects no persistence mechanism.** Whether the effective public version
 is carried by updating a record, writing a version record, moving a pointer, copying
