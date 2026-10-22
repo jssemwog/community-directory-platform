@@ -46,6 +46,8 @@ import { randomUUID } from "node:crypto";
 import {
   CLUSTER_PASSWORD,
   CLUSTER_TIMEOUT_MS,
+  EXIT_POLL_INTERVAL_MS,
+  EXIT_WAIT_CEILING_MS,
   useEmbeddedPostgres,
 } from "./testing/embedded-cluster";
 
@@ -274,6 +276,97 @@ async function sessionsNamed(applicationName: string): Promise<number> {
   `.execute(observer.db);
 
   return rows.rows[0]?.count ?? 0;
+}
+
+/**
+ * Raised when the server is still reporting an owned backend at the settlement ceiling.
+ *
+ * Named, so an exhausted wait is unmistakable in a run log and can never be read as a slow pass.
+ * It carries the pids still present and the ceiling that was reached — both safe: a backend pid is
+ * an integer the server publishes, and no credential, SQL, row or session content travels with it.
+ */
+class BackendSettlementExhausted extends Error {
+  constructor(
+    readonly remaining: readonly number[],
+    readonly ceilingMs: number,
+  ) {
+    super(
+      `backends still present after ${ceilingMs}ms of settlement waiting: ${remaining.join(", ")}`,
+    );
+    this.name = "BackendSettlementExhausted";
+  }
+}
+
+/**
+ * Which of **these exact** backends the server still reports, read fresh every time.
+ *
+ * One autocommit statement at the connection's `READ COMMITTED` default, on an observer that holds
+ * no transaction, so every observation takes its own snapshot — a wait built on a retained
+ * snapshot would never see the change it is waiting for. Restricted to the owned disposable
+ * database and to the captured pid set, so nothing else can satisfy or spoil it.
+ */
+async function livePidsAmong(pids: readonly number[]): Promise<readonly number[]> {
+  if (pids.length === 0) {
+    return [];
+  }
+
+  const rows = await sql<{ pid: number }>`
+    select pid
+      from pg_stat_activity
+     where datname = current_database() and pid = any(${[...pids]}::int[])
+     order by pid
+  `.execute(observer.db);
+
+  return rows.rows.map((row) => row.pid);
+}
+
+/**
+ * Wait, under a hard bound, until the server stops reporting these exact backends (issue #223,
+ * authorization amended 2026-10-22).
+ *
+ * ## Why waiting is the right boundary
+ *
+ * `destroy()` resolves when the pool has closed its client sockets. The server dropping each
+ * backend is a **separate event** — it happens when that backend notices its peer is gone. The gap
+ * between them is real and observable: Linux CI reported owned pids `2593`, `2605` and `2607` still
+ * in `pg_stat_activity` immediately after the shutdown that owned them had resolved, on a
+ * candidate that passed on Windows. Asserting server state from the client's completion event was
+ * asserting the wrong fact, and Windows non-reproduction did not disprove the mechanism.
+ *
+ * ## What this is, and what it is not
+ *
+ * **The correctness oracle is the observed server state, never elapsed time.** The interval only
+ * schedules the next fresh observation; no duration is ever waited out on the success path, and an
+ * immediately absent set returns after a single observation. The constants are the repository's
+ * own deterministic PostgreSQL wait pair — `EXIT_POLL_INTERVAL_MS` (100ms, the smallest interval
+ * already established here) and `EXIT_WAIT_CEILING_MS` (30s) — reused from `waitForOwnedExit`,
+ * which waits for an owned *postmaster* to disappear and is the closest existing analogue to
+ * waiting for an owned *backend* to disappear. Reusing them keeps one authority for the numbers
+ * instead of inventing a second.
+ *
+ * The deadline is **monotonic** (`performance.now()`), so a wall-clock adjustment cannot extend or
+ * collapse it.
+ *
+ * It is **not** a fixed delay, **not** a grace period, **not** a retry of the shutdown, and
+ * **not** a retry of the assertion: the caller still asserts absence exactly once, afterwards.
+ * Exhaustion **throws** — it can never become success — and the thrower names the pids that
+ * remain, which is precisely the diagnosis the old aggregate count could not give.
+ */
+async function awaitBackendsGone(
+  pids: readonly number[],
+  ceilingMs: number = EXIT_WAIT_CEILING_MS,
+): Promise<void> {
+  const startedAt = performance.now();
+  let remaining = await livePidsAmong(pids);
+
+  while (remaining.length > 0) {
+    if (performance.now() - startedAt >= ceilingMs) {
+      throw new BackendSettlementExhausted(remaining, ceilingMs);
+    }
+
+    await new Promise((settled) => setTimeout(settled, EXIT_POLL_INTERVAL_MS));
+    remaining = await livePidsAmong(pids);
+  }
 }
 
 /**
@@ -2123,12 +2216,14 @@ describe("the capturing pool's idle-client errors", () => {
         await owned.shutdown();
       }
 
-      // Shutdown completed, and **exactly this pool's** backends are gone — named, not counted.
-      // Each query below is its own statement on an observer that holds no transaction, so none of
-      // them can read a snapshot taken before the shutdown settled.
-      const liveAfter = await livePids();
+      // Shutdown has resolved, which is a **client-side** completion. The server dropping these
+      // backends is a separate event, so the wait below is on the server's own report of
+      // **exactly these pids**, under a hard monotonic ceiling, and it throws a named sentinel
+      // rather than passing if they never go (issue #223).
+      await awaitBackendsGone(ownedPids);
 
-      expect(ownedPids.filter((pid) => liveAfter.includes(pid))).toEqual([]);
+      // The load-bearing postcondition, asserted once on a fresh observation after settlement.
+      expect(await livePidsAmong(ownedPids)).toEqual([]);
 
       // Nothing carrying this pool's label survives at all.
       expect(await pidsNamed(OWNED_CAPTURE_APPLICATION_NAME)).toEqual([]);
@@ -2180,12 +2275,110 @@ describe("the capturing pool's idle-client errors", () => {
         await pair.shutdown();
       }
 
-      // **Both** are gone, not just the first one found.
-      const liveAfter = await livePids();
+      // **Both** are gone, not just the first one found — awaited on the server's own report
+      // under the same bound, then asserted once.
+      await awaitBackendsGone(held);
 
-      expect(held.filter((pid) => liveAfter.includes(pid))).toEqual([]);
+      expect(await livePidsAmong(held)).toEqual([]);
       expect(await pidsNamed(OWNED_CAPTURE_APPLICATION_NAME)).toEqual([]);
       expect(await sessionsInTransaction()).toBe(0);
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  /** A short ceiling for the exhaustion cases, so a bound can be proved without a 30s test. */
+  const PROBE_CEILING_MS = 1_000;
+
+  it(
+    "completes for a backend that is live when the wait is started and shut down during it",
+    async () => {
+      const transient = createCapturingPersistence(
+        VERIFIED_DATABASE,
+        OWNED_CAPTURE_APPLICATION_NAME,
+      );
+      const pid = (
+        await sql<{ pid: number }>`select pg_backend_pid() as pid`.execute(transient.db)
+      ).rows[0]?.pid as number;
+
+      // Live at the moment the wait is started.
+      expect(await livePidsAmong([pid])).toEqual([pid]);
+
+      const settling = awaitBackendsGone([pid]);
+
+      await transient.shutdown();
+      await expect(settling).resolves.toBeUndefined();
+      expect(await livePidsAmong([pid])).toEqual([]);
+
+      // **What this does and does not prove.** It proves the wait completes rather than hanging
+      // when a live target is shut down while it runs. It does *not* force the wait to observe the
+      // pid as present first: the first observation is asynchronous and may land after the
+      // shutdown, so the loop may never iterate. The deterministic proof that observations are
+      // repeated and fresh is the exhaustion case below, where a target that never goes keeps the
+      // loop running to its ceiling and is named in the failure.
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "completes immediately for an already-absent backend, with no minimum delay",
+    async () => {
+      const transient = createCapturingPersistence(
+        VERIFIED_DATABASE,
+        OWNED_CAPTURE_APPLICATION_NAME,
+      );
+      const pid = (
+        await sql<{ pid: number }>`select pg_backend_pid() as pid`.execute(transient.db)
+      ).rows[0]?.pid as number;
+
+      await transient.shutdown();
+      await awaitBackendsGone([pid]);
+
+      // Settled before the wait was even called, so the success path waits out no interval at all.
+      expect(await livePidsAmong([pid])).toEqual([]);
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "requires every target backend to go, and names the ones that remain on exhaustion",
+    async () => {
+      // One backend that will go, one that will not: the suite-wide pool's own, which this file
+      // keeps alive on purpose. A wait that accepted partial disappearance would pass here.
+      await sql`select 1`.execute(capturing.db);
+
+      const staying = await pidsNamed(CAPTURE_APPLICATION_NAME);
+      const transient = createCapturingPersistence(
+        VERIFIED_DATABASE,
+        OWNED_CAPTURE_APPLICATION_NAME,
+      );
+      const goingPid = (
+        await sql<{ pid: number }>`select pg_backend_pid() as pid`.execute(transient.db)
+      ).rows[0]?.pid as number;
+
+      await transient.shutdown();
+      expect(staying.length).toBeGreaterThanOrEqual(1);
+
+      const stayingPid = staying[0] as number;
+      const failure = await awaitBackendsGone([goingPid, stayingPid], PROBE_CEILING_MS).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      // Exhaustion throws — it can never be converted into success — and reports safely.
+      expect(failure).toBeInstanceOf(BackendSettlementExhausted);
+      expect((failure as Error).name).toBe("BackendSettlementExhausted");
+      expect((failure as BackendSettlementExhausted).remaining).toEqual([stayingPid]);
+      expect((failure as BackendSettlementExhausted).ceilingMs).toBe(PROBE_CEILING_MS);
+      expect((failure as Error).message).toContain(String(stayingPid));
+      expect((failure as Error).message).not.toContain("password");
+
+      // The one that did go is gone; only the live neighbour kept the wait from completing.
+      expect(await livePidsAmong([goingPid])).toEqual([]);
+
+      // And the ceiling the real callers use is finite and positive.
+      expect(Number.isFinite(EXIT_WAIT_CEILING_MS)).toBe(true);
+      expect(EXIT_WAIT_CEILING_MS).toBeGreaterThan(0);
+      expect(EXIT_POLL_INTERVAL_MS).toBeGreaterThan(0);
     },
     CLUSTER_TIMEOUT_MS,
   );
