@@ -195,9 +195,11 @@ implementation**:
   offending field in the rule's deterministic order; an unreadable stored listing
   is its own `STORED_LISTING_UNREADABLE` outcome. **Nothing is normalized and
   nothing is silently privatized**, and **`OP-10` does not revalidate the policy**
-  — that remains separately sequenced work. `FR-ADM-04` and `FR-ADM-10b` remain
+  — that remains separately sequenced work. ~~`FR-ADM-04` and `FR-ADM-10b` remain
   **unimplemented** *as persistence paths*, so privacy enforcement is live on `OP-6`
-  **only** — `FR-ADM-04`'s **pure-domain** edit enforces the same policy since issue
+  **only**~~ **both persistence paths now exist and enforce the policy —
+  `FR-ADM-04` with issue #217 (PR #218) and `FR-ADM-10b` with issue #219
+  (PR #220)** — `FR-ADM-04`'s **pure-domain** edit enforces the same policy since issue
   #215, ~~but no stored write reaches it~~ **and its stored write reaches it since
   issue #217**, so enforcement is now live on `OP-6` **and** `FR-ADM-04`.
   ~~`FR-ADM-10b` remains **unimplemented**.~~ **`FR-ADM-10b` landed with issue
