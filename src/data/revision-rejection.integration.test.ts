@@ -2359,6 +2359,14 @@ describe("the capturing pool's idle-client errors", () => {
         await owned.shutdown();
       }
 
+      // `shutdown()` resolved, and the pool itself reports it holds nothing — asserted **here**,
+      // before the settlement wait. Without this the shutdown guarantee would not be
+      // load-bearing: an idle client disappears on its own once the pool's idle timeout
+      // elapses, so a wait on server state alone cannot tell *shut down* from *timed out*, and
+      // a mutation that skipped the shutdown entirely passed. This is a client-side fact used
+      // to attribute the disappearance, never a substitute for the server-side proof below.
+      expect(owned.pool.totalCount).toBe(0);
+
       // Shutdown has resolved, which is a **client-side** completion. The server dropping these
       // backends is a separate event, so the wait below is on the server's own report of
       // **exactly these pids**, under a hard monotonic ceiling, and it throws a named sentinel
@@ -2455,9 +2463,16 @@ describe("the capturing pool's idle-client errors", () => {
       // **What this does and does not prove.** It proves the wait completes rather than hanging
       // when a live target is shut down while it runs. It does *not* force the wait to observe the
       // pid as present first: the first observation is asynchronous and may land after the
-      // shutdown, so the loop may never iterate. The deterministic proof that observations are
-      // repeated and fresh is the exhaustion case below, where a target that never goes keeps the
-      // loop running to its ceiling and is named in the failure.
+      // shutdown, so the loop may never iterate.
+      //
+      // What *is* deterministic: the exhaustion case below proves the observations are
+      // **repeated** — a target that never goes keeps the loop running to its ceiling and is
+      // named in the failure. It does **not** prove each observation is **fresh**: an
+      // implementation that reused one snapshot would behave identically there, and a mutation
+      // that did exactly that survived. Freshness rests on construction instead — one
+      // autocommit statement per observation, on an observer that holds no transaction — and on
+      // review, not on a test. Forcing it would need a timed stimulus, which is not authorized
+      // and would be worse evidence than the structure.
     },
     CLUSTER_TIMEOUT_MS,
   );
