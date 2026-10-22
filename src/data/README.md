@@ -463,9 +463,11 @@ administrative-edit operation and the **three-state partial-edit input** `ADR-02
 clarification — issue #213), and **no such type or operation exists or is
 authorized**.~~ **Both landed with issue #215**: `applyAdministrativeEdit` and the
 three-state `PatchField` live in `src/domain/listing/administrative-edit.ts` and
-implement the issue #213 ruling. They are **pure domain**: nothing in `src/data/`
-imports or calls them, ~~**no persistence path exists for `FR-ADM-04`**~~, and
-`FR-ADM-10b` remains **unimplemented**. **The persistence path landed with issue
+implement the issue #213 ruling. They are **pure domain** — they read no clock and reach no
+store — ~~nothing in `src/data/` imports or calls them~~ **and `src/data/` now calls them since
+issue #217**, ~~**no persistence path exists for `FR-ADM-04`**~~, and
+~~`FR-ADM-10b` remains **unimplemented**~~ **`FR-ADM-10b` landed with issue #219, recorded
+below**. **The persistence path landed with issue
 #217**: `listing-administrative-edit.ts` is `ADR-024`'s **third** governed write path,
 and the first that edits the **listing row of a pending record** rather than a
 revision. A valid no-op **writes nothing and commits**; a material edit performs
