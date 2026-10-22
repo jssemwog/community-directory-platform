@@ -52,6 +52,8 @@ import { randomUUID } from "node:crypto";
 
 import {
   CLUSTER_TIMEOUT_MS,
+  EXIT_POLL_INTERVAL_MS,
+  EXIT_WAIT_CEILING_MS,
   useEmbeddedPostgres,
 } from "./testing/embedded-cluster";
 
@@ -317,6 +319,114 @@ async function sessionsNamed(applicationName: string): Promise<number> {
 }
 
 /**
+ * Raised when the server is still reporting an owned backend at the settlement ceiling.
+ *
+ * Named, so an exhausted wait is unmistakable in a run log and can never be read as a slow pass.
+ * It carries the pids still present and the ceiling that was reached — both safe: a backend pid is
+ * an integer the server publishes, and no credential, SQL, row or session content travels with it.
+ */
+class BackendSettlementExhausted extends Error {
+  constructor(
+    readonly remaining: readonly number[],
+    readonly ceilingMs: number,
+  ) {
+    super(
+      `backends still present after ${ceilingMs}ms of settlement waiting: ${remaining.join(", ")}`,
+    );
+    this.name = "BackendSettlementExhausted";
+  }
+}
+
+/**
+ * Which of **these exact** backends the server still reports, read fresh every time.
+ *
+ * One autocommit statement at the connection's `READ COMMITTED` default, on an observer that holds
+ * no transaction, so every observation takes its own snapshot — a wait built on a retained
+ * snapshot would never see the change it is waiting for. Restricted to the owned disposable
+ * database and to the captured pid set, so nothing else can satisfy or spoil it.
+ */
+async function livePidsAmong(pids: readonly number[]): Promise<readonly number[]> {
+  if (pids.length === 0) {
+    return [];
+  }
+
+  const rows = await sql<{ pid: number }>`
+    select pid
+      from pg_stat_activity
+     where datname = current_database() and pid = any(${[...pids]}::int[])
+     order by pid
+  `.execute(observer.db);
+
+  return rows.rows.map((row) => row.pid);
+}
+
+/**
+ * Wait, under a hard bound, until the server stops reporting these exact backends (issue #223,
+ * authorization amended 2026-10-22).
+ *
+ * ## Why waiting is the right boundary
+ *
+ * `destroy()` resolves when the pool has closed its client sockets. The server dropping each
+ * backend is a **separate event** — it happens when that backend notices its peer is gone. The gap
+ * between them is real and observable: Linux CI reported owned pids `2593`, `2605` and `2607` still
+ * in `pg_stat_activity` immediately after the shutdown that owned them had resolved, on a
+ * candidate that passed on Windows. Asserting server state from the client's completion event was
+ * asserting the wrong fact, and Windows non-reproduction did not disprove the mechanism.
+ *
+ * ## What this is, and what it is not
+ *
+ * **The correctness oracle is the observed server state, never elapsed time.** The interval only
+ * schedules the next fresh observation; no duration is ever waited out on the success path, and an
+ * immediately absent set returns after a single observation. The constants are the repository's
+ * own deterministic PostgreSQL wait pair — `EXIT_POLL_INTERVAL_MS` (100ms, the smallest interval
+ * already established here) and `EXIT_WAIT_CEILING_MS` (30s) — reused from `waitForOwnedExit`,
+ * which waits for an owned *postmaster* to disappear and is the closest existing analogue to
+ * waiting for an owned *backend* to disappear. Reusing them keeps one authority for the numbers
+ * instead of inventing a second.
+ *
+ * The deadline is **monotonic** (`performance.now()`), so a wall-clock adjustment cannot extend or
+ * collapse it.
+ *
+ * It is **not** a fixed delay, **not** a grace period, **not** a retry of the shutdown, and
+ * **not** a retry of the assertion: the caller still asserts absence exactly once, afterwards.
+ * Exhaustion **throws** — it can never become success — and the thrower names the pids that
+ * remain, which is precisely the diagnosis the old aggregate count could not give.
+ */
+async function awaitBackendsGone(
+  pids: readonly number[],
+  ceilingMs: number = EXIT_WAIT_CEILING_MS,
+): Promise<void> {
+  const startedAt = performance.now();
+  let remaining = await livePidsAmong(pids);
+
+  while (remaining.length > 0) {
+    if (performance.now() - startedAt >= ceilingMs) {
+      throw new BackendSettlementExhausted(remaining, ceilingMs);
+    }
+
+    await new Promise((settled) => setTimeout(settled, EXIT_POLL_INTERVAL_MS));
+    remaining = await livePidsAmong(pids);
+  }
+}
+
+/**
+ * The backend pids carrying one label — the attribution a bare count cannot make (issue #223).
+ *
+ * Ordered, so a failure message is stable, and filtered by the owned disposable database as well
+ * as the label, because database alone matches every pool in this file plus the observer.
+ */
+async function pidsNamed(applicationName: string): Promise<readonly number[]> {
+  const rows = await sql<{ pid: number }>`
+    select pid
+      from pg_stat_activity
+     where datname = current_database() and application_name = ${applicationName}
+     order by pid
+  `.execute(observer.db);
+
+  return rows.rows.map((row) => row.pid);
+}
+
+/**
  * Resolve with the **next** error this pool hands to its own listener.
  *
  * Registered *before* the backend is terminated, so the wait is event-driven: no polling, no
@@ -424,6 +534,41 @@ interface PgPool {
 
 const pg = createRequire(import.meta.url)("pg") as PgModule;
 
+/**
+ * The label every capturing instance in this file has carried since it was introduced.
+ *
+ * It is the **suite-wide** pool's identity. It is deliberately *not* reused by the one instance
+ * whose shutdown is asserted — see `OWNED_CAPTURE_APPLICATION_NAME` and issue #223.
+ */
+const CAPTURE_APPLICATION_NAME = "revision_rejection_capture";
+
+/**
+ * A **distinct, stable** label for the single capturing pool whose shutdown this file asserts
+ * (issue #223).
+ *
+ * ## Why a second label exists
+ *
+ * `sessionsNamed` identifies sessions by database plus `application_name`, and its own description
+ * called that *"sessions belonging to one labelled pool"*. That premise was false: three instances
+ * in this file were built by the same factory with the same hard-coded label on the same database,
+ * so the predicate returned their **sum** and could attribute a session to none of them. A probe
+ * measured exactly that — one pool: 1; two pools: 2, pids `[a, b]`; shutting down only the second:
+ * back to 1 with its pid gone — so an assertion comparing that count against a baseline could not
+ * distinguish *this pool leaked a session* from *another pool carrying the label differs from its
+ * baseline*.
+ *
+ * **What this does not claim.** The proximate cause of the two CI failures of that assertion
+ * remains **unknown**: a clean `destroy()` left no residue in 60/60 iterations, the failing test's
+ * exact terminate-then-replace-then-destroy shape left none in 30/30, and the symptom has never
+ * reproduced locally. Relabelling makes the question answerable, not answered — if this pool ever
+ * does leak, the assertion now names the pid.
+ *
+ * **Stable and deterministic**: a fixed string, with no randomness, timestamp, pid, test index or
+ * counter, so a failure message is reproducible and readable. 32 bytes, well inside
+ * PostgreSQL's 63-byte `application_name` limit. Nothing in production reads or sets it.
+ */
+const OWNED_CAPTURE_APPLICATION_NAME = "revision_rejection_capture_owned";
+
 interface CapturedStatement {
   readonly sql: string;
   readonly parameters: readonly unknown[];
@@ -439,7 +584,10 @@ interface CapturedStatement {
  * pool is configured exactly as `createListingPersistence` configures its own, so this is the
  * same boundary that runs in production and not a lookalike.
  */
-function createCapturingPersistence(database: string): {
+function createCapturingPersistence(
+  database: string,
+  applicationName: string = CAPTURE_APPLICATION_NAME,
+): {
   readonly db: Kysely<ListingDatabase>;
   readonly statements: readonly CapturedStatement[];
   /** Exposed for issue #201's assertions only; no test may use it to drive the boundary. */
@@ -455,7 +603,7 @@ function createCapturingPersistence(database: string): {
     connectionString: cluster.connectionStringFor(database),
     max: 2,
     types: createTimestamptzTypeOverrides(),
-    options: startupOptionsFor({ application_name: "revision_rejection_capture" }),
+    options: startupOptionsFor({ application_name: applicationName }),
   });
 
   /**
@@ -2060,8 +2208,16 @@ describe("the capturing pool's idle-client errors", () => {
     async () => {
       // The file-level `capturing` pool shares this label and is torn down by the cluster
       // helper, not here — so residue is measured as a **return to baseline**, not as zero.
-      const baseline = await sessionsNamed("revision_rejection_capture");
-      const owned = createCapturingPersistence(VERIFIED_DATABASE);
+      // Labelled distinctly, so the assertions after shutdown are about **this** pool and
+      // not about every pool in the file that happens to share a name (issue #223).
+      const owned = createCapturingPersistence(
+        VERIFIED_DATABASE,
+        OWNED_CAPTURE_APPLICATION_NAME,
+      );
+      /** Every backend this pool owns, enumerated at the latest possible point below. */
+      let ownedPids: readonly number[] = [];
+      /** The suite-wide pool's backends, which must be untouched by this pool's shutdown. */
+      let suiteWidePids: readonly number[] = [];
 
       try {
         const pidRows = await sql<{ pid: number }>`select pg_backend_pid() as pid`.execute(
@@ -2167,13 +2323,220 @@ describe("the capturing pool's idle-client errors", () => {
 
         // Nothing retried or recovered on our behalf: a failing query still fails.
         await expect(sql`select 1 / 0`.execute(owned.db)).rejects.toThrow();
+
+        // **Enumerated here, last.** Every connection this pool will ever open already exists —
+        // including the replacement client it opened after its first backend was terminated — so
+        // the set is complete, and it is captured before anything shuts anything down.
+        const reported = await sql<{ name: string }>`
+          select current_setting('application_name') as name
+        `.execute(owned.db);
+
+        // The server agrees about the identity being asserted; the label is not merely requested.
+        expect(reported.rows[0]?.name).toBe(OWNED_CAPTURE_APPLICATION_NAME);
+
+        // The suite-wide pool opens its connections lazily, so whether it has one depends on
+        // which earlier tests ran — a focused run leaves it with none. Using it here makes its
+        // liveness a fact this test establishes rather than a side effect of test order, which
+        // is the same class of dependency issue #223 exists to remove.
+        await sql`select 1`.execute(capturing.db);
+
+        ownedPids = await pidsNamed(OWNED_CAPTURE_APPLICATION_NAME);
+        suiteWidePids = await pidsNamed(CAPTURE_APPLICATION_NAME);
+
+        // Not vacuous: there is something to disappear. `max: 2` permits more than one, so the
+        // whole set is taken rather than a single pid assumed.
+        expect(ownedPids.length).toBeGreaterThanOrEqual(1);
+
+        // The suite-wide pool is live and is a **different** set of backends, which is the
+        // distinction the shared label could not make.
+        expect(suiteWidePids.length).toBeGreaterThanOrEqual(1);
+        expect(ownedPids.filter((pid) => suiteWidePids.includes(pid))).toEqual([]);
+
+        // And the label predicate is necessary: identity by database alone over-matches, because
+        // every pool in this file — and the observer asking the question — shares the database.
+        expect((await livePids()).length).toBeGreaterThan(ownedPids.length);
       } finally {
         await owned.shutdown();
       }
 
-      // This instance's own sessions are gone: the label is back to where it started.
-      expect(await sessionsNamed("revision_rejection_capture")).toBe(baseline);
+      // `shutdown()` resolved, and the pool itself reports it holds nothing — asserted **here**,
+      // before the settlement wait. Without this the shutdown guarantee would not be
+      // load-bearing: an idle client disappears on its own once the pool's idle timeout
+      // elapses, so a wait on server state alone cannot tell *shut down* from *timed out*, and
+      // a mutation that skipped the shutdown entirely passed. This is a client-side fact used
+      // to attribute the disappearance, never a substitute for the server-side proof below.
+      expect(owned.pool.totalCount).toBe(0);
+
+      // Shutdown has resolved, which is a **client-side** completion. The server dropping these
+      // backends is a separate event, so the wait below is on the server's own report of
+      // **exactly these pids**, under a hard monotonic ceiling, and it throws a named sentinel
+      // rather than passing if they never go (issue #223).
+      await awaitBackendsGone(ownedPids);
+
+      // The load-bearing postcondition, asserted once on a fresh observation after settlement.
+      expect(await livePidsAmong(ownedPids)).toEqual([]);
+
+      // Nothing carrying this pool's label survives at all.
+      expect(await pidsNamed(OWNED_CAPTURE_APPLICATION_NAME)).toEqual([]);
+
+      // Separately: the suite-wide pool, which shares this file but not the label, is untouched —
+      // so a healthy neighbour can never be reported as this pool's residue.
+      expect(await pidsNamed(CAPTURE_APPLICATION_NAME)).toEqual(suiteWidePids);
       expect(await sessionsInTransaction()).toBe(0);
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "enumerates every backend such a pool owns, not only the first",
+    async () => {
+      // `max: 2` permits more than one backend, so the shutdown proof above takes a **set**
+      // rather than assuming a single pid. This case makes that set observable: two connections
+      // are held at once — deterministically, by nesting `connection()`, with no sleep and no
+      // concurrency guesswork — so the enumeration has two pids to find (issue #223).
+      const pair = createCapturingPersistence(
+        VERIFIED_DATABASE,
+        OWNED_CAPTURE_APPLICATION_NAME,
+      );
+      let held: readonly number[] = [];
+
+      try {
+        await pair.db.connection().execute(async (first) => {
+          await sql`select 1`.execute(first);
+
+          // The outer connection is checked out, so this one cannot be the same client.
+          await pair.db.connection().execute(async (second) => {
+            await sql`select 1`.execute(second);
+
+            // Established, not assumed: the suite-wide pool's connections are lazy.
+            await sql`select 1`.execute(capturing.db);
+
+            held = await pidsNamed(OWNED_CAPTURE_APPLICATION_NAME);
+          });
+        });
+
+        expect(held).toHaveLength(2);
+        expect(new Set(held).size).toBe(2);
+
+        // Still disjoint from the suite-wide pool, which the shared label could not tell apart.
+        const suiteWide = await pidsNamed(CAPTURE_APPLICATION_NAME);
+
+        expect(held.filter((pid) => suiteWide.includes(pid))).toEqual([]);
+      } finally {
+        await pair.shutdown();
+      }
+
+      // **Both** are gone, not just the first one found — awaited on the server's own report
+      // under the same bound, then asserted once.
+      await awaitBackendsGone(held);
+
+      expect(await livePidsAmong(held)).toEqual([]);
+      expect(await pidsNamed(OWNED_CAPTURE_APPLICATION_NAME)).toEqual([]);
+      expect(await sessionsInTransaction()).toBe(0);
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  /** A short ceiling for the exhaustion cases, so a bound can be proved without a 30s test. */
+  const PROBE_CEILING_MS = 1_000;
+
+  it(
+    "completes for a backend that is live when the wait is started and shut down during it",
+    async () => {
+      const transient = createCapturingPersistence(
+        VERIFIED_DATABASE,
+        OWNED_CAPTURE_APPLICATION_NAME,
+      );
+      const pid = (
+        await sql<{ pid: number }>`select pg_backend_pid() as pid`.execute(transient.db)
+      ).rows[0]?.pid as number;
+
+      // Live at the moment the wait is started.
+      expect(await livePidsAmong([pid])).toEqual([pid]);
+
+      const settling = awaitBackendsGone([pid]);
+
+      await transient.shutdown();
+      await expect(settling).resolves.toBeUndefined();
+      expect(await livePidsAmong([pid])).toEqual([]);
+
+      // **What this does and does not prove.** It proves the wait completes rather than hanging
+      // when a live target is shut down while it runs. It does *not* force the wait to observe the
+      // pid as present first: the first observation is asynchronous and may land after the
+      // shutdown, so the loop may never iterate.
+      //
+      // What *is* deterministic: the exhaustion case below proves the observations are
+      // **repeated** — a target that never goes keeps the loop running to its ceiling and is
+      // named in the failure. It does **not** prove each observation is **fresh**: an
+      // implementation that reused one snapshot would behave identically there, and a mutation
+      // that did exactly that survived. Freshness rests on construction instead — one
+      // autocommit statement per observation, on an observer that holds no transaction — and on
+      // review, not on a test. Forcing it would need a timed stimulus, which is not authorized
+      // and would be worse evidence than the structure.
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "completes immediately for an already-absent backend, with no minimum delay",
+    async () => {
+      const transient = createCapturingPersistence(
+        VERIFIED_DATABASE,
+        OWNED_CAPTURE_APPLICATION_NAME,
+      );
+      const pid = (
+        await sql<{ pid: number }>`select pg_backend_pid() as pid`.execute(transient.db)
+      ).rows[0]?.pid as number;
+
+      await transient.shutdown();
+      await awaitBackendsGone([pid]);
+
+      // Settled before the wait was even called, so the success path waits out no interval at all.
+      expect(await livePidsAmong([pid])).toEqual([]);
+    },
+    CLUSTER_TIMEOUT_MS,
+  );
+
+  it(
+    "requires every target backend to go, and names the ones that remain on exhaustion",
+    async () => {
+      // One backend that will go, one that will not: the suite-wide pool's own, which this file
+      // keeps alive on purpose. A wait that accepted partial disappearance would pass here.
+      await sql`select 1`.execute(capturing.db);
+
+      const staying = await pidsNamed(CAPTURE_APPLICATION_NAME);
+      const transient = createCapturingPersistence(
+        VERIFIED_DATABASE,
+        OWNED_CAPTURE_APPLICATION_NAME,
+      );
+      const goingPid = (
+        await sql<{ pid: number }>`select pg_backend_pid() as pid`.execute(transient.db)
+      ).rows[0]?.pid as number;
+
+      await transient.shutdown();
+      expect(staying.length).toBeGreaterThanOrEqual(1);
+
+      const stayingPid = staying[0] as number;
+      const failure = await awaitBackendsGone([goingPid, stayingPid], PROBE_CEILING_MS).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      // Exhaustion throws — it can never be converted into success — and reports safely.
+      expect(failure).toBeInstanceOf(BackendSettlementExhausted);
+      expect((failure as Error).name).toBe("BackendSettlementExhausted");
+      expect((failure as BackendSettlementExhausted).remaining).toEqual([stayingPid]);
+      expect((failure as BackendSettlementExhausted).ceilingMs).toBe(PROBE_CEILING_MS);
+      expect((failure as Error).message).toContain(String(stayingPid));
+      expect((failure as Error).message).not.toContain("password");
+
+      // The one that did go is gone; only the live neighbour kept the wait from completing.
+      expect(await livePidsAmong([goingPid])).toEqual([]);
+
+      // And the ceiling the real callers use is finite and positive.
+      expect(Number.isFinite(EXIT_WAIT_CEILING_MS)).toBe(true);
+      expect(EXIT_WAIT_CEILING_MS).toBeGreaterThan(0);
+      expect(EXIT_POLL_INTERVAL_MS).toBeGreaterThan(0);
     },
     CLUSTER_TIMEOUT_MS,
   );
