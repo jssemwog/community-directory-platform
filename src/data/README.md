@@ -195,9 +195,11 @@ implementation**:
   offending field in the rule's deterministic order; an unreadable stored listing
   is its own `STORED_LISTING_UNREADABLE` outcome. **Nothing is normalized and
   nothing is silently privatized**, and **`OP-10` does not revalidate the policy**
-  — that remains separately sequenced work. `FR-ADM-04` and `FR-ADM-10b` remain
+  — that remains separately sequenced work. ~~`FR-ADM-04` and `FR-ADM-10b` remain
   **unimplemented** *as persistence paths*, so privacy enforcement is live on `OP-6`
-  **only** — `FR-ADM-04`'s **pure-domain** edit enforces the same policy since issue
+  **only**~~ **both persistence paths now exist and enforce the policy —
+  `FR-ADM-04` with issue #217 (PR #218) and `FR-ADM-10b` with issue #219
+  (PR #220)** — `FR-ADM-04`'s **pure-domain** edit enforces the same policy since issue
   #215, ~~but no stored write reaches it~~ **and its stored write reaches it since
   issue #217**, so enforcement is now live on `OP-6` **and** `FR-ADM-04`.
   ~~`FR-ADM-10b` remains **unimplemented**.~~ **`FR-ADM-10b` landed with issue
@@ -463,9 +465,11 @@ administrative-edit operation and the **three-state partial-edit input** `ADR-02
 clarification — issue #213), and **no such type or operation exists or is
 authorized**.~~ **Both landed with issue #215**: `applyAdministrativeEdit` and the
 three-state `PatchField` live in `src/domain/listing/administrative-edit.ts` and
-implement the issue #213 ruling. They are **pure domain**: nothing in `src/data/`
-imports or calls them, ~~**no persistence path exists for `FR-ADM-04`**~~, and
-`FR-ADM-10b` remains **unimplemented**. **The persistence path landed with issue
+implement the issue #213 ruling. They are **pure domain** — they read no clock and reach no
+store — ~~nothing in `src/data/` imports or calls them~~ **and `src/data/` now calls them since
+issue #217**, ~~**no persistence path exists for `FR-ADM-04`**~~, and
+~~`FR-ADM-10b` remains **unimplemented**~~ **`FR-ADM-10b` landed with issue #219, recorded
+below**. **The persistence path landed with issue
 #217**: `listing-administrative-edit.ts` is `ADR-024`'s **third** governed write path,
 and the first that edits the **listing row of a pending record** rather than a
 revision. A valid no-op **writes nothing and commits**; a material edit performs

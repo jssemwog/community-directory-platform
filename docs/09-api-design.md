@@ -922,7 +922,7 @@ edit is not a status transition — so it rests on the ruling, and it is judged 
 accept an invalid edit or a prohibited designation widening: both are refused before the
 no-op question is reached. A **material** edit still advances `lastUpdatedAt` exactly
 once under `DI-6`. **This is implemented as a pure-domain operation since issue #215** —
-`applyAdministrativeEdit`; **no persistence, transport or authorization path reaches it.**
+`applyAdministrativeEdit`; ~~**no persistence, transport or authorization path reaches it.**~~ **An internal persistence consumer has reached it since issue #217** — `applyAdministrativeEditToPendingListing` in `src/data/listing-administrative-edit.ts`, which invokes the pure-domain operation under `ADR-024`'s `PS-11` protocol — and **no transport or authorization path reaches it.**
 
 ---
 
