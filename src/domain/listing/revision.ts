@@ -49,10 +49,17 @@
  * `ADR-017` Q-3's atomicity is therefore enforced where it is enforced, and `DI-6`'s
  * strictly-later rule is reached for the first time from a write path.
  *
- * **Still unimplemented and separately authorized:** `FR-ADM-04`, `FR-ADM-10b`, rejection
- * persistence, rejected-history retrieval, retention and purge, the administrator conflict
- * message, and every API transport, authorization check and visible message — **no transport,
- * authorization or administrator-facing messaging exists for any operation.**
+ * **Three more persistence paths landed since, each separately authorized and each internal:**
+ * rejection persistence (issue #199) — `rejectPendingRevision`, which sets the state and writes
+ * the write-once anchor under the lock and never touches the listing row; `FR-ADM-04` (issue
+ * #217), which edits a **pending** listing and reaches no revision; and `FR-ADM-10b` (issue
+ * #219), which creates and approves one proposal in a single transaction, reusing
+ * `approvePendingRevision` unchanged as `OP-10` does.
+ *
+ * **Still unimplemented and separately authorized:** rejected-history retrieval, retention and
+ * purge, the administrator conflict message, and every API transport, authorization check and
+ * visible message — **no transport, authorization or administrator-facing messaging exists for
+ * any operation.**
  */
 
 import { isInstant, type Instant } from "./instant";
@@ -132,8 +139,10 @@ export interface ListingRevision {
    * (`DI-10`), and this field must not change that.
    *
    * **This module neither compares nor exposes it.** The administrator message and transport
-   * are the moderation API unit, and `OP-10`'s own staleness predicate is still unimplemented.
-   * `OP-6`'s comparison lives in the adapter (issue #195), where the locked listing is: the
+   * are the moderation API unit. Every comparison lives in an adapter, where the locked listing
+   * is: `OP-6`'s since issue #195, and `OP-10`'s since issue #197 — `approveAndApplyPendingRevision`
+   * reads the **persisted proposal's own** captured base and compares it against the locked
+   * listing's current version, both sides the same `Instant` carrier. In each case the
    * token is carried there unchanged and compared by exact equality before any mutation, and
    * `revision-mapping.ts` round-trips it through the same expression the listing's own
    * `lastUpdatedAt` uses.

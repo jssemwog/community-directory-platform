@@ -26,8 +26,11 @@
  * It is **pure domain**. It reads no clock, performs no I/O, imports nothing from `src/data/`,
  * mutates no argument, and returns a value. There is **no** persistence, transaction, `PS-11`
  * lock, `ADR-023` stale token, SQL, transport, authorization, role, override, audit or messaging
- * here, and **no production consumer** is wired to it yet: `FR-ADM-04`'s persistence path and
- * `FR-ADM-10b` remain unimplemented, and each needs its own gates.
+ * here. One **internal** production consumer is wired to it: `FR-ADM-04`'s persistence path,
+ * `applyAdministrativeEditToPendingListing` in `src/data/listing-administrative-edit.ts`, which
+ * invokes this operation under `ADR-024`'s `PS-11` protocol (issue #217). It supplies all of the
+ * above from outside; none of it moved in here. `FR-ADM-10b` is a separate `PS-11` path and does
+ * **not** reach this module. No transport or authorization path reaches either.
  *
  * It is also **not** `OP-6`. `createPendingRevision` proposes a revision against an **approved**
  * listing; this edits a **pending** record in place, before approval, and the two never meet.

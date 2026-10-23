@@ -24,12 +24,15 @@
  * **no production fault-injection hook is introduced**, which was an explicit condition of this
  * unit.
  *
- * ## Operations that do not exist yet
+ * ## Rival operations this suite deliberately does not drive
  *
- * Revision rejection and the administrative listing edit are **not implemented** and must not be
- * created here. Where an interleaving needs one, it is driven as a **test-only SQL participant**
- * inside a controlled transaction — a local fixture, never exported, never a repository
- * function.
+ * Revision rejection (issue #199) and the administrative listing edit (`FR-ADM-04`, issue #217)
+ * both exist now, and this suite still must not call them. An interleaving needs a rival it can
+ * hold open — acquire the lock, block the approver, release on command — and a repository
+ * function returns once its own transaction has committed, so it cannot be held. Each rival is
+ * therefore driven as a **test-only SQL participant** inside a controlled transaction — a local
+ * fixture, never exported, never a repository function. What is under test here is
+ * `approveAndApplyPendingRevision`; the rivals are only the concurrent pressure on it.
  */
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -1593,8 +1596,9 @@ describe("the ADR-024 protocol, under real concurrency", () => {
   it(
     "interleaving 2 — approve versus a simulated rejection: the rejected proposal is not applied",
     async () => {
-      // Rejection persistence does **not** exist and must not be created here, so the rival is a
-      // test-only SQL participant performing what a rejection would: the proposal leaves the
+      // Rejection persistence exists (issue #199) but must not be driven from here, because this
+      // rival has to stay open inside the controlled transaction. So it is a test-only SQL
+      // participant performing what `rejectPendingRevision` does: the proposal leaves the
       // pending state and gains its write-once anchor, while the listing is untouched.
       const listing = await seedWithProposal();
 
@@ -1636,8 +1640,9 @@ describe("the ADR-024 protocol, under real concurrency", () => {
   it(
     "interleaving 3 — approve versus a simulated administrative edit: stale, not applied",
     async () => {
-      // `FR-ADM-04` does not exist yet either, so the rival performs what it would: a content
-      // change that advances `last_updated_at`. The approver must then refuse as **stale**,
+      // `FR-ADM-04` exists too (issue #217) and is held off for the same reason, so the rival
+      // performs what it does: a content change that advances `last_updated_at`, which is the
+      // part of it this interleaving needs. The approver must then refuse as **stale**,
       // because the proposal was prepared against a version that no longer exists.
       const listing = await seedWithProposal();
 

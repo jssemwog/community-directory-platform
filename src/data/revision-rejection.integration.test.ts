@@ -31,12 +31,14 @@
  * `afterEach` sweeps any a failed assertion stranded. Nothing in `src/` knows it exists: **no
  * production fault-injection hook is introduced**.
  *
- * ## Operations that do not exist yet
+ * ## Rival operations this suite deliberately does not drive
  *
- * The administrative listing edit (`FR-ADM-04`) is **not implemented** and must not be created
- * here. Where an interleaving needs one, it is driven as a **test-only SQL participant** inside a
- * controlled transaction — a local fixture, never exported, never a repository function. Approval
- * is driven through the real `OP-10` boundary, because that one does exist.
+ * The administrative listing edit (`FR-ADM-04`) exists now (issue #217) and must still not be
+ * called here: an interleaving needs a rival it can hold open inside a controlled transaction,
+ * and a repository function returns only once its own transaction has committed. It is therefore
+ * driven as a **test-only SQL participant** — a local fixture, never exported, never a
+ * repository function. Approval is driven through the real `OP-10` boundary, because that rival
+ * does not need to be held open.
  */
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -1049,9 +1051,9 @@ describe("rejecting the sole pending revision", () => {
       // item 6 says so in as many words.
       const listing = await seedWithProposal();
 
-      // A test-only participant doing what `FR-ADM-04` will: advance the listing's version, so
-      // the proposal's captured base no longer equals it. `FR-ADM-04` is not implemented and is
-      // deliberately not created here.
+      // A test-only participant doing what `FR-ADM-04` does: advance the listing's version, so
+      // the proposal's captured base no longer equals it. `FR-ADM-04` exists (issue #217) and is
+      // deliberately not driven from here — only the version advance matters to this test.
       await sql`
         update listing
            set description = 'Corrected by an administrator.',
