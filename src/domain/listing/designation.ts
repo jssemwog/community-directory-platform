@@ -55,13 +55,18 @@
  * - It is **not** a patch evaluator. It compares two **complete** content sets, because
  *   `ADR-017` defines a proposal as *"a complete set, not a difference"*. An absent proposed
  *   value is therefore an **explicit removal**, never a patch-style omission. The three-state
- *   partial-edit boundary `ADR-025` requires before `FR-ADM-04` is a later unit's problem, and
- *   nothing here invents it.
+ *   partial-edit boundary `ADR-025` requires before `FR-ADM-04` landed next door instead, as
+ *   `PatchField` in `administrative-edit.ts` (issue #215): it resolves a patch to complete
+ *   content and only then calls this rule, so this module still compares complete sets and
+ *   nothing here invents the boundary.
  * - It is **not** a persistence, transport, normalization or authorization boundary, and gains
  *   none of those by having a consumer. `ADR-025` sequenced this module as step 3 and `OP-6`
  *   reconciliation as step 4; **step 4 landed with issue #207 (PR #208)**, so
  *   `createPendingRevision` now **consumes and enforces** this policy when a pending revision is
- *   created. `FR-ADM-04` and `FR-ADM-10b` remain **unimplemented** future consumers.
+ *   created. `FR-ADM-04` (issue #217) and `FR-ADM-10b` (issue #219) are since consumers too, each
+ *   its own **internal** `PS-11` path: the first reaches this rule through
+ *   `applyAdministrativeEdit`, the second calls it directly. All three invoke it **once**,
+ *   against stored content read under the lock and before any mutation.
  */
 
 import type { DesignatableValue, ListingContent } from "./listing";

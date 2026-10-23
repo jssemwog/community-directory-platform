@@ -943,7 +943,9 @@ describe("retrieving the sole pending revision", () => {
       });
 
       // A rejected row of my own: real history, retained under `FR-AUD-06`, and not what this
-      // read returns. Written by raw SQL because rejection persistence is a later unit.
+      // read returns. Rejection persistence exists (issue #199), but it is not what is under
+      // test here — this is a fixture for the read's contract, so the row is written by raw SQL
+      // rather than through a path whose own behaviour would then be in the assertion.
       await sql`
         insert into listing_revision (
           id, listing_id, state, name, category, description, locality, country,
