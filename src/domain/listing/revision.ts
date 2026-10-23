@@ -51,10 +51,11 @@
  *
  * **Three more persistence paths landed since, each separately authorized and each internal:**
  * rejection persistence (issue #199) — `rejectPendingRevision`, which sets the state and writes
- * the write-once anchor under the lock and never touches the listing row; `FR-ADM-04` (issue
- * #217), which edits a **pending** listing and reaches no revision; and `FR-ADM-10b` (issue
- * #219), which creates and approves one proposal in a single transaction, reusing
- * `approvePendingRevision` unchanged as `OP-10` does.
+ * the write-once anchor under the lock and **writes** no listing row; `FR-ADM-04` (issue #217),
+ * which edits a **pending** listing and **writes** no revision row, reading `listing_revision`
+ * under the lock only as an invariant guard; and `FR-ADM-10b` (issue #219), which creates and
+ * approves one proposal in a single transaction, reusing `approvePendingRevision` unchanged as
+ * `OP-10` does.
  *
  * **Still unimplemented and separately authorized:** rejected-history retrieval, retention and
  * purge, the administrator conflict message, and every API transport, authorization check and
