@@ -362,8 +362,9 @@ values** and are now rejected everywhere, including by attacking tests.
 
 **Still not built:** `OP-11` is unimplemented; no filtering or browsing exists; no reference
 table, enum or seed data exists; no category UI selector exists; and **no provisioning,
-credentials or production migration execution is authorized** — `C9` persistence does not
-exist. Later additions, renames or removals still require a separately governed Product Owner
+credentials or production migration execution is authorized** — ~~`C9` persistence does not
+exist~~ **`C9` persistence exists since issue #177 (PR #178), though no transport reaches
+it**. Later additions, renames or removals still require a separately governed Product Owner
 decision applied through a deployment.
 
 ---
