@@ -83,10 +83,10 @@ of *rejected*. The status change advances `last updated at` to a **strictly late
 - The domain's `transitionListingStatus` is the authority on the permitted pair, the strictly
   later instant and the write-once anchor.
 
-**The concurrency neighbourhood.** The only implemented writer of a **pending** listing row is
+**The concurrency neighbourhood.** The only implemented writer that changes an existing **pending** listing row is
 `FR-ADM-04` (issue #217), which locks that row first and compares a captured token. The revision
 paths (`OP-6`, `OP-10`, revision rejection, `FR-ADM-10b`) act only on **approved** listings, so
-none of them can act on the same pending row as `OP-8`. No data-layer code writes `status` today;
+none of them can act on the same pending row as `OP-8`. No data-layer code changes the status of an existing listing today;
 `src/data/listing-table.ts` reserves that column for `OP-7`/`OP-8`.
 
 ## Decision
