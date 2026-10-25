@@ -519,6 +519,13 @@ specified below as a committed operation.
 | **Authorization** | **Required**, attributable. |
 | **Errors / empty states** | *Not in a rejectable status*; *not found*; *unauthorized*; *save failure*. |
 
+**`C9` persistence status (issue #234).** The persistence half of `OP-8` exists:
+`rejectPendingListing` (`src/data/listing-rejection.ts`) rejects a **pending** listing in one
+transaction under `ADR-026` — explicit `READ COMMITTED`, the listing row locked before any
+domain evaluation, no automatic retry and no viewed-version token. **Transport, authorization,
+attribution, the moderation note and audit remain unimplemented**, so the operation is not yet
+reachable.
+
 **Both operations are single, atomic status transitions** (`NFR-DATA-03`, `DI-3`). An
 approval that half-succeeds — status written, content not, or the reverse — is forbidden.
 And note the ordering constraint `docs/08` `DI-3` implies: there must be no instant at
