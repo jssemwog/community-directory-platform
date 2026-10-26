@@ -508,6 +508,18 @@ specified below as a committed operation.
 | **Authorization** | **Required**, and **attributable** to one identity (`NFR-SEC-01`). |
 | **Errors / empty states** | *Not in an approvable status*; *validation failure*; *not found*; *unauthorized*; *save failure*. |
 
+**Pure-domain status (issue #238).** The domain half of `OP-7` exists:
+`approvePendingListing` (`src/domain/listing/approval.ts`) approves a **pending** listing.
+An out-of-set status is reported as such; any other non-pending status, an already-approved
+listing included, is refused; `validateBeforeApproval` is applied unchanged; and the shared
+status transition sets *approved* and *publicly available* at a strictly later instant. It
+preserves every visibility designation and grants no restricted field public visibility.
+**The no-op this document promises for approving an already-approved record (*Idempotency
+of administrative operations*) is a deferred obligation of the future `OP-7` operation
+boundary and is not yet satisfied.**
+Persistence, transaction and locking policy, transport, authorization, attribution, audit
+and messaging remain unimplemented, so the operation is not yet reachable.
+
 ### OP-8 — Reject a pending submission
 
 | | |
