@@ -502,11 +502,11 @@ specified below as a committed operation.
 |---|---|
 | **Who** | Administrator (authenticated) |
 | **Journeys** | A4 |
-| **Provides** | The record identity. |
+| **Provides** | The record identity, and the record's **originally viewed `lastUpdatedAt` version token** — required, compared by exact equality, never recaptured and never public (`ADR-027`). |
 | **Returns** | Confirmation of the resulting state — *approved and now publicly visible* (`FR-CONF-02`). |
 | **Validation** | The record must be in a status from which approval is permitted (`DI-2`). The content must satisfy the same validation rules (`VR-6`) — approving invalid content would publish it. |
 | **Authorization** | **Required**, and **attributable** to one identity (`NFR-SEC-01`). |
-| **Errors / empty states** | *Not in an approvable status*; *validation failure*; *not found*; *unauthorized*; *save failure*. |
+| **Errors / empty states** | *Not in an approvable status*; *validation failure*; *not found*; *unauthorized*; *save failure*; ***stale input*** — the record changed after it was viewed, or no usable viewed version was supplied: refresh and resubmit (`ADR-027`). |
 
 **Pure-domain status (issue #238).** The domain half of `OP-7` exists:
 `approvePendingListing` (`src/domain/listing/approval.ts`) approves a **pending** listing.
