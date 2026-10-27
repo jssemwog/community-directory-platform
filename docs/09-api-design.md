@@ -263,6 +263,16 @@ already asks for "a clear *listing not available* message, rather than stale con
 this document adds the reason that message must not be refined into something more
 helpful.
 
+**`C9` read status (issue #244).** The persistence half of `OP-1` (browse, **no criteria**)
+and `OP-2` exists in `src/data/public-listing-read.ts`. Both read only approved, publicly
+available rows, pass each through the public projection, never read revisions, and return
+`{ id, listing }` pairs, the public identity being the opaque UUID (`DDM-2`). `OP-2` returns one
+unavailable outcome for a malformed identity, an absent listing and a pending, rejected or
+unpublished one. The list is ordered by that opaque identity, a consistent order that **does
+not answer `OQ-3`**. **Not built:** search and filter criteria (`OQ-4`), pagination, `OP-11`,
+transport and UI. **The `BI-4` equivalence test remains separate work**, so equivalence
+beyond the returned value is not claimed.
+
 ---
 
 ## Listing-submission operations
