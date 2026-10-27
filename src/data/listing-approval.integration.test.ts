@@ -112,6 +112,9 @@ const WORST_CASE_PATHS_MS = {
     SESSION_CLEANUP_BOUND_MS,
   // rival { race C; checker stop C }; completion C; settle C, terminate C, settle C
   "C-7": RIVAL_ACQUIRE_BOUND_MS + 2 * CEILING_MS + RIVAL_FINISH_BOUND_MS + CEILING_MS + 3 * CEILING_MS,
+  // as C-4: two waits with a peer, plus one probe trigger before the rival
+  "C-8": STATEMENT_TIMEOUT_MS + RIVAL_ACQUIRE_BOUND_MS + 2 * BLOCKED_WAIT_BOUND_MS +
+    RIVAL_FINISH_BOUND_MS + 2 * CEILING_MS + SESSION_CLEANUP_BOUND_MS,
 } as const;
 
 /** The largest worst-case path plus the setup margin. */
@@ -752,6 +755,8 @@ async function withRivalLock(
     readonly holder?: TestPool;
     readonly ceilingMs?: number;
     readonly acquireCeilingMs?: number;
+    /** The lock the rival takes instead of the listing row lock (C-8 only). */
+    readonly lock?: { readonly text: string; readonly values: readonly unknown[] };
   } = {},
 ): Promise<void> {
   const holder = options.holder ?? rival;
@@ -786,7 +791,13 @@ async function withRivalLock(
     // connection holds can be terminated precisely.
     pid = Number((await client.query("select pg_backend_pid() as pid")).rows[0]?.pid);
     await client.query("start transaction isolation level read committed");
-    await client.query("select id from listing where id = $1::uuid for update", [listingText(listing)]);
+    if (options.lock === undefined) {
+      await client.query("select id from listing where id = $1::uuid for update", [
+        listingText(listing),
+      ]);
+    } else {
+      await client.query(options.lock.text, options.lock.values);
+    }
 
     await body({
       db: kyselyOver(client),
@@ -1065,6 +1076,9 @@ async function awaitCondition(predicate: () => Promise<boolean>, label: string):
 
   throw new Error(`${LOCK_WAIT_SENTINEL}: ${label}`);
 }
+
+/** The advisory-lock key of the C-8 gate; test-only, inside the disposable database. */
+const EDIT_GATE_KEY = 242_008;
 
 /** Content that satisfies every before-approval obligation, with mixed designations. */
 const APPROVABLE = COMPLETE_CONTENT;
@@ -1621,6 +1635,78 @@ describe("contention on the listing row (R-2, R-4, R-5, ADR-027 serialized outco
       last_updated_at: T2,
     });
   }, PLAIN_TEST_TIMEOUT_MS);
+
+  it("C-8 — a real FR-ADM-04 edit commits while the approval waits behind it: the approval is stale", async () => {
+    await withOperationSessions(["edit", "approve"], async (session, track) => {
+      const editSession = session("edit");
+      const approveSession = session("approve");
+      const listing = await seedApprovable();
+      let editing: ReturnType<typeof applyAdministrativeEditToPendingListing> | undefined;
+      let approving: Promise<ApprovalResult> | undefined;
+
+      // A test-only gate: the edit's UPDATE waits on an advisory lock the rival holds, so the
+      // real FR-ADM-04 transaction pauses **after** taking the listing row lock and **before**
+      // committing. The approval then queues behind the edit, not behind the rival.
+      await createProbeTrigger(
+        "edit_gate",
+        "before",
+        `begin
+           if new.locality = 'Cobh' then
+             perform pg_advisory_xact_lock(${EDIT_GATE_KEY});
+           end if;
+           return new;
+         end;`,
+      );
+
+      await withRivalLock(
+        listing,
+        async (rivalTransaction) => {
+          editing = track(
+            applyAdministrativeEditToPendingListing(editSession.db, {
+              listingId: listing.id,
+              baseListingLastUpdatedAt: instant(T0),
+              edit: { locality: supply("Cobh") },
+              at: instant(T1),
+            }),
+          );
+
+          // The edit holds the row lock and waits on the rival's advisory lock.
+          expect(await awaitBlockedOnRival(editSession.name, rivalTransaction.pid)).toBe("direct");
+
+          approving = track(approve(listing, instant(T0), instant(T2), approveSession.db));
+
+          // The approval waits on the row lock the edit holds: blocked through the edit.
+          expect(
+            await awaitBlockedOnRival(approveSession.name, rivalTransaction.pid, [
+              editSession.name,
+            ]),
+          ).toBe("indirect");
+
+          await rivalTransaction.commit();
+        },
+        { lock: { text: "select pg_advisory_xact_lock($1)", values: [EDIT_GATE_KEY] } },
+      );
+
+      const edited = await withinCeiling(
+        editing as ReturnType<typeof applyAdministrativeEditToPendingListing>,
+        "C-8 edit completes",
+      );
+
+      expect(edited.ok).toBe(true);
+      const approval = await withinCeiling(
+        approving as Promise<ApprovalResult>,
+        "C-8 approval completes",
+      );
+
+      expect(expectRefusal(approval)).toEqual({ code: "STALE_LISTING_VERSION" });
+      expect(await storedRow(listing)).toMatchObject({
+        status: "pending",
+        publication_state: null,
+        locality: "Cobh",
+        last_updated_at: T1,
+      });
+    });
+  }, CONCURRENCY_TEST_TIMEOUT_MS);
 
   it("C-7 — a malformed token returns while the rival still holds the lock, sending nothing (PF-A)", async () => {
     const listing = await seedApprovable();
