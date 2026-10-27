@@ -71,6 +71,12 @@ const PRIVATE_WEBSITE = "https://private.example.ie";
 const UNPUBLISH_REASON = "probe unpublish reason";
 const REVISION_NAME = "Revision-only name";
 
+/** The inverse designations, for the private postal code and email case. */
+const PRIVATE_POSTAL_CODE = "T12 PRIV";
+const PRIVATE_EMAIL = "owner-private@example.ie";
+const PUBLIC_PHONE = "+353 21 555 0101";
+const PUBLIC_WEBSITE = "https://quay-florist.example.ie";
+
 /** Mixed designations: postal code and email public, phone and website private. */
 const CONTENT: ListingContent = {
   name: "Harbour Bakery",
@@ -118,8 +124,11 @@ async function submit(db: Kysely<ListingDatabase> = persistence.db, content = CO
 }
 
 /** Submit, then approve through the real `OP-7` persistence. */
-async function submitAndApprove(db: Kysely<ListingDatabase> = persistence.db): Promise<Listing> {
-  const listing = await submit(db);
+async function submitAndApprove(
+  db: Kysely<ListingDatabase> = persistence.db,
+  content: ListingContent = CONTENT,
+): Promise<Listing> {
+  const listing = await submit(db, content);
   const approved = await persistListingApproval(db, {
     listingId: listing.id,
     viewedLastUpdatedAt: instant(T0),
@@ -293,6 +302,54 @@ describe("OP-1 browse (FR-VIS-01, FR-VIS-02, BI-1, BI-6, DI-5, DI-10)", () => {
       "designatedPublic",
     ]) {
       expect(serialized).not.toContain(forbidden);
+    }
+  }, TEST_TIMEOUT_MS);
+
+  it("withholds a private postal code and a private email from list and detail, while showing public phone and website", async () => {
+    // The inverse of `CONTENT`: postal code designated private, email with no designation
+    // (private by default), phone and website designated public.
+    const content: ListingContent = {
+      name: "Quay Florist",
+      category: "retail-shopping",
+      description: "Cut flowers and plants.",
+      locality: "Cobh",
+      country: "IE",
+      postalCode: { value: PRIVATE_POSTAL_CODE, designatedPublic: false },
+      phone: { value: PUBLIC_PHONE, designatedPublic: true },
+      email: { value: PRIVATE_EMAIL },
+      website: { value: PUBLIC_WEBSITE, designatedPublic: true },
+    };
+    const listing = await submitAndApprove(persistence.db, content);
+    const expected = {
+      name: "Quay Florist",
+      category: "retail-shopping",
+      description: "Cut flowers and plants.",
+      locality: "Cobh",
+      country: "IE",
+      phone: PUBLIC_PHONE,
+      website: PUBLIC_WEBSITE,
+    };
+
+    const listed = expectListings(await listPubliclyAvailableListings(persistence.db));
+    const found = await findPubliclyAvailableListing(persistence.db, textOf(listing));
+
+    expect(listed).toEqual([{ id: textOf(listing), listing: expected }]);
+    expect(found).toEqual({ ok: true, value: { id: textOf(listing), listing: expected } });
+
+    for (const serialized of [JSON.stringify(listed), JSON.stringify(found)]) {
+      expect(serialized).toContain(PUBLIC_PHONE);
+      expect(serialized).toContain(PUBLIC_WEBSITE);
+
+      for (const forbidden of [
+        PRIVATE_POSTAL_CODE,
+        PRIVATE_EMAIL,
+        "postalCode",
+        "email",
+        "designatedPublic",
+        "designated_public",
+      ]) {
+        expect(serialized).not.toContain(forbidden);
+      }
     }
   }, TEST_TIMEOUT_MS);
 
