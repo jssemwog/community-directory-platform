@@ -14,7 +14,8 @@ infrastructure** (`migrate.ts`, issue #157), the **authored migration**
 
 **What `C9` still does not have.** No revision read or write; no moderation
 operation; no listing update or delete; no enumeration, filtering, search,
-public query or projection transport; no retention or purge; and **no
+~~public query or projection transport~~ projection transport (a public read query exists since
+issue #244); no retention or purge; and **no
 application composition** — nothing outside the tests constructs the boundary,
 so the product does not yet persist anything end to end. **No credential,
 environment variable, provisioning or production execution** belongs to it.
@@ -485,6 +486,11 @@ comparison with the caller's **original** token; and one guarded `UPDATE` writin
 publication state and last-updated. It is not one of `ADR-024`'s governed paths, and its token
 comparison is `ADR-027`'s own rule.
 
+**A public read path landed with issue #244**: `public-listing-read.ts` lists approved,
+publicly available listings (`OP-1`, no criteria) and finds one by identity (`OP-2`), reading
+only those rows, projecting each through `projectListingPublicly`, and never reading
+`listing_revision`. No route or UI reaches it, and the `BI-4` equivalence test is separate.
+
 **`FR-ADM-10b` landed with issue #219** as `ADR-024`'s **fourth and last** governed `PS-11` write path: `createAndApproveRevisionAtomically` in `src/data/revision-atomic-approval.ts` creates, validates, approves, applies and removes a **transient** pending revision inside **one** transaction (`ADR-017` Q-3) — explicit `READ COMMITTED`, the complete listing `SELECT … FOR UPDATE` first and held to commit, the post-lock locked pending read that decides the issue #137 refusal **under the lock**, exact comparison with the caller's **original** `ADR-023` token, `enforceDesignationPolicy` and the merged pure-domain `admitPendingRevision` and `approvePendingRevision` as the sole content authorities, then **one** `INSERT`, **one** guarded `UPDATE` carrying that same token and **one** `DELETE`, each with its affected-row count checked. The proposal is **complete replacement content**, never `FR-ADM-04`'s three-state patch; an **equal-content** proposal is an ordinary revision that **advances `last_updated_at`**, because the issue #213 no-op ruling governs `FR-ADM-04` only. **Revision identity stays adapter-private** — supplied under `ADR-019`, never in the domain, never returned, no `RETURNING` — so `DDM-2` remains open. **No retry is performed**, and **schema and migrations are unchanged**. **Transport, authorization, administrator confirmation and conflict messaging, and audit storage do not exist**, and rejected-history retrieval and retention/purge remain deferred.
 
 **Only `OP-10` compares a token, and that is deliberate.** `ADR-024` items 6–8 bind the
@@ -562,6 +568,6 @@ Two obligations bind whatever eventually lands here:
   (`NFR-SEC-08`; `docs/07` `R-10`).
 
 ~~**Still no `C9`, and still no schema.**~~ **There is now a schema (issue #171) and a first
-`C9` slice (issue #177).** There is still **no application wiring, no public read path, no
+`C9` slice (issue #177).** There is still **no application wiring, ~~no public read path,~~ no
 revision or moderation persistence, no provisioning and no production execution** — and
 completing a slice is not the same as the product persisting anything.
