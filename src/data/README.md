@@ -478,6 +478,13 @@ revision. A valid no-op **writes nothing and commits**; a material edit performs
 listing under `ADR-026`, following the same lock-first shape, but it is **not** one of
 `ADR-024`'s governed paths and carries no stale comparison.
 
+**`OP-7` persistence landed with issue #242**: `listing-approval.ts` approves a **pending**
+listing under `ADR-027` — a missing or malformed viewed-version token, then an unusable
+instant, refused before any transaction; the same lock-first shape; lifecycle before the
+comparison with the caller's **original** token; and one guarded `UPDATE` writing status,
+publication state and last-updated. It is not one of `ADR-024`'s governed paths, and its token
+comparison is `ADR-027`'s own rule.
+
 **`FR-ADM-10b` landed with issue #219** as `ADR-024`'s **fourth and last** governed `PS-11` write path: `createAndApproveRevisionAtomically` in `src/data/revision-atomic-approval.ts` creates, validates, approves, applies and removes a **transient** pending revision inside **one** transaction (`ADR-017` Q-3) — explicit `READ COMMITTED`, the complete listing `SELECT … FOR UPDATE` first and held to commit, the post-lock locked pending read that decides the issue #137 refusal **under the lock**, exact comparison with the caller's **original** `ADR-023` token, `enforceDesignationPolicy` and the merged pure-domain `admitPendingRevision` and `approvePendingRevision` as the sole content authorities, then **one** `INSERT`, **one** guarded `UPDATE` carrying that same token and **one** `DELETE`, each with its affected-row count checked. The proposal is **complete replacement content**, never `FR-ADM-04`'s three-state patch; an **equal-content** proposal is an ordinary revision that **advances `last_updated_at`**, because the issue #213 no-op ruling governs `FR-ADM-04` only. **Revision identity stays adapter-private** — supplied under `ADR-019`, never in the domain, never returned, no `RETURNING` — so `DDM-2` remains open. **No retry is performed**, and **schema and migrations are unchanged**. **Transport, authorization, administrator confirmation and conflict messaging, and audit storage do not exist**, and rejected-history retrieval and retention/purge remain deferred.
 
 **Only `OP-10` compares a token, and that is deliberate.** `ADR-024` items 6–8 bind the

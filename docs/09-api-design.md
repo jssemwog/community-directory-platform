@@ -517,8 +517,15 @@ preserves every visibility designation and grants no restricted field public vis
 **The no-op this document promises for approving an already-approved record (*Idempotency
 of administrative operations*) is a deferred obligation of the future `OP-7` operation
 boundary and is not yet satisfied.**
-Persistence, transaction and locking policy, transport, authorization, attribution, audit
-and messaging remain unimplemented, so the operation is not yet reachable.
+~~Persistence, transaction and locking policy, transport, authorization, attribution, audit
+and messaging remain unimplemented, so the operation is not yet reachable.~~ **`C9`
+persistence landed with issue #242:** `persistListingApproval` (`src/data/listing-approval.ts`)
+approves a pending listing under `ADR-027` — token, then instant, refused before any
+transaction; explicit `READ COMMITTED`; the listing row locked first; lifecycle before the
+viewed-version token comparison; one guarded `UPDATE` of status, publication state and
+last-updated. An already-approved source is refused without writing; the no-op above is still
+not satisfied. **Transport, authorization, attribution, audit and messaging remain
+unimplemented**, so the operation is not yet reachable.
 
 ### OP-8 — Reject a pending submission
 
