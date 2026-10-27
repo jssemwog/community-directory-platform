@@ -32,10 +32,12 @@
  *   **Everything else stays `never` on update, and that is load-bearing.** `id` is identity
  *   (`DI-8`); `status` changes belong exclusively to `OP-7`/`OP-8` and never to an edit
  *   (`docs/09` `OP-6`); `submitted_at` is write-once (`ADR-017` `PS-9`); `rejected_at` is a
- *   write-once anchor; and `publication_state`/`unpublish_reason` are `OP-9`'s. The domain's
- *   `withListingContent` provably preserves all six, so `OP-10` has nothing to write through
- *   them - and a compile-time guard pins that, so a later unit cannot widen the surface
- *   silently.
+ *   write-once anchor; and `publication_state`/`unpublish_reason` changes after approval are
+ *   `OP-9`'s. Initial approval sets `publication_state` together with `status` through
+ *   `OP-7`'s own local statement (`ADR-017` `DDM-9`, `ADR-027`; issue #242), not through
+ *   this surface. The domain's `withListingContent` provably preserves all six, so `OP-10`
+ *   has nothing to write through them - and a compile-time guard pins that, so a later unit
+ *   cannot widen the surface silently.
  * - The `*_designated_public` flags carry a database `DEFAULT false`, so their insert type admits
  *   `undefined`. Serialization still supplies every one of them explicitly — the default is the
  *   store's fail-closed backstop (`ADR-017` `PS-2`), not this layer's way of omitting a value.
