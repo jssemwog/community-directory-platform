@@ -271,11 +271,12 @@ unavailable outcome for a malformed identity, an absent listing and a pending, r
 unpublished one. The list is ordered by that opaque identity, a consistent order that **does
 not answer `OQ-3`**. **Not built:** search and filter criteria (`OQ-4`), pagination, `OP-11`,
 transport and UI. **`BI-4` remains pending.** Issue #246 adds partial equivalence evidence at
-this read level only — `OP-2`'s outcome value and shape, `OP-1`'s count and order, and `OP-2`'s
-statement footprint and plan shape (`docs/traceability-matrix.md`, `BI-4`). Identical SQL and
-plan shape are not evidence of identical execution or timing: a present non-public row is
-fetched and filtered out, an absent key is not. **Timing equivalence is not claimed** and no
-timing method or threshold is decided.
+this read level only: `OP-2`'s outcome value and shape and `OP-1`'s count and order, plus a
+statement-footprint check that is structural evidence only (`docs/traceability-matrix.md`,
+`BI-4`). Identical SQL is not evidence of identical execution or timing, and no plan or executor
+behaviour is asserted. Under the tested conditions a present non-public row was observed to be
+fetched and filtered out while an absent key was not. **Timing equivalence is not claimed** and
+no timing method or threshold is decided.
 
 ---
 
