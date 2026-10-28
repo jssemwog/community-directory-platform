@@ -14,4 +14,9 @@ Two obligations govern everything that will be added here:
   Supplying a status, timestamp, or administrative field is rejected, not
   ignored.
 
-**Empty at scaffold time.**
+**Local demonstration only (issue #248).** `directory-view.ts` maps the `C9` read results
+to the `S1`/`S2` view states (results, empty directory, error; present, not available, error),
+and `local-demo-persistence.ts` is the composition root the `/directory` pages use. That root
+is enabled **only** for `npm run demo:local`: a loopback database, development mode, and the
+demo's own variable. **There is no production composition root**, and no pool, TLS or
+credential policy is decided here (`ADR-016`). `BI-4` remains pending (#246).

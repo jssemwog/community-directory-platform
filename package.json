@@ -13,7 +13,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "migrate:latest": "node --experimental-strip-types src/data/migrate.ts latest",
-    "migrate:down": "node --experimental-strip-types src/data/migrate.ts down"
+    "migrate:down": "node --experimental-strip-types src/data/migrate.ts down",
+    "demo:local": "node --no-warnings --experimental-transform-types --import ./scripts/local-demo/register.mjs scripts/local-demo/local-demo.ts start",
+    "demo:local:stop": "node --no-warnings --experimental-transform-types --import ./scripts/local-demo/register.mjs scripts/local-demo/local-demo.ts stop",
+    "demo:local:reset": "node --no-warnings --experimental-transform-types --import ./scripts/local-demo/register.mjs scripts/local-demo/local-demo.ts reset"
   },
   "dependencies": {
     "kysely": "0.29.6",

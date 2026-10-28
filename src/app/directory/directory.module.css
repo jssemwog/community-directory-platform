@@ -1,0 +1,162 @@
+/*
+ * Minimal, unbranded styling for the local demonstration (issue #248). Not a visual-design
+ * decision: layout, typography and colour remain `docs/10` `DU-2`.
+ */
+
+.shell {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+  color: #1a1a1a;
+  background: #ffffff;
+  min-height: 100vh;
+}
+
+.skipLink {
+  position: absolute;
+  left: 1rem;
+  top: -4rem;
+  padding: 0.75rem 1rem;
+  background: #1a1a1a;
+  color: #ffffff;
+  z-index: 1;
+}
+
+.skipLink:focus {
+  top: 1rem;
+}
+
+.header {
+  border-bottom: 1px solid #d0d0d0;
+  padding: 0.75rem 1rem;
+}
+
+.headerInner,
+.main {
+  max-width: 48rem;
+  margin: 0 auto;
+}
+
+.headerInner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
+.siteLink {
+  display: inline-block;
+  padding: 0.5rem 0;
+  font-weight: 600;
+  font-size: 1.125rem;
+}
+
+.demoNote {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #4a4a4a;
+}
+
+.main {
+  padding: 1rem 1rem 3rem;
+}
+
+.main:focus {
+  outline: none;
+}
+
+.shell a {
+  color: #0b4f9c;
+  text-underline-offset: 0.15em;
+}
+
+.shell a:focus-visible,
+.shell button:focus-visible {
+  outline: 3px solid #0b4f9c;
+  outline-offset: 2px;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.entry {
+  border: 1px solid #d0d0d0;
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+}
+
+.entryName {
+  margin: 0;
+  font-size: 1.125rem;
+}
+
+/* A touch-sized target for the main action on each entry (`UA-5`). */
+.entryName a {
+  display: inline-block;
+  padding: 0.5rem 0;
+}
+
+.entryMeta {
+  margin: 0;
+  color: #4a4a4a;
+}
+
+.message {
+  border: 1px solid #d0d0d0;
+  border-left-width: 0.375rem;
+  border-radius: 0.25rem;
+  padding: 0.75rem 1rem;
+}
+
+.backLink {
+  display: inline-block;
+  padding: 0.5rem 0;
+  margin-bottom: 0.5rem;
+}
+
+.description {
+  overflow-wrap: anywhere;
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: minmax(6rem, max-content) 1fr;
+  gap: 0.5rem 1rem;
+  margin: 1.5rem 0 0;
+}
+
+.field {
+  display: contents;
+}
+
+.fields dt {
+  font-weight: 600;
+}
+
+.fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 30rem) {
+  .fields {
+    grid-template-columns: 1fr;
+    gap: 0.125rem;
+  }
+
+  .fields dd {
+    margin-bottom: 0.5rem;
+  }
+}
+
+.retry {
+  font: inherit;
+  padding: 0.5rem 1rem;
+  min-height: 2.75rem;
+  cursor: pointer;
+}
