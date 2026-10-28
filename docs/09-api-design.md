@@ -270,8 +270,12 @@ available rows, pass each through the public projection, never read revisions, a
 unavailable outcome for a malformed identity, an absent listing and a pending, rejected or
 unpublished one. The list is ordered by that opaque identity, a consistent order that **does
 not answer `OQ-3`**. **Not built:** search and filter criteria (`OQ-4`), pagination, `OP-11`,
-transport and UI. **The `BI-4` equivalence test remains separate work**, so equivalence
-beyond the returned value is not claimed.
+transport and UI. **`BI-4` remains pending.** Issue #246 adds partial equivalence evidence at
+this read level only — `OP-2`'s outcome value and shape, `OP-1`'s count and order, and `OP-2`'s
+statement footprint and plan shape (`docs/traceability-matrix.md`, `BI-4`). Identical SQL and
+plan shape are not evidence of identical execution or timing: a present non-public row is
+fetched and filtered out, an absent key is not. **Timing equivalence is not claimed** and no
+timing method or threshold is decided.
 
 ---
 

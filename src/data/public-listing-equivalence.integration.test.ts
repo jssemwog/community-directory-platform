@@ -4,8 +4,8 @@
  *
  * The property is not "each non-public case returns not-available" (#244 already shows that); it
  * is that **never existed, pending, rejected and unpublished cannot be told apart** by an
- * unauthorised observer. Each test below compares the four cases with one another, per channel:
- * outcome value and shape, count, ordering, and the statements the database receives.
+ * unauthorised observer. Each equivalence test below compares the four cases with one another, per
+ * channel tested: outcome value and shape, count, ordering, and the statements the database receives.
  *
  * Listings reach their states through the real operations where they exist — submission, approval
  * (`OP-7`) and rejection (`OP-8`). Unpublishing (`OP-9`) is not implemented, so that state is
@@ -13,13 +13,16 @@
  *
  * ## What this suite does not prove
  *
- * **Timing.** Identical SQL text, an identical plan and identical returned rows are evidence that
- * the cases take the same *path*; they are not a measurement of response time, and they do not
- * rule out differences from index lookups, buffer caching or visibility checks on a row that is
- * present but filtered out. The plan observed here is a primary-key index scan with status and
- * publication state applied as a *filter after* the lookup, so a present non-public row is fetched
- * and discarded while a never-existed key is not: a known source of possible timing difference.
- * No timing equivalence is claimed here.
+ * **Execution or timing.** Identical SQL text and an identical plan shape show only that the
+ * application sends the same statement and the planner chooses the same plan; they do **not** show
+ * that the cases execute identically, and they are not a measurement of response time. The plan
+ * is a primary-key index scan with status and publication state applied as a *filter after* the
+ * lookup, and the "does not execute identically" test below records the consequence: a present
+ * non-public row is fetched and removed by the filter, while a never-existed key finds no row at
+ * all. That is different executor work, a known possible source of a timing difference (as are
+ * buffer caching and visibility checks), and nothing here measures whether it is observable.
+ * Timing equivalence is **unproven**: a timing claim needs its own measured method and threshold,
+ * which this suite does not decide.
  */
 
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -192,6 +195,21 @@ beforeAll(async () => {
   cluster.closeBeforeShutdown("persistence", () => persistence.shutdown());
 }, CLUSTER_TIMEOUT_MS);
 
+/** The one statement `OP-2` sends for `identity`, captured through the logging pool. */
+async function capturedStatementFor(identity: string): Promise<CapturedStatement> {
+  captured.length = 0;
+  await findPubliclyAvailableListing(capturingDb, identity);
+
+  expect(captured).toHaveLength(1);
+
+  return captured[0];
+}
+
+/** `statement`'s parameters with the captured identity replaced by `identity`. */
+function parametersFor(statement: CapturedStatement, capturedIdentity: string, identity: string): unknown[] {
+  return statement.parameters.map((parameter) => (parameter === capturedIdentity ? identity : parameter));
+}
+
 beforeEach(async () => {
   await sql`delete from listing_revision`.execute(persistence.db);
   await sql`delete from listing`.execute(persistence.db);
@@ -252,18 +270,16 @@ describe("BI-4: OP-2's negative outcome is the same for never existed, pending, 
     }
   }, TEST_TIMEOUT_MS);
 
-  it("chooses the same plan shape for each case (planner evidence, not a timing measurement)", async () => {
+  it("chooses the same plan shape for each case (planner evidence, not execution or timing)", async () => {
     const cases = await fourCases();
-
-    captured.length = 0;
-    await findPubliclyAvailableListing(capturingDb, cases[0][1]);
-
-    const [statement] = captured;
+    const statement = await capturedStatementFor(cases[0][1]);
     const plans = [];
 
     for (const [, identity] of cases) {
-      const parameters = statement.parameters.map((parameter) => (parameter === cases[0][1] ? identity : parameter));
-      const { rows } = await capturePool.query(`explain (format json, costs false) ${statement.sql}`, parameters);
+      const { rows } = await capturePool.query(
+        `explain (format json, costs false) ${statement.sql}`,
+        parametersFor(statement, cases[0][1], identity),
+      );
 
       plans.push(JSON.stringify(rows[0]).split(identity).join("<identity>"));
     }
@@ -271,6 +287,41 @@ describe("BI-4: OP-2's negative outcome is the same for never existed, pending, 
     for (const plan of plans.slice(1)) {
       expect(plan).toBe(plans[0]);
     }
+
+    // The plan the header describes: a primary-key lookup, with status and publication state
+    // applied as a filter after it.
+    expect(JSON.parse(plans[0])).toMatchObject({
+      "QUERY PLAN": [
+        {
+          Plan: {
+            "Node Type": "Index Scan",
+            "Index Name": "listing_pkey",
+            Filter: expect.stringMatching(/status.*publication_state/),
+          },
+        },
+      ],
+    });
+  }, TEST_TIMEOUT_MS);
+
+  it("does not execute identically: a present non-public row is fetched and filtered out, an absent key is not (no timing claim)", async () => {
+    const cases = await fourCases();
+    const statement = await capturedStatementFor(cases[0][1]);
+    const removedByFilter: Record<string, unknown> = {};
+
+    for (const [name, identity] of cases) {
+      const { rows } = await capturePool.query(
+        `explain (analyze, costs false, timing false, summary false, format json) ${statement.sql}`,
+        parametersFor(statement, cases[0][1], identity),
+      );
+      const [{ Plan: plan }] = rows[0]["QUERY PLAN"] as ReadonlyArray<{ Plan: Record<string, unknown> }>;
+
+      expect(plan["Actual Rows"]).toBe(0);
+      removedByFilter[name] = plan["Rows Removed by Filter"];
+    }
+
+    // Recorded, not endorsed: this is why the identical statement and plan above are not evidence
+    // of identical execution or timing. Whether the difference is observable is not measured here.
+    expect(removedByFilter).toEqual({ "never existed": 0, pending: 1, rejected: 1, unpublished: 1 });
   }, TEST_TIMEOUT_MS);
 });
 
