@@ -64,6 +64,28 @@ same "not available" page as an address that never existed:
 **Stop.** Press **Ctrl+C** in the terminal running `demo:local`; it stops the site and then the
 database. If the terminal was closed instead, run `npm run demo:local:stop`.
 
+**One command at a time.** Each command holds `.local-demo/launcher.lock` while it runs, so:
+- a second `demo:local` refuses while one is active, and `demo:local:stop` and
+  `demo:local:reset` refuse too. They leave the running demo untouched; stop it with Ctrl+C in
+  its own terminal. A lock left by a command that has exited is reclaimed automatically;
+- `demo:local` also refuses, before changing anything, if port 3000 on `127.0.0.1` is in use. It
+  refuses too if port 54329 is in use while its own cluster is not running. A cluster of its own
+  left running by an earlier session is reused.
+
+**Shutdown.** The launcher asks the site to stop and waits up to 15 seconds each for the site to
+exit and for port 3000 to be released, with a forced exit of the site's own process in between.
+Only then does it stop the database and print `Stopped.`. Otherwise it reports the problem and
+exits with an error. It never stops a process by name or port.
+
+**Reset deletes nothing on doubt.** `demo:local:reset` deletes `.local-demo/` only when PostgreSQL
+confirms the cluster is stopped and port 54329 is free. Otherwise it changes nothing and says
+why. It refuses even when the process holding the port is unrelated to the demo. Likewise, if
+PostgreSQL cannot report the cluster as either running or stopped, `demo:local` and
+`demo:local:stop` change nothing.
+
+**Checking the lifecycle.** `node scripts/local-demo/check-lifecycle.mjs` runs the real demo and
+checks these rules end to end. Run it while no demo is running; it reseeds the demo database.
+
 **What it is not.**
 - Not a deployment: everything listens on `127.0.0.1` only.
 - The `/directory` pages are disabled unless all three hold: the demo's

@@ -11,6 +11,17 @@
  * Ctrl+C stops the site and then the cluster. `stop` stops a cluster left running. `reset` stops
  * it and deletes `.local-demo/`.
  *
+ * ## One command at a time, and nothing deleted on doubt (`lifecycle.ts`)
+ *
+ * - Every command takes the owned launcher lock `.local-demo/launcher.lock` first. While a live
+ *   `start` holds it, a second `start` cannot reseed or stop that demo, and `stop` and `reset`
+ *   refuse; the running demo is left as it is.
+ * - `start` checks that the site port is free before it changes anything.
+ * - `pg_ctl status` is read as running, stopped or unknown. On unknown, `start` and `stop` change
+ *   nothing, and `reset` deletes nothing; `reset` also refuses while the database port is busy.
+ * - Shutdown asks the spawned site to stop over IPC (`site-control.mjs`), waits a bounded time for
+ *   it and for the site port to be released, and only then stops the cluster and reports success.
+ *
  * ## Local only, and nothing shared
  *
  * - The PostgreSQL binaries are the ones `embedded-postgres` already installs for the test suite;
@@ -25,11 +36,10 @@
  *   (`ADR-016`).
  */
 
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import net from "node:net";
 import { arch, platform } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
@@ -42,12 +52,22 @@ import { createListingPersistence } from "../../src/data/connection";
 import { createMigrationProvider } from "../../src/data/migrate";
 import { LOCAL_DEMO_DATABASE_URL } from "../../src/interface/public/local-demo-persistence";
 import { resetAndSeedSyntheticListings, SYNTHETIC_LISTINGS } from "./fixtures";
+import {
+  acquireLauncherLock,
+  clusterStatusOf,
+  portIsFree,
+  resetRefusalOf,
+  stopOwnedSite,
+  type ClusterStatus,
+  type OwnedLock,
+} from "./lifecycle";
 
 const REPOSITORY_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const DEMO_DIRECTORY = join(REPOSITORY_ROOT, ".local-demo");
 const DATA_DIRECTORY = join(DEMO_DIRECTORY, "pgdata");
 const SERVER_LOG = join(DEMO_DIRECTORY, "postgres.log");
 const CREDENTIALS_FILE = join(DEMO_DIRECTORY, "credentials.json");
+const LAUNCHER_LOCK = join(DEMO_DIRECTORY, "launcher.lock");
 
 const HOST = "127.0.0.1";
 const DATABASE_PORT = 54329;
@@ -55,6 +75,10 @@ const WEB_PORT = 3000;
 const DATABASE_USER = "demo";
 const DATABASE_NAME = "community_directory_demo";
 const PG_CTL_TIMEOUT_SECONDS = "60";
+/** How long each shutdown step waits for the site: its exit, a forced exit, the port release. */
+const SITE_STOP_TIMEOUT_MS = 15_000;
+/** The IPC message a supervising process (the lifecycle check) sends to request shutdown. */
+const LAUNCHER_SHUTDOWN_MESSAGE = "local-demo:shutdown";
 
 interface PostgresBinaries {
   readonly initdb: string;
@@ -91,17 +115,47 @@ function run(command: string, args: readonly string[], quiet = true): Promise<nu
   });
 }
 
-async function isRunning(binaries: PostgresBinaries): Promise<boolean> {
-  return existsSync(DATA_DIRECTORY) && (await run(binaries.pg_ctl, ["status", "-D", DATA_DIRECTORY])) === 0;
+/** The owned cluster's status. With no data directory there is no cluster of ours to run. */
+async function clusterStatus(binaries: PostgresBinaries): Promise<ClusterStatus> {
+  if (!existsSync(DATA_DIRECTORY)) {
+    return "stopped";
+  }
+
+  try {
+    return clusterStatusOf(await run(binaries.pg_ctl, ["status", "-D", DATA_DIRECTORY]));
+  } catch {
+    return clusterStatusOf(null);
+  }
 }
 
-function portIsFree(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const probe = net.createServer();
+const UNKNOWN_STATUS =
+  "pg_ctl could not confirm whether the local PostgreSQL cluster is running; nothing was changed. See .local-demo/postgres.log.";
 
-    probe.once("error", () => resolve(false));
-    probe.listen(port, HOST, () => probe.close(() => resolve(true)));
-  });
+/** Take the launcher lock for `command`, or explain who holds it and change nothing. */
+function takeLauncherLock(command: string): OwnedLock {
+  mkdirSync(DEMO_DIRECTORY, { recursive: true });
+
+  const attempt = acquireLauncherLock(LAUNCHER_LOCK, command);
+
+  if (attempt.ok) {
+    process.on("exit", () => attempt.lock.release());
+    return attempt.lock;
+  }
+
+  if (attempt.reason === "active") {
+    throw new Error(
+      `A local demo \`${attempt.holder.command}\` (process ${attempt.holder.pid}) is still active; nothing was changed. ` +
+        "Stop it with Ctrl+C in its terminal first.",
+    );
+  }
+
+  if (attempt.reason === "unreadable") {
+    throw new Error(
+      ".local-demo/launcher.lock is unreadable; nothing was changed. Remove it only after confirming no local demo command is running.",
+    );
+  }
+
+  throw new Error("Another local demo command started at the same time; nothing was changed. Try again.");
 }
 
 function readPassword(): string {
@@ -155,12 +209,19 @@ async function initialiseIfNeeded(binaries: PostgresBinaries): Promise<void> {
 }
 
 async function startCluster(binaries: PostgresBinaries): Promise<void> {
-  if (await isRunning(binaries)) {
-    say("The local PostgreSQL cluster is already running; reusing it.");
+  const status = await clusterStatus(binaries);
+
+  if (status === "unknown") {
+    throw new Error(UNKNOWN_STATUS);
+  }
+
+  if (status === "running") {
+    // No live launcher holds the lock, so this cluster was left by an earlier session.
+    say("The local PostgreSQL cluster was left running by an earlier session; reusing it.");
     return;
   }
 
-  if (!(await portIsFree(DATABASE_PORT))) {
+  if (!(await portIsFree(HOST, DATABASE_PORT))) {
     throw new Error(`Port ${DATABASE_PORT} on ${HOST} is in use by another process.`);
   }
 
@@ -184,8 +245,15 @@ async function startCluster(binaries: PostgresBinaries): Promise<void> {
   }
 }
 
+/** Stop the owned cluster and confirm it stopped; throw if that cannot be confirmed. */
 async function stopCluster(binaries: PostgresBinaries): Promise<void> {
-  if (!(await isRunning(binaries))) {
+  const status = await clusterStatus(binaries);
+
+  if (status === "unknown") {
+    throw new Error(UNKNOWN_STATUS);
+  }
+
+  if (status === "stopped") {
     return;
   }
 
@@ -193,8 +261,8 @@ async function stopCluster(binaries: PostgresBinaries): Promise<void> {
 
   const code = await run(binaries.pg_ctl, ["stop", "-D", DATA_DIRECTORY, "-m", "fast", "-w", "-t", PG_CTL_TIMEOUT_SECONDS]);
 
-  if (code !== 0) {
-    throw new Error("PostgreSQL did not stop; run `npm run demo:local:stop` again.");
+  if (code !== 0 || (await clusterStatus(binaries)) !== "stopped") {
+    throw new Error("PostgreSQL could not be confirmed stopped; run `npm run demo:local:stop` again.");
   }
 }
 
@@ -253,71 +321,143 @@ async function prepareDatabase(password: string): Promise<void> {
 
 async function start(): Promise<void> {
   const binaries = await postgresBinaries();
+  const lock = takeLauncherLock("start");
+
+  if (!(await portIsFree(HOST, WEB_PORT))) {
+    throw new Error(`Port ${WEB_PORT} on ${HOST} is in use by another process; nothing was changed.`);
+  }
 
   await initialiseIfNeeded(binaries);
   await startCluster(binaries);
 
   let stopping = false;
-  let site: ReturnType<typeof spawn> | undefined;
+  let site: ChildProcess | undefined;
 
-  const shutdown = async (exitCode: number): Promise<void> => {
+  const shutdown = async (requestedExitCode: number): Promise<void> => {
     if (stopping) {
       return;
     }
 
     stopping = true;
 
-    if (site !== undefined && site.exitCode === null) {
-      site.kill();
+    let exitCode = requestedExitCode;
+
+    if (site !== undefined) {
+      const outcome = await stopOwnedSite(site, { host: HOST, port: WEB_PORT, timeoutMs: SITE_STOP_TIMEOUT_MS });
+
+      if (outcome === "did-not-exit") {
+        say("The site process did not exit within the shutdown bound.");
+        exitCode = 1;
+      } else if (outcome === "port-still-in-use") {
+        say(`The site exited, but port ${WEB_PORT} was not released within the shutdown bound; a site worker may still be running.`);
+        exitCode = 1;
+      }
     }
 
     try {
       await stopCluster(binaries);
     } catch (error) {
-      say(error instanceof Error ? error.message : "PostgreSQL did not stop.");
+      say(error instanceof Error ? error.message : "PostgreSQL could not be confirmed stopped.");
       exitCode = 1;
     }
 
+    lock.release();
+    say(exitCode === 0 ? "Stopped." : "Shutdown finished with the problems reported above.");
     process.exit(exitCode);
   };
 
   process.on("SIGINT", () => void shutdown(0));
   process.on("SIGTERM", () => void shutdown(0));
+  process.on("message", (message) => {
+    if (message === LAUNCHER_SHUTDOWN_MESSAGE) {
+      void shutdown(0);
+    }
+  });
 
   try {
+    if (!lock.stillOwned()) {
+      throw new Error("The launcher lock is no longer this launcher's; nothing was reseeded.");
+    }
+
     await prepareDatabase(readPassword());
+
+    site = spawn(
+      process.execPath,
+      [
+        "--import",
+        new URL("./site-control.mjs", import.meta.url).href,
+        require.resolve("next/dist/bin/next"),
+        "dev",
+        "--hostname",
+        HOST,
+        "--port",
+        String(WEB_PORT),
+      ],
+      {
+        cwd: REPOSITORY_ROOT,
+        stdio: ["inherit", "inherit", "inherit", "ipc"],
+        env: {
+          ...process.env,
+          [LOCAL_DEMO_DATABASE_URL]: connectionStringFor(DATABASE_NAME, readPassword()),
+        },
+      },
+    );
   } catch (error) {
-    say(error instanceof Error ? error.message : "Preparing the local database failed.");
+    say(error instanceof Error ? error.message : "Preparing the local demo failed.");
     await shutdown(1);
     return;
   }
 
+  site.once("error", () => {
+    say("The site process could not be started.");
+    void shutdown(1);
+  });
+  site.once("exit", (code) => void shutdown(code ?? 1));
+
   say(`Open http://${HOST}:${WEB_PORT}/directory — press Ctrl+C to stop the site and the database.`);
-
-  site = spawn(
-    process.execPath,
-    [require.resolve("next/dist/bin/next"), "dev", "--hostname", HOST, "--port", String(WEB_PORT)],
-    {
-      cwd: REPOSITORY_ROOT,
-      stdio: "inherit",
-      env: {
-        ...process.env,
-        [LOCAL_DEMO_DATABASE_URL]: connectionStringFor(DATABASE_NAME, readPassword()),
-      },
-    },
-  );
-
-  site.once("exit", (code) => void shutdown(code ?? 0));
 }
 
 async function stop(): Promise<void> {
-  await stopCluster(await postgresBinaries());
+  if (!existsSync(DEMO_DIRECTORY)) {
+    say("Nothing to stop.");
+    return;
+  }
+
+  const binaries = await postgresBinaries();
+  const lock = takeLauncherLock("stop");
+
+  try {
+    await stopCluster(binaries);
+  } finally {
+    lock.release();
+  }
+
   say("Stopped.");
 }
 
 async function reset(): Promise<void> {
-  await stopCluster(await postgresBinaries());
-  rmSync(DEMO_DIRECTORY, { recursive: true, force: true });
+  if (!existsSync(DEMO_DIRECTORY)) {
+    say("Nothing to reset.");
+    return;
+  }
+
+  const binaries = await postgresBinaries();
+  const lock = takeLauncherLock("reset");
+
+  try {
+    await stopCluster(binaries);
+
+    const refusal = resetRefusalOf(await clusterStatus(binaries), await portIsFree(HOST, DATABASE_PORT), DATABASE_PORT);
+
+    if (refusal !== undefined) {
+      throw new Error(refusal);
+    }
+
+    rmSync(DEMO_DIRECTORY, { recursive: true, force: true });
+  } finally {
+    lock.release();
+  }
+
   say("Removed .local-demo/.");
 }
 
