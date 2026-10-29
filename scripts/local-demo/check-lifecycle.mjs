@@ -9,13 +9,15 @@
  * 1. an occupied site port makes `start` refuse before it changes anything;
  * 2. a second `start`, a `stop` and a `reset` all refuse while a demo is active, and that demo
  *    keeps serving;
- * 3. an orderly shutdown stops the site and its worker within the bound, releases both ports and
- *    reports success only then;
- * 4. `reset` deletes nothing while the database port is busy or `pg_ctl` cannot confirm a stop.
+ * 3. an orderly shutdown makes the launcher exit 0 only after the site child exited, port 3000
+ *    became bindable and the cluster stopped (this does not prove every site worker exited);
+ * 4. `reset` deletes nothing while the database port is busy or `pg_ctl` cannot confirm a stop;
+ * 5. a stale or unreadable launcher lock makes `start`, `stop` and `reset` refuse, and leaves the
+ *    lock byte-for-byte unchanged. The check then removes the lock files it wrote itself.
  */
 
-import { spawn } from "node:child_process";
-import { existsSync, renameSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { join } from "node:path";
 import process from "node:process";
@@ -99,6 +101,11 @@ if (!(await portIsFree(WEB_PORT)) || !(await portIsFree(DATABASE_PORT))) {
   process.exit(2);
 }
 
+if (existsSync(join(DEMO_DIRECTORY, "launcher.lock"))) {
+  process.stdout.write(".local-demo/launcher.lock exists; this check never touches a lock it did not write. Resolve it first.\n");
+  process.exit(2);
+}
+
 // 1. An occupied site port.
 {
   const holder = await occupy(WEB_PORT);
@@ -151,7 +158,7 @@ if (serving) {
 
   check(`the launcher exits 0 after shutdown (${Date.now() - requestedAt} ms)`, code === 0);
   check("  ...reporting success only after the site and the cluster stopped", /Stopping PostgreSQL[\s\S]*Stopped\.\s*$/.test(activeOutput));
-  check("  ...with port 3000 released (no site worker left serving)", await portIsFree(WEB_PORT));
+  check("  ...with port 3000 bindable again (the site child exited; not proof every worker did)", await portIsFree(WEB_PORT));
   check("  ...and port 54329 released", await portIsFree(DATABASE_PORT));
   check("  ...and the launcher lock released", !existsSync(join(DEMO_DIRECTORY, "launcher.lock")));
 }
@@ -179,6 +186,33 @@ if (serving) {
     check("  ...and deletes nothing", existsSync(aside));
   } finally {
     renameSync(aside, PG_VERSION);
+  }
+}
+
+// 5. A stale or unreadable lock fails closed and is left exactly as it was.
+{
+  const lockPath = join(DEMO_DIRECTORY, "launcher.lock");
+  const { pid: exitedPid } = spawnSync(process.execPath, ["-e", ""]);
+  const cases = [
+    ["stale", JSON.stringify({ pid: exitedPid, command: "start", token: "check-stale" }), "no longer appears to be running"],
+    ["unreadable", "not a lock", "is unreadable"],
+  ];
+
+  for (const [kind, content, message] of cases) {
+    writeFileSync(lockPath, content);
+
+    try {
+      for (const command of ["start", "stop", "reset"]) {
+        const { code, output } = await runCommand(command);
+
+        check(`${command} refuses the ${kind} lock`, code === 1 && output.includes(message));
+        check("  ...leaving the lock unchanged", readFileSync(lockPath, "utf8") === content);
+        check("  ...and starting or deleting nothing", existsSync(PG_VERSION) && (await portIsFree(WEB_PORT)) && (await portIsFree(DATABASE_PORT)));
+      }
+    } finally {
+      // Deliberate recovery of a lock this check wrote itself, with no demo running.
+      rmSync(lockPath, { force: true });
+    }
   }
 }
 

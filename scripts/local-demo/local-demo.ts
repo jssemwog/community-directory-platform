@@ -13,14 +13,16 @@
  *
  * ## One command at a time, and nothing deleted on doubt (`lifecycle.ts`)
  *
- * - Every command takes the owned launcher lock `.local-demo/launcher.lock` first. While a live
- *   `start` holds it, a second `start` cannot reseed or stop that demo, and `stop` and `reset`
- *   refuse; the running demo is left as it is.
+ * - Every command takes the owned launcher lock `.local-demo/launcher.lock` first, by exclusive
+ *   creation. While it exists, a second `start` cannot reseed or stop the demo, and `stop` and
+ *   `reset` refuse. An existing lock is never moved or deleted automatically, even when its
+ *   process has exited; a person removes it after confirming no demo launcher or site remains.
  * - `start` checks that the site port is free before it changes anything.
  * - `pg_ctl status` is read as running, stopped or unknown. On unknown, `start` and `stop` change
  *   nothing, and `reset` deletes nothing; `reset` also refuses while the database port is busy.
- * - Shutdown asks the spawned site to stop over IPC (`site-control.mjs`), waits a bounded time for
- *   it and for the site port to be released, and only then stops the cluster and reports success.
+ * - Shutdown asks the spawned site to stop over IPC (`site-control.mjs`) and waits, within bounds,
+ *   for that child to exit and the site port to become bindable; only then does it stop the
+ *   cluster and report success. That does not prove every site worker exited.
  *
  * ## Local only, and nothing shared
  *
@@ -149,13 +151,21 @@ function takeLauncherLock(command: string): OwnedLock {
     );
   }
 
+  if (attempt.reason === "stale") {
+    throw new Error(
+      `.local-demo/launcher.lock was left by a local demo \`${attempt.holder.command}\` (process ${attempt.holder.pid}) ` +
+        "that no longer appears to be running; nothing was changed. Confirm that no local demo launcher or site is " +
+        "still running, then delete .local-demo/launcher.lock and try again.",
+    );
+  }
+
   if (attempt.reason === "unreadable") {
     throw new Error(
       ".local-demo/launcher.lock is unreadable; nothing was changed. Remove it only after confirming no local demo command is running.",
     );
   }
 
-  throw new Error("Another local demo command started at the same time; nothing was changed. Try again.");
+  throw new Error("The launcher lock kept changing while being taken; nothing was changed. Try again.");
 }
 
 function readPassword(): string {

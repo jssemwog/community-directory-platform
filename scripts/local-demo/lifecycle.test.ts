@@ -87,34 +87,68 @@ describe("the launcher lock", () => {
     expect(second.ok && second.lock.stillOwned()).toBe(true);
   });
 
-  it("reclaims a lock left by a process that has exited", () => {
+  it("refuses a lock left by an exited process, for every command, and leaves it unchanged", () => {
+    const stale = JSON.stringify({ pid: exitedPid(), command: "start", token: "stale" });
+
+    writeFileSync(lockPath, stale);
+
+    for (const command of ["start", "stop", "reset", "start"]) {
+      expect(acquireLauncherLock(lockPath, command)).toMatchObject({ ok: false, reason: "stale", holder: { command: "start" } });
+      expect(readFileSync(lockPath, "utf8")).toBe(stale);
+    }
+  });
+
+  it("can be taken again only after a person deliberately removes the stale lock", () => {
     writeFileSync(lockPath, JSON.stringify({ pid: exitedPid(), command: "start", token: "stale" }));
+    expect(acquireLauncherLock(lockPath, "start").ok).toBe(false);
+
+    rmSync(lockPath);
 
     const attempt = acquireLauncherLock(lockPath, "start");
 
-    expect(attempt.ok).toBe(true);
     expect(attempt.ok && attempt.lock.stillOwned()).toBe(true);
   });
 
-  it("never takes a lock it cannot read as one of its own", () => {
-    writeFileSync(lockPath, "not a lock");
+  it("never takes a lock it cannot read as one of its own, and leaves it unchanged", () => {
+    for (const content of ["not a lock", "{}", JSON.stringify({ pid: "1", command: "start", token: "t" })]) {
+      writeFileSync(lockPath, content);
 
-    expect(acquireLauncherLock(lockPath, "start")).toEqual({ ok: false, reason: "unreadable" });
-    expect(readFileSync(lockPath, "utf8")).toBe("not a lock");
+      for (const command of ["start", "stop", "reset"]) {
+        expect(acquireLauncherLock(lockPath, command)).toEqual({ ok: false, reason: "unreadable" });
+        expect(readFileSync(lockPath, "utf8")).toBe(content);
+      }
+    }
   });
 
-  it("backs off and restores the newer lock when another launcher reclaimed the stale one first", () => {
-    const rival = JSON.stringify({ pid: process.pid, command: "start", token: "rival" });
+  it("does not consult liveness to move or replace a lock: a stale verdict changes nothing", () => {
+    const stale = JSON.stringify({ pid: 999_999, command: "start", token: "stale" });
+    let consulted = 0;
 
-    writeFileSync(lockPath, JSON.stringify({ pid: 999_999, command: "start", token: "stale" }));
+    writeFileSync(lockPath, stale);
 
     const attempt = acquireLauncherLock(lockPath, "start", () => {
-      writeFileSync(lockPath, rival);
+      consulted += 1;
       return false;
     });
 
-    expect(attempt).toEqual({ ok: false, reason: "contended" });
-    expect(readFileSync(lockPath, "utf8")).toBe(rival);
+    expect(attempt).toEqual({ ok: false, reason: "stale", holder: { pid: 999_999, command: "start" } });
+    expect(consulted).toBe(1);
+    expect(readFileSync(lockPath, "utf8")).toBe(stale);
+  });
+
+  it("release removes the lock only while it still carries the holder's token", () => {
+    const holder = acquireLauncherLock(lockPath, "start");
+    const other = JSON.stringify({ pid: process.pid, command: "start", token: "someone-else" });
+
+    expect(holder.ok).toBe(true);
+    writeFileSync(lockPath, other);
+
+    if (holder.ok) {
+      expect(holder.lock.stillOwned()).toBe(false);
+      holder.lock.release();
+    }
+
+    expect(readFileSync(lockPath, "utf8")).toBe(other);
   });
 
   it("treats this process as alive and an exited one as not", () => {

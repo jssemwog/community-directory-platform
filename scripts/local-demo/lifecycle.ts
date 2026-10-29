@@ -9,7 +9,7 @@
 
 import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { linkSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import process from "node:process";
 
@@ -79,7 +79,7 @@ export async function waitForPortFree(host: string, port: number, timeoutMs: num
 
 /**
  * Whether a process with this id exists. A permission error means it exists; any doubt counts as
- * alive, so a lock is never reclaimed from a process that might still hold it.
+ * alive, so a lock is never reported stale while its process might still hold it.
  */
 export function isProcessAlive(pid: number): boolean {
   try {
@@ -104,7 +104,7 @@ export interface OwnedLock {
 
 export type LockAttempt =
   | { readonly ok: true; readonly lock: OwnedLock }
-  | { readonly ok: false; readonly reason: "active"; readonly holder: LockHolder }
+  | { readonly ok: false; readonly reason: "active" | "stale"; readonly holder: LockHolder }
   | { readonly ok: false; readonly reason: "unreadable" | "contended" };
 
 function errorCode(error: unknown): string | undefined {
@@ -141,11 +141,14 @@ function holderOf(raw: string): (LockHolder & { readonly token: string }) | unde
 /**
  * Take the launcher lock at `path` for `command`, created exclusively (`wx`).
  *
- * - A lock whose process is alive is never taken: the attempt fails as `active`.
- * - A lock that cannot be read as one of ours is never taken: `unreadable`.
- * - A lock whose process has exited is moved aside atomically and the move is checked: if what
- *   was moved is not the stale lock that was read (another launcher replaced it meanwhile), it is
- *   restored and the attempt fails as `contended`.
+ * An existing lock is **never** moved, rewritten or deleted here; the attempt fails closed:
+ * - `active`: its process is alive (or might be);
+ * - `stale`: its process has exited. Recovery is deliberate: a person confirms that no local demo
+ *   launcher or site remains, then deletes the file;
+ * - `unreadable`: it cannot be read as one of ours;
+ * - `contended`: it kept disappearing between the create and the read.
+ *
+ * Only the holder removes its own lock, and only while the file still carries its token.
  */
 export function acquireLauncherLock(
   path: string,
@@ -167,7 +170,7 @@ export function acquireLauncherLock(
           rmSync(path, { force: true });
         }
       } catch {
-        // Releasing is best effort; a leftover lock names an exited process and is reclaimed.
+        // Releasing is best effort; a leftover lock is refused as stale until a person removes it.
       }
     },
   };
@@ -185,6 +188,7 @@ export function acquireLauncherLock(
     const observed = readIfPresent(path);
 
     if (observed === undefined) {
+      // Its holder released it meanwhile; try the exclusive create again.
       continue;
     }
 
@@ -194,34 +198,11 @@ export function acquireLauncherLock(
       return { ok: false, reason: "unreadable" };
     }
 
-    if (isAlive(holder.pid)) {
-      return { ok: false, reason: "active", holder: { pid: holder.pid, command: holder.command } };
-    }
-
-    const aside = `${path}.stale-${token}`;
-
-    try {
-      renameSync(path, aside);
-    } catch (error) {
-      if (errorCode(error) === "ENOENT") {
-        continue;
-      }
-
-      throw error;
-    }
-
-    if (readIfPresent(aside) !== observed) {
-      try {
-        linkSync(aside, path);
-      } catch {
-        // A newer lock is already in place; the owner of the moved one sees it is no longer theirs.
-      }
-
-      rmSync(aside, { force: true });
-      return { ok: false, reason: "contended" };
-    }
-
-    rmSync(aside, { force: true });
+    return {
+      ok: false,
+      reason: isAlive(holder.pid) ? "active" : "stale",
+      holder: { pid: holder.pid, command: holder.command },
+    };
   }
 
   return { ok: false, reason: "contended" };
@@ -254,14 +235,18 @@ export const SITE_STOP_MESSAGE = "local-demo:stop";
 export type SiteStopOutcome = "stopped" | "did-not-exit" | "port-still-in-use";
 
 /**
- * Stop the owned site process and confirm that it, and any worker it started, has finished.
+ * Stop the owned site process within a bound. What this verifies is limited to two facts: the
+ * spawned child process exited, and the site port became bindable again. It does **not** verify
+ * that every worker or other descendant of the site exited; one that no longer holds the port
+ * would go unnoticed, so `"stopped"` is not proof of complete worker cleanup.
  *
- * 1. Ask it to stop through its IPC channel, so `next dev` runs its own shutdown, which stops its
- *    worker and waits for it. Then wait up to `timeoutMs` for it to exit.
+ * 1. Ask it to stop through its IPC channel. `site-control.mjs` hands that to `next dev`'s own
+ *    SIGTERM handling, which in Next 16.3.3 stops its worker and waits for it (Next internals,
+ *    not a documented API). Then wait up to `timeoutMs` for the child to exit.
  * 2. If it has not exited, terminate that one process (`kill()` on the spawned child) and wait
  *    up to `timeoutMs` again.
- * 3. Wait up to `timeoutMs` for the site port to be released, which confirms that no worker of
- *    the site is still serving. The port is only checked; nothing listening on it is touched.
+ * 3. Wait up to `timeoutMs` for the site port to become bindable. The port is only checked;
+ *    nothing listening on it is touched.
  */
 export async function stopOwnedSite(
   site: ChildProcess,
