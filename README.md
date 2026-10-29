@@ -36,6 +36,84 @@ The development server serves two structural surfaces:
 Both are **empty shells**. `/admin` is *not* protected, because the
 authentication mechanism is `ADR-004`, which is blocked by `DG-3`.
 
+## Local directory demonstration (localhost only)
+
+A **local-only** demonstration of the public directory (`S1`) and listing detail (`S2`), over
+the real public read path and projection, with **synthetic, fictional** listings (issue #248).
+It needs nothing beyond `npm install`: the PostgreSQL binaries are the ones the test suite
+already installs, and no account, service or network access is used.
+
+```
+npm run demo:local         # start: database + migrations + synthetic listings + site
+npm run demo:local:stop    # stop a database left running (e.g. after closing the terminal)
+npm run demo:local:reset   # stop and delete all local demo data (.local-demo/)
+```
+
+**Start.** `npm run demo:local` initialises a PostgreSQL cluster in `.local-demo/` on first run,
+starts it on `127.0.0.1:54329`, applies the migrations, and re-creates seven fictional listings
+through the existing submission, approval and rejection operations — five approved, one pending,
+one rejected. It then runs the development server on `127.0.0.1:3000`.
+
+**View.** Open <http://127.0.0.1:3000/directory>. The five approved listings appear; open one
+for its detail. The pending and rejected listings do not appear, and their addresses show the
+same "not available" page as an address that never existed:
+
+- pending: `/directory/5acd9ba7-be6f-4c8a-937e-af6bce8c4d56`
+- rejected: `/directory/6bdeacb8-cf7a-4d9b-a48f-ba7cdf9d5e67`
+
+**Stop.** Press **Ctrl+C** in the terminal running `demo:local`; it stops the site and then the
+database. If the terminal was closed instead, its lock may remain; follow the recovery steps under
+"A leftover lock is never removed automatically" below, which end with `npm run demo:local:stop`.
+
+**One command at a time.** Each command creates `.local-demo/launcher.lock` exclusively and holds
+it while it runs. While that file exists:
+- a second `demo:local` refuses, and so do `demo:local:stop` and `demo:local:reset`. They leave
+  the running demo untouched; stop it with Ctrl+C in its own terminal.
+- `demo:local` also refuses, before changing anything, if port 3000 on `127.0.0.1` is in use. It
+  refuses too if port 54329 is in use while its own cluster is not running. A cluster of its own
+  left running by an earlier session is reused.
+
+**A leftover lock is never removed automatically.** If a command ended without releasing the
+lock (for example, its terminal was killed), every command refuses. It names the process the lock
+records and says that process no longer appears to be running. An unreadable lock is refused the
+same way. To recover deliberately:
+1. Confirm that no local demo is still running. No terminal is running `demo:local`, no process
+   with the recorded id is running, and <http://127.0.0.1:3000> does not respond.
+2. Delete `.local-demo/launcher.lock`.
+3. Run `npm run demo:local:stop` in case the database was left running, then start again.
+
+**Shutdown.** The launcher asks the site to stop and waits up to 15 seconds for the site process
+it started to exit. If needed, it forces that one process to exit and waits again. It then waits
+up to 15 seconds for port 3000 to become free. Only then does it stop the database and print
+`Stopped.`; otherwise it reports the problem and exits with an error. It never stops a process by
+name or port.
+
+This confirms only that the launcher's own child process exited and that port 3000 is free. It
+does not prove that every Next.js worker process exited. The orderly stop also relies on
+internal, undocumented `next dev` shutdown behaviour (checked against Next.js 16.3.3).
+
+**Reset deletes nothing on doubt.** `demo:local:reset` deletes `.local-demo/` only when PostgreSQL
+confirms the cluster is stopped and port 54329 is free. Otherwise it changes nothing and says
+why. It refuses even when the process holding the port is unrelated to the demo. Likewise, if
+PostgreSQL cannot report the cluster as either running or stopped, `demo:local` and
+`demo:local:stop` change nothing.
+
+**Checking the lifecycle.** `node scripts/local-demo/check-lifecycle.mjs` runs the real demo and
+checks these rules end to end. Run it while no demo is running and no lock exists; it reseeds the
+demo database.
+
+**What it is not.**
+- Not a deployment: everything listens on `127.0.0.1` only.
+- The `/directory` pages are disabled unless all three hold: the demo's
+  `LOCAL_DEMO_DATABASE_URL` is set, its host is loopback, and Next.js runs in development mode.
+  So `npm run dev`, `npm run build` and `npm start` are unaffected, and those pages answer 404
+  there.
+- The database password is random per cluster and stays in the git-ignored `.local-demo/`.
+- There is no search, submission form, administration or authentication.
+- The layout and wording are a demonstration, not the `DU-2` / `DU-7` design decisions.
+- **`BI-4` remains pending** (#246). The not-available response is the same for every
+  non-public case, but timing equivalence is unresolved.
+
 ## Project structure
 
 ```

@@ -16,3 +16,6 @@ next-env.d.ts
 
 # TypeScript incremental build info
 *.tsbuildinfo
+
+# Local directory demonstration (issue #248) — cluster data and credentials, never committed
+.local-demo/
