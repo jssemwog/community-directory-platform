@@ -18,6 +18,7 @@ import {
   isProcessAlive,
   portIsFree,
   resetRefusalOf,
+  SITE_CONTROL_OWNER_ENV,
   stopOwnedSite,
   waitForExit,
 } from "./lifecycle";
@@ -218,8 +219,72 @@ function fakeSite(port: number, stubborn: boolean): ChildProcess {
 
   return spawn(process.execPath, ["--import", SITE_CONTROL, "-e", source], {
     stdio: ["ignore", "inherit", "inherit", "ipc"],
+    env: { ...process.env, [SITE_CONTROL_OWNER_ENV]: String(process.pid) },
   });
 }
+
+/**
+ * A stand-in for `next dev` started as the launcher starts it, which forks a worker the way
+ * Next 16.3.3 does: with the parent's `--import` carried in `NODE_OPTIONS` and an IPC channel of
+ * its own. Both report how many `message` and `disconnect` listeners they have, and whether the
+ * owner variable reached them.
+ */
+function hookCarrier(ownerValue: string | undefined): ChildProcess {
+  const report = `({ message: process.listenerCount("message"), disconnect: process.listenerCount("disconnect"), owner: process.env.${SITE_CONTROL_OWNER_ENV} ?? null })`;
+  const source = `
+    const { spawn } = require("node:child_process");
+    const own = ${report};
+    const worker = spawn(process.execPath, ["-e", ${JSON.stringify(`process.send(${report}, () => process.exit(0));`)}], {
+      stdio: ["ignore", "inherit", "inherit", "ipc"],
+      env: { ...process.env, NODE_OPTIONS: "--import=${SITE_CONTROL}" },
+    });
+    worker.once("message", (inherited) => process.send({ own, inherited }, () => process.exit(0)));
+  `;
+  const env: NodeJS.ProcessEnv = { ...process.env };
+
+  if (ownerValue === undefined) {
+    delete env[SITE_CONTROL_OWNER_ENV];
+  } else {
+    env[SITE_CONTROL_OWNER_ENV] = ownerValue;
+  }
+
+  return spawn(process.execPath, ["--import", SITE_CONTROL, "-e", source], {
+    stdio: ["ignore", "inherit", "inherit", "ipc"],
+    env,
+  });
+}
+
+interface ListenerReport {
+  readonly message: number;
+  readonly disconnect: number;
+  readonly owner: string | null;
+}
+
+function reportsOf(carrier: ChildProcess): Promise<{ own: ListenerReport; inherited: ListenerReport }> {
+  return new Promise((resolve) => carrier.once("message", (message) => resolve(message as never)));
+}
+
+describe("the site stop hook stays in the launcher's own child (issue #250)", () => {
+  it("listens in the child the launcher owns, and is inert in a process that inherits it via NODE_OPTIONS", async () => {
+    const carrier = hookCarrier(String(process.pid));
+    const { own, inherited } = await reportsOf(carrier);
+
+    expect(own).toEqual({ message: 1, disconnect: 1, owner: null });
+    expect(inherited).toEqual({ message: 0, disconnect: 0, owner: null });
+    expect(await waitForExit(carrier, 10_000)).toBe(true);
+  }, TEST_TIMEOUT_MS);
+
+  it("is inert in a direct child whose owner variable is absent or names another process", async () => {
+    for (const ownerValue of [undefined, String(exitedPid())]) {
+      const carrier = hookCarrier(ownerValue);
+      const { own, inherited } = await reportsOf(carrier);
+
+      expect(own).toEqual({ message: 0, disconnect: 0, owner: null });
+      expect(inherited).toEqual({ message: 0, disconnect: 0, owner: null });
+      expect(await waitForExit(carrier, 10_000)).toBe(true);
+    }
+  }, TEST_TIMEOUT_MS);
+});
 
 function workerOf(site: ChildProcess): Promise<number> {
   return new Promise((resolve) => site.once("message", (message) => resolve((message as { worker: number }).worker)));

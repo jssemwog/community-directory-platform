@@ -99,8 +99,9 @@ PostgreSQL cannot report the cluster as either running or stopped, `demo:local` 
 `demo:local:stop` change nothing.
 
 **Checking the lifecycle.** `node scripts/local-demo/check-lifecycle.mjs` runs the real demo and
-checks these rules end to end. Run it while no demo is running and no lock exists; it reseeds the
-demo database.
+checks these rules end to end. It also opens an approved listing's detail page directly and as the
+client router requests it after a click on the directory. Run it while no demo is running and no
+lock exists; it reseeds the demo database.
 
 **What it is not.**
 - Not a deployment: everything listens on `127.0.0.1` only.

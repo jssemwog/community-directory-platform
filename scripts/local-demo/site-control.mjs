@@ -7,11 +7,24 @@
  * SIGTERM handling. In Next 16.3.3 that handling stops its worker and waits for it before
  * exiting; this is Next's internal behaviour, not a documented API. If the launcher itself
  * disappears, the channel closes and the hook requests the same shutdown.
+ *
+ * ## Only in the launcher's own child (issue #250)
+ *
+ * `next dev` copies its `execArgv`, and with it this `--import`, into `NODE_OPTIONS` for its
+ * worker. From there the hook reaches every Node process the worker starts, including the
+ * `jest-worker` that serves dynamic routes, and those processes have IPC channels of their own.
+ * Listening there stalled every `/directory/<id>` request. So the hook acts only when
+ * `LOCAL_DEMO_SITE_CONTROL_OWNER` names this process's parent (the launcher). It deletes that
+ * variable before `next dev` starts, so no descendant inherits it, and is inert everywhere else.
  */
 
 import process from "node:process";
 
-if (typeof process.send === "function") {
+const owner = process.env.LOCAL_DEMO_SITE_CONTROL_OWNER;
+
+delete process.env.LOCAL_DEMO_SITE_CONTROL_OWNER;
+
+if (owner !== undefined && owner === String(process.ppid) && typeof process.send === "function") {
   process.on("message", (message) => {
     if (message === "local-demo:stop") {
       process.emit("SIGTERM");

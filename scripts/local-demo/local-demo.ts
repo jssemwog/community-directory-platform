@@ -59,6 +59,7 @@ import {
   clusterStatusOf,
   portIsFree,
   resetRefusalOf,
+  SITE_CONTROL_OWNER_ENV,
   stopOwnedSite,
   type ClusterStatus,
   type OwnedLock,
@@ -409,6 +410,7 @@ async function start(): Promise<void> {
         env: {
           ...process.env,
           [LOCAL_DEMO_DATABASE_URL]: connectionStringFor(DATABASE_NAME, readPassword()),
+          [SITE_CONTROL_OWNER_ENV]: String(process.pid),
         },
       },
     );

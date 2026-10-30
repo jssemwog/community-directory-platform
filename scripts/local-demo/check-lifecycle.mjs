@@ -7,8 +7,9 @@
  *
  * It checks, in order:
  * 1. an occupied site port makes `start` refuse before it changes anything;
- * 2. a second `start`, a `stop` and a `reset` all refuse while a demo is active, and that demo
- *    keeps serving;
+ * 2. while a demo is active, an approved listing's detail page loads, both opened directly and
+ *    requested as the client router does after a click on /directory (issue #250); then a second
+ *    `start`, a `stop` and a `reset` all refuse, and that demo keeps serving;
  * 3. an orderly shutdown makes the launcher exit 0 only after the site child exited, port 3000
  *    became bindable and the cluster stopped (this does not prove every site worker exited);
  * 4. `reset` deletes nothing while the database port is busy or `pg_ctl` cannot confirm a stop;
@@ -28,6 +29,10 @@ const HOST = "127.0.0.1";
 const WEB_PORT = 3000;
 const DATABASE_PORT = 54329;
 const DIRECTORY_URL = `http://${HOST}:${WEB_PORT}/directory`;
+const APPROVED_ID = "0b7e4c52-6f1a-4d3b-8e29-5a1c7f3d9e01";
+const APPROVED_NAME = "Juniper Lane Bakery";
+/** How long a detail request may take before it counts as hanging (first compile included). */
+const DETAIL_TIMEOUT_MS = 60_000;
 const DEMO_DIRECTORY = join(ROOT, ".local-demo");
 const PG_VERSION = join(DEMO_DIRECTORY, "pgdata", "PG_VERSION");
 const LAUNCHER = [
@@ -72,6 +77,26 @@ function occupy(port) {
 
     holder.listen(port, HOST, () => resolve(holder));
   });
+}
+
+/** One request, never following redirects, abandoned after DETAIL_TIMEOUT_MS. */
+async function fetchWithin(url, headers) {
+  const startedAt = Date.now();
+
+  try {
+    const response = await fetch(url, { headers, redirect: "manual", signal: AbortSignal.timeout(DETAIL_TIMEOUT_MS) });
+    const body = await response.text();
+
+    return {
+      status: response.status,
+      type: response.headers.get("content-type") ?? "",
+      location: response.headers.get("location"),
+      body,
+      ms: Date.now() - startedAt,
+    };
+  } catch {
+    return { status: 0, type: "", location: null, body: "", ms: Date.now() - startedAt };
+  }
 }
 
 async function statusOf(url) {
@@ -130,6 +155,36 @@ active.stderr.on("data", (chunk) => (activeOutput += chunk));
 const serving = await waitFor(async () => (await statusOf(DIRECTORY_URL)) === 200, 180_000);
 
 check("the first start serves /directory", serving);
+
+// The listing detail (S2) of an approved fixture, opened directly and requested the way the
+// client router does after a click on /directory (issue #250: both used to hang).
+if (serving) {
+  const detailUrl = `${DIRECTORY_URL}/${APPROVED_ID}`;
+  const direct = await fetchWithin(detailUrl, {});
+
+  check(
+    `an approved listing's detail page loads directly (${direct.ms} ms)`,
+    direct.status === 200 && direct.body.includes(APPROVED_NAME) && direct.body.includes("Back to the directory"),
+  );
+
+  // The router sends RSC headers; Next redirects (307) to the matching cache-busting `_rsc` value
+  // when the client's differs, and the router follows it with the same headers.
+  const routerHeaders = {
+    RSC: "1",
+    "Next-Router-State-Tree": encodeURIComponent(JSON.stringify(["", { children: ["directory", { children: ["__PAGE__", {}] }] }])),
+    "Next-Url": "/directory",
+  };
+  let navigation = await fetchWithin(detailUrl, routerHeaders);
+
+  if (navigation.status === 307 && navigation.location !== null) {
+    navigation = await fetchWithin(new URL(navigation.location, detailUrl).href, routerHeaders);
+  }
+
+  check(
+    `navigating from the directory to that listing loads it (${navigation.ms} ms)`,
+    navigation.status === 200 && navigation.type.startsWith("text/x-component") && navigation.body.includes(APPROVED_NAME),
+  );
+}
 
 if (serving) {
   const second = await runCommand("start");
