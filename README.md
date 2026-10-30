@@ -33,8 +33,9 @@ The development server serves two structural surfaces:
 | `/` | Public | `TB-1` / `TB-2` |
 | `/admin` | Administrative | `TB-3` |
 
-Both are **empty shells**. `/admin` is *not* protected, because the
-authentication mechanism is `ADR-004`, which is blocked by `DG-3`.
+Both are **empty shells**. `/admin` is *not* protected, because no
+authentication is implemented. Its mechanism, `ADR-004`, is `Accepted` (issue #252) but not
+implemented, and `DG-3` remains unresolved.
 
 ## Local directory demonstration (localhost only)
 
