@@ -232,6 +232,12 @@ export function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boo
 /** The message `site-control.mjs` turns into the site's own SIGTERM handling. */
 export const SITE_STOP_MESSAGE = "local-demo:stop";
 
+/**
+ * The variable through which the launcher tells `site-control.mjs` which process owns it: the
+ * launcher's process id. The hook acts only in a process whose parent has that id (issue #250).
+ */
+export const SITE_CONTROL_OWNER_ENV = "LOCAL_DEMO_SITE_CONTROL_OWNER";
+
 export type SiteStopOutcome = "stopped" | "did-not-exit" | "port-still-in-use";
 
 /**
