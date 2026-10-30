@@ -184,7 +184,7 @@ authentication *mechanism* is an architecture decision and is not selected here.
 | NFR-SEC-04 | Data exchanged between users and the system, and any administrator credentials, shall be protected against interception and tampering in transit. | Security | Stakeholders; privacy | Must | Inspection / Test | Stated as a protection property, technology-neutral (no protocol or cipher selected). |
 | NFR-SEC-05 | The public listing-request form shall validate and constrain all submitted input so that malformed or malicious input cannot compromise the system, corrupt stored data, or be reflected unsafely to other users. | Security | L2; FR-VAL-01 | Must | Test | Complements functional validation (FR-VAL) with an injection/abuse-resistance quality bar. |
 | NFR-SEC-06 | The public submission form should be protected by a safeguard that limits automated abuse (such as bulk or scripted submissions) without requiring a lister account. | Security | L2; FR-SUB-09 | Should | Test / Demonstration | Anti-abuse safeguard is valuable but not yet approved. **Decision pending: OQ-9.** |
-| NFR-SEC-07 | Administrator authentication should meet a defined minimum strength for credentials and session handling appropriate to a small trusted operator team. | Security | Stakeholders; A-5, A-6 | Should | Inspection | The concrete strength/session policy is **Decision pending: NOQ-9**; the mechanism itself is deferred to architecture. |
+| NFR-SEC-07 | Administrator authentication should meet a defined minimum strength for credentials and session handling appropriate to a small trusted operator team. | Security | Stakeholders; A-5, A-6 | Should | Inspection | The concrete strength/session policy was ~~**Decision pending: NOQ-9**~~ **Decided 2026-10-30 (NOQ-9, issue #252)**: an app-owned password plus mandatory TOTP over server-side sessions, recorded in `ADR-004` (`Accepted` 2026-10-30). |
 | NFR-SEC-08 | Sensitive values (such as administrator credentials) shall never be stored or transmitted in an unprotected, human-readable form, and shall never appear in logs or error messages. | Security / Privacy | Stakeholders; observability | Must | Inspection / Audit | Cross-links NFR-OBS-04 (no sensitive data in logs). |
 
 ---
@@ -437,7 +437,7 @@ here.** Each decision-pending requirement above points to one of these.
 | NOQ-6 | Which browsers, devices, and assistive technologies form the supported compatibility matrix? | NFR-RESP-03, NFR-COMP-01, NFR-COMP-02 | Vision; FR-ACC-03 |
 | NOQ-7 | What is the operational-log retention period, and what precisely counts as sensitive data to exclude from logs? | NFR-OBS-06 | Stakeholders; privacy |
 | NOQ-8 | *(Reserved)* Is audit logging of administrator moderation actions committed for the MVP? Tracked jointly with the functional question. | NFR-OBS-05 | Carries FR OQ-14 |
-| NOQ-9 | What minimum administrator credential and session-handling strength is required (independent of the deferred authentication mechanism)? | NFR-SEC-07 | Stakeholders; A-6 |
+| ~~NOQ-9~~ | ~~What minimum administrator credential and session-handling strength is required (independent of the deferred authentication mechanism)?~~ **Decided 2026-10-30 (Joe S., issue #252):** see `ADR-004` (`Accepted` 2026-10-30) for the approved choices and the accepted lockout risk. | NFR-SEC-07 | Stakeholders; A-6 |
 
 **Referenced functional open questions.** `OQ-7` (public vs. withheld fields —
 NFR-PRIV-01, NFR-PRIV-02) is now **Decided**, as is `OQ-8`/`OQ-8b` (submission obligations —

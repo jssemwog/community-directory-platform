@@ -7,7 +7,7 @@ later**.
 `docs/07-system-architecture.md` names the ADRs this project needs. Until now, **nothing held
 them.** This directory is that place.
 
-**It holds twenty-two decisions in force.** `ADR-001`, `ADR-002`, `ADR-003`, `ADR-005`, `ADR-006`,
+**It holds twenty-three decisions in force.** `ADR-001`, `ADR-002`, `ADR-003`, `ADR-005`, `ADR-006`,
 `ADR-010`, `ADR-013`, `ADR-012` — since 2026-09-04 — `ADR-014` — since 2026-09-11 — `ADR-015` —
 since 2026-09-14 — `ADR-016` — since 2026-09-15 — `ADR-017` — since 2026-09-17 (issue
 #137; published as `Proposed` 2026-09-16, issue #131) — `ADR-018` — since 2026-09-28 (issue
@@ -16,11 +16,11 @@ since 2026-09-14 — `ADR-016` — since 2026-09-15 — `ADR-017` — since 2026
 2026-10-09** (issue #167) — **`ADR-022`, since 2026-10-09** (issue #169) — **`ADR-023`,
 since 2026-10-12** (issue #181) — **`ADR-024`, since 2026-10-14** (issue #189) —
 **`ADR-025`, since 2026-10-17** (issue #203) — **`ADR-026`, since 2026-10-25** (issue
-#235) — and **`ADR-027`, since 2026-10-26** (issue #240) — the last nine on binding rulings
+#235) — **`ADR-027`, since 2026-10-26** (issue #240) — and **`ADR-004`, since 2026-10-30**
+(issue #252; published as `Proposed` the same day) — the last ten on binding rulings
 given before
 their ADRs were drafted — are all **Accepted**;
-and every remaining ADR is **Blocked** on a question
-the product owner has not been asked. See *The register*.
+and every remaining ADR is **Blocked** on a question the product owner has not been asked. See *The register*.
 
 ---
 
@@ -135,7 +135,7 @@ forgotten.
 | **`ADR-001`** | Adopt a modular monolith with a server-enforced public/administrative boundary; **reject microservices and browser-direct data access** — and record **why the mini lab shape was rejected on the requirements** (`R-10`) | `DG-0` | **Nothing** | **Accepted** — 2026-07-24 (issue #29). *The only decision taken so far.* |
 | **[`ADR-002`](ADR-002-application-language-and-framework.md)** | Application language and framework | **`DG-2`** | **Nothing.** ~~The technology decision~~ — **no open question is named**; hard requirements 1, 2, 6 and `DD-2` are stated **inputs**, and `NOQ-1`/`NOQ-4` are **shaping inputs** that do not block (carried as `PA-1`). **Fed by `ADR-003`** (Accepted), which fixes the store the stack must integrate with | **Accepted** — 2026-08-25 (issue #85). *In force; work may rely on it.* The decision is **TypeScript + Next.js**, the product owner's selection from the governed candidate comparison. **It discharges `DD-2`.** The compensating obligations **O-1**–**O-12** are binding. ~~**`ADR-005` remains open; `DG-2` remains Unresolved**~~ — **`ADR-005` is `Accepted` and `DG-2` is `Resolved`** (2026-08-27, issue #93); this ADR itself opened no gate — and no ORM/data-access technology, hosting provider, authentication mechanism, test tooling, CI, named PostgreSQL provider, schema, or separable frontend technology is selected. |
 | **[`ADR-003`](ADR-003-data-store-product.md)** | **Data-store product** | **`DG-2`** | **Nothing.** ~~**`NOQ-2`** (availability) · **`NOQ-3`** (backup / RPO / RTO)~~ both **Decided** — 2026-07-30, `NOQ-3` amended by ruling **R1** 2026-08-18 — `DD-3`. **Fed by `ADR-010`** (Accepted), which supplies the recovery-capability filter `DD-3` required | **Accepted** — 2026-08-23 (issue #81). *In force; work may rely on it.* The decision is **PostgreSQL under a managed operating posture**. It **discharges `DD-3`**. **The named provider is deferred**, so `DDM-1` is **not fully discharged**; no schema or index is decided; `ADR-010`'s provider-capability validation remains outstanding; and ~~**`DG-2` remains Unresolved**~~ **`DG-2` is `Resolved`** (2026-08-27, issue #93) — this ADR itself opened no gate. |
-| **`ADR-004`** | Administrator authentication mechanism | **`DG-3`** | **`NOQ-9`** — `DD-4`. *The boundary is settled; the mechanism is not* | **Blocked** |
+| **[`ADR-004`](ADR-004-administrator-authentication-mechanism.md)** | Administrator authentication mechanism | **`DG-3`**, which **remains `Unresolved`** | ~~**`NOQ-9`** — `DD-4`. *The boundary is settled; the mechanism is not*~~ — **`NOQ-9` Decided 2026-10-30** (issue #252): an app-owned password plus a mandatory TOTP second factor over server-side sessions, explicitly provisioned accounts and no public registration; the consolidated parameters approved and the lockout and sole-maintainer recovery risk accepted the same day | **Accepted** — 2026-10-30 (issue #252); published as `Proposed` the same day. **In force.** It authorizes no implementation, and `DG-3` remains `Unresolved` |
 | **[`ADR-005`](ADR-005-hosting-platform-and-runtime-model.md)** | Hosting platform and runtime model | **`DG-2`** | **Nothing.** ~~The technology decision~~ — **no open question is named**; `DD-5` is a stated **input** (`docs/07` records that **both** runtime shapes satisfy the architecture), `NOQ-2` is **Decided** 2026-07-30, and `NOQ-1`/`NOQ-4` are **shaping inputs** that do not block (carried as `PA-1`). **Fed by `ADR-010`** (Accepted — the availability and recovery posture it must host), **`ADR-003`** (Accepted — the managed PostgreSQL it must reach) and **`ADR-002`** (Accepted — whose Node.js runtime requirement is a framework *consequence*, not an `ADR-005` decision). **It must not reopen the rejected decomposition of Option D** (`docs/07`) | **Accepted** — 2026-08-27 (issue #91). *In force; work may rely on it.* Published as `Proposed` 2026-08-26 (issue #89, PR #90). The decision is **Render, with the Next.js modular monolith deployed as a long-running Node.js web service**, the product owner's selection from the governed candidate comparison. **It discharges `DD-5`.** The compensating obligations **O-1**–**O-9** are binding. ~~**`DG-2` remains Unresolved**~~ **`DG-2` is `Resolved`** (2026-08-27, issue #93) — this acceptance completed its final substantive decision but **opened no gate**, so the separate governed `Resolved` synchronization it required was performed under issue #93 — and no named PostgreSQL provider, ORM/data-access technology, authentication mechanism, test tooling, CI, container technology, observability product, or Render service tier is selected. |
 | **[`ADR-006`](ADR-006-listing-data-model-and-lifecycle-states.md)** | **Listing data model and lifecycle states** | **`DG-1`** — **Resolved 2026-08-04** | **Nothing.** `OQ-6`, `OQ-7`, `OQ-8`/`OQ-8b`, `OQ-10`, `OQ-11`, and `OQ-13` are all **Decided** — `DD-1` | **Accepted** — 2026-08-07 (issue #61). *In force; work may rely on it.* |
 | **`ADR-007`** | Search approach | **`DG-1`** | **`OQ-4`** — `DD-14`. *A dedicated index requires **measured** justification* | **Blocked** |
@@ -167,10 +167,12 @@ forgotten.
 > `Accepted`** — in force since 2026-08-23; the named provider remains **deferred**, and
 > ~~`DG-2` remains **Unresolved**~~ **`DG-2` is `Resolved`** (2026-08-27, issue #93).
 
-**Five of twelve still cannot be written** — ~~six~~, until `ADR-012` was drafted as
-`Proposed` on 2026-09-03. That is not a backlog to work around; it is the
+**~~Five~~ Four of twelve still cannot be written** — ~~six~~, until `ADR-012` was drafted as
+`Proposed` on 2026-09-03; and five until `ADR-004` was drafted as `Proposed` on 2026-10-30
+(issue #252), after the `NOQ-9` direction ruling, and **`Accepted`** the same day. That is not a backlog to work around; it is the
 measure of what ~~`DG-1`, `DG-2`, and~~ **`DG-3`** is holding — `DG-1` and `DG-2` are both
-**`Resolved`**. Four of the five (`ADR-004`, `ADR-008`, `ADR-009`, `ADR-011`) wait on **`DG-3`**;
+**`Resolved`**. ~~Four of the five (`ADR-004`, `ADR-008`, `ADR-009`, `ADR-011`)~~ Three of the
+four (`ADR-008`, `ADR-009`, `ADR-011`) wait on **`DG-3`**, which remains `Unresolved`;
 `ADR-007` sits under the `Resolved` `DG-1` and waits instead on **`OQ-4`**, an **Unresolved shaping
 input**. See `docs/13-decision-log.md`.
 
