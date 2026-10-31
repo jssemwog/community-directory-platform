@@ -17,7 +17,11 @@ Every module added here is subject to:
   moderation notes must never reach a public surface — and this is the layer
   that finally holds them.
 
-The mechanism behind `C8` is **`ADR-004`, Blocked by `DG-3`** (`NOQ-9`). No
-authentication or authorization is implemented at scaffold time.
+The mechanism behind `C8` is **`ADR-004`**, `Accepted` 2026-10-30 (issue #252).
+`DG-3` remains `Unresolved`; a narrow exception (issue #254; full exception in `docs/13`,
+*Gate-scope exception*) permits separately authorized authentication work **locally only**
+(development mode, the web server bound to loopback, a local database, synthetic accounts), with
+no moderation or business-administration capability. No authentication or authorization is
+implemented yet.
 
 **Empty at scaffold time.**
