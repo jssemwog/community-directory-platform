@@ -67,7 +67,7 @@ until it is answered. That is a harder deadline than a calendar date, and an hon
 | **`DG-0`** | Process | **Joe S.** — maintainer | **Open** | Nothing | — | — |
 | **`DG-1`** | **Data design** | **Joe S.** — product owner | **Resolved** — 2026-08-04 | ~~**All of `P1`**~~; the product-decision blocker on `P1` is removed. ~~**`P1` remains blocked by `DG-2`.**~~ — **`DG-2` is now `Resolved` too, so `P1` is gate-clear.** | 6 — **6 Decided, 0 Unresolved** | 2 — **1 Decided, 1 Unresolved** |
 | **`DG-2`** | **Technology** | **Joe S.** — product owner | **Resolved** — 2026-08-27 (issue #93) | ~~The **`P0b` scaffold** and all of `P1`~~; both gate blockers are removed. **`P0b` is now eligible to start; `P1` is gate-clear but still follows `P0b`.** | 3 — **3 Decided, 0 Unresolved** | 2 |
-| **`DG-3`** | **Build-time** | **Joe S.** — product owner | **Unresolved** | `P3`, `P4`, and the *verifiability* of `P2` | 3 — `NOQ-9` **Decided** 2026-10-30 (issue #252; `ADR-004` `Accepted`); `OQ-9` and `OQ-14` + `NOQ-8` **Unresolved** | 2 |
+| **`DG-3`** | **Build-time** | **Joe S.** — product owner | **Unresolved** — a narrow local-only authentication exception was ruled 2026-10-31 (issue #254; full exception under *`DG-3` — build-time*, *Gate-scope exception*) | `P3`, `P4` (except that local-only authentication work), and the *verifiability* of `P2` | 3 — `NOQ-9` **Decided** 2026-10-30 (issue #252; `ADR-004` `Accepted`); `OQ-9` and `OQ-14` + `NOQ-8` **Unresolved** | 2 |
 | **`DG-4`** | **Release** | **Joe S.** — product owner | **Unresolved** | The **release decision**, not the build | — | — |
 
 > **`DG-0` is open. Everything else is not.**
@@ -283,6 +283,28 @@ records them on one row deliberately.**
 break keyboard or assistive operability (`NFR-ACC-01/02`) or violate the vision's low-friction
 principle. **That constraint is recorded now, before the mechanism is chosen** — it is not a
 new requirement, and it does not answer `OQ-9`.
+
+### Gate-scope exception: local-only administrator authentication (issue #254)
+
+**Product Owner ruling, 2026-10-31.** A **narrow** exception to this gate for **separately
+authorized** local authentication work under `Accepted` `ADR-004`. **`DG-3` remains
+`Unresolved` overall**, and the exception opens nothing else.
+
+| | |
+|---|---|
+| **Permitted** | **Synthetic** local administrator accounts, **authentication and recovery flows**, and a **trivial protected page**, each through its own authorized issue |
+| **Only where** | **Development mode**, with the web server **bound to loopback** and a **local database** |
+| **Never reachable** | **No moderation or business-administration capability**: `OP-4`–`OP-10` transport, `S5`–`S7`, and `C10` stay blocked by `OQ-14` + `NOQ-8` |
+| **Logging** | Operational logging (`C12`) may provide evidence for synthetic testing. **Not decided:** whether provisioning, reset, revoke, disable or authentication events require **audit** in the eventual product (`OQ-14` + `NOQ-8`) |
+| **Still prohibited** | **Public administrative reachability.** `ADR-004` L-1–L-5, R-1–R-4 and its security review stay required |
+| **Unchanged** | `OQ-9` and `OQ-14` + `NOQ-8` **undecided**; #246 open and `BI-4` **pending**; no accepted ADR amended |
+
+**Why an exception was needed.** `docs/12` places the `C8` boundary in `P4` (`W4`;
+*Phase 4*, "First"), and `P4` is gated here by `OQ-14` + `NOQ-8`. The earlier carve-outs
+(#234, #238) covered only slices that **expose no surface**; an authentication flow exposes one.
+This exception **permits synthetic local authentication testing** without deciding whether
+authentication, provisioning, reset, revoke or disable events require eventual audit (`OQ-14` +
+`NOQ-8`). **No moderation or business-administration capability may become reachable.**
 
 ---
 

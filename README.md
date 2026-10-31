@@ -35,7 +35,11 @@ The development server serves two structural surfaces:
 
 Both are **empty shells**. `/admin` is *not* protected, because no
 authentication is implemented. Its mechanism, `ADR-004`, is `Accepted` (issue #252) but not
-implemented, and `DG-3` remains unresolved.
+implemented, and `DG-3` remains unresolved. A narrow Product Owner exception (issue #254)
+permits separately authorized authentication work **locally only** — development mode, the web
+server bound to loopback, a local database and synthetic accounts — with no moderation or
+business-administration capability. Public administrative reachability remains prohibited. The
+full exception is recorded in `docs/13-decision-log.md` (*Gate-scope exception*).
 
 ## Local directory demonstration (localhost only)
 

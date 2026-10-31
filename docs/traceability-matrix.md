@@ -305,7 +305,7 @@ work, and a shaping input is not overstated into a block.
 | `DG-0` | Process | **Open** | Nothing — `P0a` proceeds |
 | `DG-1` | Data design | Unresolved | All of `P1`; transitively `P2`–`P4` |
 | `DG-2` | Technology | **Resolved** — 2026-08-27 (issue #93) | ~~`P0b` scaffold and all of `P1`~~ — discharged: `P0b` eligible, `P1` gate-clear |
-| `DG-3` | Build-time | Unresolved | `P3`, `P4`; verifiability of `P2` |
+| `DG-3` | Build-time | Unresolved | `P3`, `P4` (except the local-only authentication work of issue #254; full exception in `docs/13`, *Gate-scope exception*); verifiability of `P2` |
 | `DG-4` | Release | Unresolved | The release decision, not the build |
 
 **Every gate is owned by a role, not yet a person** (`docs/13`) — assigning a person to each
@@ -417,7 +417,7 @@ has answered `DG-1` by the back door.**
 | `P1` | Entities, status machine, integrity invariants | `DG-1`, `DG-2` | Blocked |
 | `P2` | Public browsing, the public projection | `P1`; `DG-1` | Blocked |
 | `P3` | Listing submission workflow | `P1`; `DG-1`, `DG-3` | Blocked |
-| `P4` | Administrative review workflow | `P1`; `DG-3` | Blocked |
+| `P4` | Administrative review workflow | `P1`; `DG-3` | Blocked — except local-only `C8` authentication work (issue #254; full exception in `docs/13`, *Gate-scope exception*) |
 | `P5` | Testing, hardening, release preparation | `P2`–`P4`; `DG-4` | Blocked |
 
 ---
