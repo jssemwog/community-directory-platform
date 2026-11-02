@@ -20,6 +20,15 @@ decisions and creates no new policy.**
 base-version column `ADR-023` requires. **It likewise implements an already
 accepted decision and creates no new policy.**
 
+**It also contains the third schema migration** —
+`003-create-administrator-authentication-tables.ts` (issue #258) — which creates the
+seven administrator authentication tables `ADR-028` assigns to it, with their constraints.
+**It implements an accepted decision and creates no new policy.** The recovery-code table is
+`ADR-028`'s migration `004`, a later slice, so **recovery-code issuance stays deferred** and
+complete `ADR-004` provisioning remains required before any public reachability. Like `001`
+and `002`, it is applied only to disposable test clusters, and by the local demonstration to
+its own local database when that demonstration is started.
+
 **What still does not exist:** **no database is provisioned**, **no PostgreSQL
 version is selected**, **no migration has been executed against any shared,
 hosted, staging or production database**, and **`C9` persistence is not

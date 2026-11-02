@@ -99,6 +99,13 @@ const MIGRATION_NAME = "001-create-listing-and-revision-tables";
 const SECOND_MIGRATION_NAME = "002-add-revision-base-version";
 
 /**
+ * The third migration (issue #258): the `ADR-028` administrator authentication tables. Named
+ * for the same reason as `002`: the governed runner applies it too. Its own attacking tests live
+ * in `third-schema-migration.test.ts`.
+ */
+const THIRD_MIGRATION_NAME = "003-create-administrator-authentication-tables";
+
+/**
  * The base-version column `002` adds (`ADR-023` items 9-12).
  *
  * `001` does not create it, and this file does not attack it — but it is `not null`, so every
@@ -359,13 +366,17 @@ describe("up migration", () => {
       "select name from kysely_migration order by name",
     );
 
-    // Exactly the two governed migrations, in the order the ordinal prefixes impose. Stated
+    // Exactly the three governed migrations, in the order the ordinal prefixes impose. Stated
     // exhaustively rather than as a subset: a third file appearing in the folder, or either of
     // these failing to apply, must fail here rather than pass unnoticed.
-    expect(rows.map((row) => row.name)).toEqual([MIGRATION_NAME, SECOND_MIGRATION_NAME]);
+    expect(rows.map((row) => row.name)).toEqual([
+      MIGRATION_NAME,
+      SECOND_MIGRATION_NAME,
+      THIRD_MIGRATION_NAME,
+    ]);
   });
 
-  it("creates exactly the two governed tables, and no other", async () => {
+  it("creates exactly the governed tables, and no other", async () => {
     const { rows } = await client.query<{ table_name: string }>(
       `select table_name from information_schema.tables
         where table_schema = 'public' and table_type = 'BASE TABLE'
@@ -373,7 +384,18 @@ describe("up migration", () => {
         order by table_name`,
     );
 
-    expect(rows.map((row) => row.table_name)).toEqual(["listing", "listing_revision"]);
+    // `001`'s two, and the seven `003` adds (issue #258).
+    expect(rows.map((row) => row.table_name)).toEqual([
+      "administrator",
+      "administrator_consumed_challenge",
+      "administrator_pending_challenge",
+      "administrator_session",
+      "administrator_totp_factor",
+      "authentication_source_window",
+      "authentication_throttle",
+      "listing",
+      "listing_revision",
+    ]);
   });
 });
 
@@ -1116,9 +1138,12 @@ describe("down migration against an empty schema", () => {
    * That is asserted step by step rather than collapsed, because the intermediate state is the
    * one a real rollback would land in, and a test that only checked the end state would pass
    * even if the first `down` had dropped a table it must not touch.
+   *
+   * **Migration `003` (issue #258) adds a third step in front**: the first `down` now reverses
+   * `003`, removing only its seven authentication tables, before `002` and `001` follow.
    */
   it(
-    "reverses one migration per step, reaching an empty schema only after both",
+    "reverses one migration per step, reaching an empty schema only after all three",
     async () => {
       const dependencies = dependenciesFor(DOWN_DATABASE);
       const downClient = new Client({
@@ -1159,10 +1184,21 @@ describe("down migration against an empty schema", () => {
         expect(await runMigration("latest", dependencies)).toBe(SUCCESS);
 
         expect(await tablesNow()).toEqual(["listing", "listing_revision"]);
-        expect(await appliedNow()).toEqual([MIGRATION_NAME, SECOND_MIGRATION_NAME]);
+        expect(await appliedNow()).toEqual([
+          MIGRATION_NAME,
+          SECOND_MIGRATION_NAME,
+          THIRD_MIGRATION_NAME,
+        ]);
         expect(await revisionColumnsNow()).toContain(BASE_VERSION_COLUMN);
 
-        // First step: `002` only. The column goes; everything `001` created stays.
+        // `003` first (issue #258): its seven tables go, and both listing tables stay.
+        expect(await runMigration("down", dependencies)).toBe(SUCCESS);
+
+        expect(await appliedNow()).toEqual([MIGRATION_NAME, SECOND_MIGRATION_NAME]);
+        expect(await tablesNow()).toEqual(["listing", "listing_revision"]);
+        expect(await revisionColumnsNow()).toContain(BASE_VERSION_COLUMN);
+
+        // Then `002` only. The column goes; everything `001` created stays.
         expect(await runMigration("down", dependencies)).toBe(SUCCESS);
 
         expect(await appliedNow()).toEqual([MIGRATION_NAME]);
