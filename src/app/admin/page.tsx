@@ -1,19 +1,45 @@
+import { headers } from "next/headers";
+import { notFound, redirect } from "next/navigation";
+
+import { administratorSessionOf } from "../../interface/admin/require-administrator";
+import { openGateFor } from "../../interface/admin/local-gate";
+import { readCookie, SESSION_COOKIE } from "../../interface/admin/session-cookies";
+
 /**
- * Administrative surface root — the structural entry point for the
- * administrative path (docs/07 C3, trust context TB-3).
+ * The trivial protected administrator page (issue #260 §3.2, under the #254 exception).
  *
- * Scaffold only. It exposes no queue, no record, no moderation action, and no
- * administrative capability of any kind, because none exists yet (P4) and the
- * authentication boundary it must sit behind is not decided (ADR-004, DG-3).
+ * It checks the gate and then the session itself, on every request, and shows nothing but
+ * "Signed in" and a way to sign out: no username, identifier, record, queue or administrative
+ * capability. No moderation or business-administration capability exists behind it.
+ *
+ * The session token is read from the raw `Cookie` header with the duplicate-aware parser, so a
+ * request carrying the session cookie more than once is refused, whichever copy is valid.
  */
-export default function AdministrativeSurfaceRoot() {
+export default async function AdministrativeSurfaceRoot() {
+  const requestHeaders = await headers();
+  const configuration = openGateFor(process.env, requestHeaders.get("host"));
+
+  if (configuration === undefined) {
+    notFound();
+  }
+
+  const token = readCookie(requestHeaders.get("cookie"), SESSION_COOKIE);
+
+  if ((await administratorSessionOf(configuration, token)) !== "valid") {
+    redirect("/admin/sign-in");
+  }
+
   return (
     <main>
       <h1>Administration</h1>
+      <p>Signed in.</p>
       <p>
-        Administrative surface. Application scaffold only — no administrative
-        capability exists yet, and no authentication boundary is implemented.
+        Local synthetic sign-in only. No administrative capability exists yet, and recovery codes,
+        revocation and account management are not implemented.
       </p>
+      <form method="post" action="/admin/sign-out">
+        <button type="submit">Sign out</button>
+      </form>
     </main>
   );
 }

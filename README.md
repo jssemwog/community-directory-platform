@@ -33,11 +33,12 @@ The development server serves two structural surfaces:
 | `/` | Public | `TB-1` / `TB-2` |
 | `/admin` | Administrative | `TB-3` |
 
-Both are **empty shells**. `/admin` is *not* protected, because no
-authentication is implemented. Its mechanism, `ADR-004`, is `Accepted` (issue #252) but not
-implemented, and `DG-3` remains unresolved. A narrow Product Owner exception (issue #254)
-permits separately authorized authentication work **locally only** — development mode, the web
-server bound to loopback, a local database and synthetic accounts — with no moderation or
+Neither exposes any administrative capability. `/admin` and its sign-in pages answer **404**
+everywhere except the launcher's local administrator journey (issue #260, below), which is
+local, synthetic and incomplete. The mechanism, `ADR-004`, and its storage, `ADR-028`, are
+`Accepted`; `DG-3` remains unresolved. A narrow Product Owner exception (issue #254) permits
+separately authorized authentication work **locally only** — development mode, the web server
+bound to loopback, a local database and synthetic accounts — with no moderation or
 business-administration capability. Public administrative reachability remains prohibited. The
 full exception is recorded in `docs/13-decision-log.md` (*Gate-scope exception*).
 
@@ -52,6 +53,8 @@ already installs, and no account, service or network access is used.
 npm run demo:local         # start: database + migrations + synthetic listings + site
 npm run demo:local:stop    # stop a database left running (e.g. after closing the terminal)
 npm run demo:local:reset   # stop and delete all local demo data (.local-demo/)
+npm run demo:local:admin -- add     # while stopped: provision one synthetic administrator
+npm run demo:local:admin -- start   # the same demo over local HTTPS, with administrator sign-in
 ```
 
 **Start.** `npm run demo:local` initialises a PostgreSQL cluster in `.local-demo/` on first run,
@@ -115,10 +118,52 @@ lock exists; it reseeds the demo database.
   So `npm run dev`, `npm run build` and `npm start` are unaffected, and those pages answer 404
   there.
 - The database password is random per cluster and stays in the git-ignored `.local-demo/`.
-- There is no search, submission form, administration or authentication.
+- There is no search, submission form or administration. Authentication exists only as the
+  local journey below.
 - The layout and wording are a demonstration, not the `DU-2` / `DU-7` design decisions.
 - **`BI-4` remains pending** (#246). The not-available response is the same for every
   non-public case, but timing equivalence is unresolved.
+
+## Local administrator sign-in journey (localhost only, synthetic accounts)
+
+The first usable administrator sign-in (issue #260, under `ADR-004`, `ADR-028` and the #254
+exception): password, then a TOTP code, then a trivial protected page at `/admin` that shows
+"Signed in" and a sign-out button. **There is nothing to administer**: no queue, record,
+moderation or business-administration capability exists behind it.
+
+1. With the demo stopped, run `npm run demo:local:admin -- add`. It creates one administrator
+   whose username must start with `synthetic-`. The password (15 to 128 characters, checked
+   against an offline blocklist; see `src/domain/administrator-auth/PASSWORD-BLOCKLIST.md`) is
+   read without echo; Ctrl-C stops the command. The `otpauth://` URI and base32 secret are shown
+   **once**, for an authenticator app, and one current code confirms the enrolment. It refuses,
+   before starting anything, outside an interactive terminal or with `NODE_ENV=production`.
+2. Run `npm run demo:local:admin -- start` and open `https://127.0.0.1:3000/admin/sign-in`.
+   If signing out cannot be completed (the local database is unavailable), the page says so and
+   you may still be signed in; sign out again once the database is back.
+
+**Local HTTPS, and a certificate warning.** The session cookie keeps its production attributes
+(`__Host-`, `Secure`, `HttpOnly`, `SameSite=Strict`), and WebKit does not send such a cookie back
+over plain `http://127.0.0.1`, so this journey runs on HTTPS with a self-signed certificate for
+`127.0.0.1` that the local OpenSSL makes in `.local-demo/tls/`. **No trust store is changed**, so
+the browser warns about the certificate the first time; accept it for `127.0.0.1` only. Nothing
+weakens the cookie for local use. Plain `npm run demo:local` is unchanged: HTTP, with sign-in
+unavailable.
+
+**Keys.** `.local-demo/administrator-keys.json` holds two random development-only keys, created
+on first use, never printed and never committed. `demo:local:reset` deletes them together with the
+cluster and its accounts.
+
+**What is still missing, deliberately.** Recovery codes (migration `004`), the recovery session,
+revocation, disabling an account, password or TOTP reset, re-enrolment and key replacement are
+not implemented, so **provisioning is incomplete under `ADR-004`**. An account whose enrolment
+was not confirmed cannot sign in and is cleared only by `demo:local:reset`. All local sign-in
+shares one per-source throttle window (20 failures per hour). The sign-in pages claim no
+accessibility conformance level or browser support (`NOQ-5`, `NOQ-6`).
+
+**Browser tests.** `npm run test:browser` runs the journey in Chromium, Firefox and WebKit with
+Playwright against its own temporary database, keys, certificate and servers. It never touches
+`.local-demo/`, and CI does not run it. The browsers come from `npx playwright install chromium
+firefox webkit`, which downloads them to the user's cache, outside the repository.
 
 ## Project structure
 
