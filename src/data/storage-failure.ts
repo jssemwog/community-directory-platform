@@ -14,6 +14,8 @@
  * get it wrong.
  */
 
+import { constants } from "node:os";
+
 /**
  * A failure the store reported.
  *
@@ -48,10 +50,33 @@ export interface StorageFailure {
  */
 const SAFE_CONSTRAINT_NAME = /^[a-z_][a-z0-9_]*$/;
 
-/** PostgreSQL's `SQLSTATE` for an error, if the driver attached one. */
+/** A `SQLSTATE`'s shape: exactly five digits or upper-case letters. */
+const SQLSTATE = /^[0-9A-Z]{5}$/;
+
+/**
+ * PostgreSQL's `SQLSTATE` for an error, if the driver attached one.
+ *
+ * **Not every `code` is a `SQLSTATE`.** The driver also surfaces Node system errors, such as
+ * `ECONNRESET` or `EPIPE` on a broken socket, with their own `code`. Labelling one of those
+ * `sqlState` would claim the server said something it never said (issue #258 §12). A value is
+ * kept only when it has a `SQLSTATE`'s shape **and** the error is not a system error: Node gives
+ * every system error a numeric `errno` and usually a `syscall`, and a server error has neither.
+ * A five-letter system code like `EPIPE` fits the shape, so the shape alone would not do; and a
+ * code that names a Node `errno` constant is refused even without those fields. No PostgreSQL
+ * `SQLSTATE` class begins with `E`, so no genuine server code is lost.
+ */
 export function sqlStateOf(cause: unknown): string | undefined {
-  const code = (cause as { readonly code?: unknown } | null)?.code;
-  return typeof code === "string" ? code : undefined;
+  const candidate = cause as
+    | { readonly code?: unknown; readonly errno?: unknown; readonly syscall?: unknown }
+    | null
+    | undefined;
+  const code = candidate?.code;
+
+  if (typeof code !== "string" || !SQLSTATE.test(code) || Object.hasOwn(constants.errno, code)) {
+    return undefined;
+  }
+
+  return candidate?.errno === undefined && candidate?.syscall === undefined ? code : undefined;
 }
 
 /**

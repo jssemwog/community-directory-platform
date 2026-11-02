@@ -101,6 +101,8 @@ type PgClient = InstanceType<PgModule["Client"]>;
 /** The two migrations, as `FileMigrationProvider` names them. */
 const FIRST_MIGRATION_NAME = "001-create-listing-and-revision-tables";
 const SECOND_MIGRATION_NAME = "002-add-revision-base-version";
+/** Issue #258: applied by the governed runner after `002`; attacked in its own file. */
+const THIRD_MIGRATION_NAME = "003-create-administrator-authentication-tables";
 
 /** The column `002` adds. */
 const COLUMN = "base_listing_last_updated_at";
@@ -344,17 +346,18 @@ describe("applying the chain", () => {
     CLUSTER_TIMEOUT_MS,
   );
 
-  it("records exactly the two expected migrations, in governed order", async () => {
+  it("records exactly the three expected migrations, in governed order", async () => {
     // Exhaustive, not a subset: a third migration file, or either of these failing to apply,
     // must fail here. `FileMigrationProvider` orders by ascending name, so the ordinal
     // prefixes are the ordering, and `002` cannot precede `001`.
     expect(await appliedMigrations(raw)).toEqual([
       FIRST_MIGRATION_NAME,
       SECOND_MIGRATION_NAME,
+      THIRD_MIGRATION_NAME,
     ]);
   });
 
-  it("creates no third table", async () => {
+  it("creates no table beyond the governed set", async () => {
     const { rows } = await raw.query<{ table_name: string }>(
       `select table_name from information_schema.tables
         where table_schema = 'public' and table_type = 'BASE TABLE'
@@ -362,7 +365,18 @@ describe("applying the chain", () => {
         order by table_name`,
     );
 
-    expect(rows.map((row) => row.table_name)).toEqual(["listing", "listing_revision"]);
+    // `002` adds no table; the seven others are `003`'s (issue #258).
+    expect(rows.map((row) => row.table_name)).toEqual([
+      "administrator",
+      "administrator_consumed_challenge",
+      "administrator_pending_challenge",
+      "administrator_session",
+      "administrator_totp_factor",
+      "authentication_source_window",
+      "authentication_throttle",
+      "listing",
+      "listing_revision",
+    ]);
   });
 });
 
@@ -691,6 +705,9 @@ describe("reversal", () => {
    * `runMigration("down")` calls Kysely's `migrateDown`, which reverses **one** migration —
    * the most recently applied. So one `down` from latest removes `002` and nothing else, and
    * `001` must survive it intact.
+   *
+   * Since issue #258 the latest migration is `003`, so the test first takes `003` down, which
+   * restores exactly the state this test was written against, and then reverses `002`.
    */
   it(
     "removes only 002, leaves 001 intact, and restores cleanly on reapply",
@@ -704,6 +721,14 @@ describe("reversal", () => {
 
       try {
         expect(await runMigration("latest", dependencies)).toBe(SUCCESS);
+        expect(await appliedMigrations(client)).toEqual([
+          FIRST_MIGRATION_NAME,
+          SECOND_MIGRATION_NAME,
+          THIRD_MIGRATION_NAME,
+        ]);
+
+        // `003` first, so that `002` is the most recent migration again.
+        expect(await runMigration("down", dependencies)).toBe(SUCCESS);
         expect(await appliedMigrations(client)).toEqual([
           FIRST_MIGRATION_NAME,
           SECOND_MIGRATION_NAME,
@@ -773,11 +798,12 @@ describe("reversal", () => {
         // by name, not merely the same count.
         expect(await governedChecks()).toEqual(GOVERNED_CHECKS);
 
-        // Requirement 22 — reapplying restores 002 exactly.
+        // Requirement 22 — reapplying restores 002 exactly (and `003` after it).
         expect(await runMigration("latest", dependencies)).toBe(SUCCESS);
         expect(await appliedMigrations(client)).toEqual([
           FIRST_MIGRATION_NAME,
           SECOND_MIGRATION_NAME,
+          THIRD_MIGRATION_NAME,
         ]);
         expect(await columnNamesOf(client, "listing_revision")).toEqual([
           ...REVISION_COLUMNS_AFTER_001,
