@@ -1,20 +1,24 @@
 import type { ReactNode } from "react";
+import { headers } from "next/headers";
+import { notFound } from "next/navigation";
+
+import { openGateFor } from "../../interface/admin/local-gate";
 
 /**
- * Administrative surface layout — the structural boundary segment
- * (docs/07 C3, trust context TB-3).
+ * Administrative surface layout — the structural boundary segment (docs/07 C3, trust context
+ * TB-3).
  *
- * This segment exists so the administrative surface is a separate, visible
- * part of the tree from the first commit, not a folder someone adds later.
- *
- * It enforces nothing yet, and that is deliberate. The authentication and
- * authorization mechanism is ADR-004, which is Blocked by DG-3 (NOQ-9).
- * When that gate opens, C8 is enforced here and at every administrative
- * server entry point — server-side, on every request (ADR-002 O-3).
- *
- * Until then, note ADR-002 O-4: UI visibility is never authorization. This
- * layout must never become the place where access is "granted" by rendering.
+ * It applies **only the local administrator gate** (issue #260, under the #254 exception):
+ * outside the launcher's local journey every administrative page is unavailable (OD-6). That is
+ * defence in depth, never authorization: ADR-002 O-4 holds, a layout's check does not extend to
+ * the pages and handlers beneath it, and each page and Route Handler repeats its own checks
+ * (ADR-004 P-1 *Where the check runs*, BI-9). This layout must never become the place where
+ * access is "granted" by rendering.
  */
-export default function AdministrativeLayout({ children }: { children: ReactNode }) {
+export default async function AdministrativeLayout({ children }: { children: ReactNode }) {
+  if (openGateFor(process.env, (await headers()).get("host")) === undefined) {
+    notFound();
+  }
+
   return <section>{children}</section>;
 }

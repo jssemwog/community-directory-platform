@@ -9,7 +9,18 @@
  *    environment only.
  *
  * Ctrl+C stops the site and then the cluster. `stop` stops a cluster left running. `reset` stops
- * it and deletes `.local-demo/`.
+ * it and deletes `.local-demo/`, including the local administrator keys, certificate and accounts.
+ *
+ * ## The local administrator journey (issue #260, under the #254 exception)
+ *
+ * `admin start` runs the same demo **over local HTTPS** with the local administrator gate open
+ * (`src/interface/admin/local-gate.ts`): it creates development-only keys in
+ * `.local-demo/administrator-keys.json` and a self-signed certificate for `127.0.0.1` in
+ * `.local-demo/tls/` on first use, and passes them only to the spawned `next dev`. No trust store
+ * is changed, so the browser shows a certificate warning the first time. `admin add` provisions
+ * one synthetic administrator while the demo is stopped. Plain `start` is unchanged: HTTP, with
+ * the gate closed. Recovery codes, revocation and account management do not exist; the journey
+ * is local and synthetic only.
  *
  * ## One command at a time, and nothing deleted on doubt (`lifecycle.ts`)
  *
@@ -54,6 +65,9 @@ import { createListingPersistence } from "../../src/data/connection";
 import { createMigrationProvider } from "../../src/data/migrate";
 import { LOCAL_DEMO_DATABASE_URL } from "../../src/interface/public/local-demo-persistence";
 import { resetAndSeedSyntheticListings, SYNTHETIC_LISTINGS } from "./fixtures";
+import { administratorEnvironmentFor, ensureAdministratorKeys } from "./administrator-keys";
+import { INCOMPLETE_NOTICE, launchRefusalOf, processTerminal, provisionSyntheticAdministrator } from "./administrator-provisioning";
+import { ensureLocalCertificate, httpsArgumentsFor } from "./local-tls";
 import {
   acquireLauncherLock,
   clusterStatusOf,
@@ -71,10 +85,14 @@ const DATA_DIRECTORY = join(DEMO_DIRECTORY, "pgdata");
 const SERVER_LOG = join(DEMO_DIRECTORY, "postgres.log");
 const CREDENTIALS_FILE = join(DEMO_DIRECTORY, "credentials.json");
 const LAUNCHER_LOCK = join(DEMO_DIRECTORY, "launcher.lock");
+const ADMINISTRATOR_KEYS_FILE = join(DEMO_DIRECTORY, "administrator-keys.json");
+const TLS_DIRECTORY = join(DEMO_DIRECTORY, "tls");
 
 const HOST = "127.0.0.1";
 const DATABASE_PORT = 54329;
 const WEB_PORT = 3000;
+/** The administrator journey's canonical origin: local HTTPS on loopback (issue #260 OD-3). */
+const ADMIN_ORIGIN = `https://${HOST}:${WEB_PORT}`;
 const DATABASE_USER = "demo";
 const DATABASE_NAME = "community_directory_demo";
 const PG_CTL_TIMEOUT_SECONDS = "60";
@@ -288,7 +306,7 @@ function plainKysely(connectionString: string): Kysely<unknown> {
   return new Kysely<unknown>({ dialect: new PostgresDialect({ pool }) });
 }
 
-async function prepareDatabase(password: string): Promise<void> {
+async function prepareDatabase(password: string, seed = true): Promise<void> {
   const admin = plainKysely(connectionStringFor("postgres", password));
 
   try {
@@ -318,6 +336,10 @@ async function prepareDatabase(password: string): Promise<void> {
     await migrating.destroy();
   }
 
+  if (!seed) {
+    return;
+  }
+
   const persistence = createListingPersistence({
     pool: { connectionString: connectionStringFor(DATABASE_NAME, password), max: 1 },
   });
@@ -331,8 +353,13 @@ async function prepareDatabase(password: string): Promise<void> {
 }
 
 async function start(): Promise<void> {
+  await startSite(false);
+}
+
+/** `start`, or with `administrator` the local administrator journey over local HTTPS. */
+async function startSite(administrator: boolean): Promise<void> {
   const binaries = await postgresBinaries();
-  const lock = takeLauncherLock("start");
+  const lock = takeLauncherLock(administrator ? "admin start" : "start");
 
   if (!(await portIsFree(HOST, WEB_PORT))) {
     throw new Error(`Port ${WEB_PORT} on ${HOST} is in use by another process; nothing was changed.`);
@@ -392,6 +419,11 @@ async function start(): Promise<void> {
 
     await prepareDatabase(readPassword());
 
+    const administratorEnvironment = administrator
+      ? administratorEnvironmentFor(ensureAdministratorKeys(ADMINISTRATOR_KEYS_FILE).keys, ADMIN_ORIGIN)
+      : {};
+    const httpsArguments = administrator ? httpsArgumentsFor(await ensureLocalCertificate(TLS_DIRECTORY)) : [];
+
     site = spawn(
       process.execPath,
       [
@@ -403,6 +435,7 @@ async function start(): Promise<void> {
         HOST,
         "--port",
         String(WEB_PORT),
+        ...httpsArguments,
       ],
       {
         cwd: REPOSITORY_ROOT,
@@ -411,6 +444,7 @@ async function start(): Promise<void> {
           ...process.env,
           [LOCAL_DEMO_DATABASE_URL]: connectionStringFor(DATABASE_NAME, readPassword()),
           [SITE_CONTROL_OWNER_ENV]: String(process.pid),
+          ...administratorEnvironment,
         },
       },
     );
@@ -426,7 +460,11 @@ async function start(): Promise<void> {
   });
   site.once("exit", (code) => void shutdown(code ?? 1));
 
-  say(`Open http://${HOST}:${WEB_PORT}/directory — press Ctrl+C to stop the site and the database.`);
+  say(
+    administrator
+      ? `Open ${ADMIN_ORIGIN}/admin/sign-in (accept the local certificate warning once) — press Ctrl+C to stop the site and the database.`
+      : `Open http://${HOST}:${WEB_PORT}/directory — press Ctrl+C to stop the site and the database.`,
+  );
 }
 
 async function stop(): Promise<void> {
@@ -473,11 +511,83 @@ async function reset(): Promise<void> {
   say("Removed .local-demo/.");
 }
 
-const commands: Record<string, () => Promise<void>> = { start, stop, reset };
+/**
+ * `admin add`: provision one synthetic administrator (issue #260 §3.6). It runs only while the
+ * demo is stopped, under the same lock: start the cluster on loopback, apply the governed
+ * migrations (without reseeding listings), provision, and stop the cluster again.
+ */
+async function adminAdd(): Promise<void> {
+  const terminal = processTerminal();
+  // Refuse a non-interactive terminal or production mode before anything is started, migrated
+  // or created: no lock, cluster, migration or keys file is touched on these refusals.
+  const refusal = launchRefusalOf(terminal, process.env);
+
+  if (refusal !== undefined) {
+    terminal.say(INCOMPLETE_NOTICE);
+    terminal.say(refusal.message);
+    terminal.close();
+    process.exitCode = 1;
+    return;
+  }
+
+  const binaries = await postgresBinaries();
+  const lock = takeLauncherLock("admin add");
+  let exitCode = 0;
+
+  try {
+    await initialiseIfNeeded(binaries);
+    await startCluster(binaries);
+
+    try {
+      await prepareDatabase(readPassword(), false);
+
+      const { keys } = ensureAdministratorKeys(ADMINISTRATOR_KEYS_FILE);
+      const databaseUrl = connectionStringFor(DATABASE_NAME, readPassword());
+      const persistence = createListingPersistence({ pool: { connectionString: databaseUrl, max: 1 } });
+
+      try {
+        const result = await provisionSyntheticAdministrator(terminal, {
+          // The storage module uses raw `sql`; only the row typing differs from the listing pool.
+          db: persistence.db as unknown as Parameters<typeof provisionSyntheticAdministrator>[1]["db"],
+          clock: Date.now,
+          totpKey: keys.totpKey,
+          environment: process.env,
+          databaseUrl,
+        });
+
+        exitCode = result.ok ? 0 : 1;
+      } finally {
+        await persistence.shutdown();
+      }
+    } finally {
+      await stopCluster(binaries);
+    }
+  } finally {
+    lock.release();
+    terminal.close();
+  }
+
+  process.exitCode = exitCode;
+}
+
+async function admin(): Promise<void> {
+  const subcommand = process.argv[3];
+
+  if (subcommand === "start") {
+    await startSite(true);
+  } else if (subcommand === "add") {
+    await adminAdd();
+  } else {
+    say("Usage: local-demo.ts admin start | add");
+    process.exitCode = 1;
+  }
+}
+
+const commands: Record<string, () => Promise<void>> = { start, stop, reset, admin };
 const command = commands[process.argv[2] ?? "start"];
 
 if (command === undefined) {
-  say("Usage: local-demo.ts start | stop | reset");
+  say("Usage: local-demo.ts start | stop | reset | admin start | admin add");
   process.exit(1);
 }
 
