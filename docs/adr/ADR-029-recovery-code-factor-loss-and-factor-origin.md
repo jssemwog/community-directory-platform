@@ -2,22 +2,48 @@
 
 | Field | Value |
 |---|---|
-| **Status** | **`Proposed`**, 2026-11-03 (issue #262). **Not in force**; nothing may depend on it until a separately authorized acceptance |
+| **Status** | **`Accepted`** — 2026-11-03 (issue #264). **In force.** Published as `Proposed` 2026-11-03 (issue #262, PR #263); see *Status and chronology* |
 | **Date** | 2026-11-03 |
-| **Decision owner** | **Joe S.**, product owner and architecture owner (`docs/13`, *Gate summary*) |
+| **Decision owner** | **Joe S.**, product owner and architecture owner (`docs/13`, *Gate summary*). **Ruled RQ-1 and RQ-2 on 2026-11-03** (issue #262); **acceptance authorized 2026-11-03** (issue #264), with the local-only risk accepted for synthetic use only |
 | **Decision gate** | **`DG-3`**, which **remains `Unresolved`**. This ADR is written under `DG-3` once its own question is answered, inside the local-only exception of issue #254, as `ADR-004` and `ADR-028` were |
 | **Related open questions** | **Depends on two Product Owner rulings of 2026-11-03** (issue #262; recorded in `docs/13`, *Ungated Product Owner policy clarifications*): **RQ-1:** `ADR-004` P-4 applies to the account (Reading A). **RQ-2:** `ADR-004` P-5's ceiling bullets are authenticator-local. **Must NOT answer:** `OQ-14` + `NOQ-8`, `NOQ-7`, `OQ-9`, `NOQ-5`, `NOQ-6`, `BI-4` timing (#246), `DG-4`, any `ADR-004` value, and `ADR-004` R-1 to R-4 |
-| **Supersedes** | **`ADR-028`**, by whole supersession **by reference** (RA-10), **only on acceptance**. Until then `ADR-028` stays `Accepted` and in force, and is not marked `Superseded` |
+| **Supersedes** | **`ADR-028`**, by whole supersession **by reference** (RA-10), effective 2026-11-03. Every `ADR-028` provision not listed under *Affected provisions* stays **in force through this ADR**, word for word from blob `3af7733a473761ba3e7977ffa9c5c0f33f5ea791` |
 | **Superseded by** | *none* |
 
-> **`Proposed`, and therefore NOT in force.** Per `docs/adr/README.md`, a `Proposed` ADR is
-> *"Drafted and under review. The decision is **not yet in force**; nothing may depend on it."*
-> **This document does not accept itself**, and **`ADR-028` stays `Accepted` and in force** until
-> this ADR is separately accepted. It authorizes no implementation, migration, schema, route,
-> command or test, and **does not change `ADR-004`**. The RQ-1 and RQ-2 rulings it relies on are
-> recorded in `docs/13`.
+> **`Accepted` 2026-11-03 (issue #264), and in force** as the successor to `ADR-028`'s storage
+> design. It was published as `Proposed` on 2026-11-03 (issue #262, PR #263) and accepted
+> separately (*Status and chronology*). **`ADR-004` is unchanged.**
+> **Acceptance authorizes no** dependency, migration, schema, route, command, provisioning or
+> test. **Implementation needs its own approved Scope Gate**, local-only under issue #254.
+> **What stays true after acceptance:**
+> - Administrator authentication remains **incomplete**, and stays **synthetic and local-only**.
+>   That means development mode, a loopback-bound web server, a local database, and no moderation
+>   or business-administration capability.
+> - The **caller restrictions** (RA-7) and the **unchanged counter behaviour** (RA-9) stand as
+>   disclosed.
+> - The **operator reset**, the **deferred re-enablement procedure** and every other `ADR-004`
+>   control stay required before any public reachability, together with R-1 to R-4 and the
+>   security review.
+> - **`DG-3` remains `Unresolved`**, #246 stays open and `BI-4` stays pending.
 
 ---
+
+## Status and chronology
+
+1. **2026-11-03, issue #262.** The Product Owner ruled RQ-1 (Reading A) and RQ-2
+   (authenticator-local), recorded in `docs/13`. The reviewed recommendations were approved as the
+   basis for a docs-only review.
+2. **2026-11-03, PR #263 (`b7e0467`).** This ADR was published as **`Proposed`**, after two review
+   corrections: RA-1 keeps classification precedence, and a disabled account needs the deferred
+   re-enablement procedure.
+3. **2026-11-03, issue #264.** The Product Owner **authorized acceptance**, and accepted the
+   disclosed local-only risk **for synthetic local use only** (`docs/13`). The status became
+   **`Accepted`**.
+4. On acceptance, `ADR-028`'s *Status* and *Superseded by* fields record the supersession by
+   reference (RA-10). Nothing else in `ADR-028` is edited.
+
+**Acceptance resolves no open question and opens no gate.** The design below is unchanged from
+the `Proposed` text.
 
 ## Context
 
@@ -413,7 +439,7 @@ and built.**
 
 | Risk | Response |
 |---|---|
-| State O with no built remedy | Accepted for synthetic local use only, at acceptance. The operator reset, and for disabled accounts the deferred re-enablement procedure, stay prerequisites before public reachability |
+| State O with no built remedy | **Accepted for synthetic local use only**, 2026-11-03 (`docs/13`). The operator reset, and for disabled accounts the deferred re-enablement procedure, stay prerequisites before public reachability |
 | A stale origin left by `startTotpEnrolment` | Caller-restricted (RA-7). No caller does this |
 | A future factor writer forgets the origin | Its `UPDATE` fails the `CHECK`, so it fails closed. Future conformance |
 
@@ -432,4 +458,4 @@ an audit record. **`DG-3` remains `Unresolved`.**
 | **Components** | `C8`, `C9`, `C12` |
 | **Decisions relied on** | `ADR-004` P-1, P-4 (RQ-1), P-5 (RQ-2), P-6; `ADR-028` at blob `3af7733a`; `ADR-018`; `ADR-022` |
 | **Documents amended on acceptance** | `docs/adr/README.md` (register); `ADR-028` *Status* and *Superseded by* only; `docs/13` (the acceptance; the RQ-1 and RQ-2 rulings are already recorded, 2026-11-03, issue #262); `docs/traceability-matrix.md` (`FR-AUTH`) |
-| **Issue / pull request** | Issue #262 (this proposal); acceptance is a separate step |
+| **Issue / pull request** | Proposed: issue #262, PR #263. Accepted: issue #264 and its pull request |
