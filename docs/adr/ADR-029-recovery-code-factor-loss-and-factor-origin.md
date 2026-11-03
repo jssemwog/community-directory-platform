@@ -431,5 +431,5 @@ an audit record. **`DG-3` remains `Unresolved`.**
 | **Invariants** | `BI-5`, `BI-9`, `AA-1`–`AA-5`; must not breach `BI-4` or `BI-6` |
 | **Components** | `C8`, `C9`, `C12` |
 | **Decisions relied on** | `ADR-004` P-1, P-4 (RQ-1), P-5 (RQ-2), P-6; `ADR-028` at blob `3af7733a`; `ADR-018`; `ADR-022` |
-| **Documents amended on acceptance** | `docs/adr/README.md` (register); `ADR-028` *Status* and *Superseded by* only; `docs/13` (RQ-1, RQ-2, acceptance); `docs/traceability-matrix.md` (`FR-AUTH`) |
+| **Documents amended on acceptance** | `docs/adr/README.md` (register); `ADR-028` *Status* and *Superseded by* only; `docs/13` (the acceptance; the RQ-1 and RQ-2 rulings are already recorded, 2026-11-03, issue #262); `docs/traceability-matrix.md` (`FR-AUTH`) |
 | **Issue / pull request** | Issue #262 (this proposal); acceptance is a separate step |
