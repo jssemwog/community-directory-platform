@@ -2,13 +2,13 @@
 
 | Field | Value |
 |---|---|
-| **Status** | **`Accepted`** — 2026-11-01 (issue #256). **In force.** Published as `Proposed` 2026-11-01; see *Status and chronology* |
+| **Status** | **`Superseded`** by **`ADR-029`** — 2026-11-03 (issue #264), **by reference** (`ADR-029` RA-10). It was **`Accepted`** 2026-11-01 (issue #256), published as `Proposed` 2026-11-01; see *Status and chronology*. **Every provision not listed in `ADR-029` *Affected provisions* remains in force through `ADR-029`, word for word as written below.** Listed provisions are read as amended there. Per `docs/adr/README.md`, this file is not otherwise edited |
 | **Date** | 2026-11-01 |
 | **Decision owner** | **Joe S.** — product owner / architecture owner (`docs/13`, *Gate summary*). **Ruled 2026-11-01** (issue #256): D-15 first, then D-1 to D-14, D-16 and D-17 with qualifications (*Owner rulings*); acceptance authorized the same day with the reviewed corrections |
 | **Decision gate** | **`DG-3`**, which **remains `Unresolved`**. This decision depends only on **`NOQ-9`** (Decided 2026-10-30, `ADR-004` `Accepted`) and on the **local-only gate-scope exception** of issue #254 (`docs/13`, *Gate-scope exception*), following the `ADR-004` precedent: an ADR written under `DG-3` once its own question was answered |
 | **Related open questions** | **Depends on:** `NOQ-9` (Decided). **Must NOT answer:** `OQ-14` + `NOQ-8`, including how long administrator records are retained and whether they may be deleted; `NOQ-7`; `OQ-9`; `NOQ-5`, `NOQ-6`; `BI-4` timing (#246); `DG-4`; any `ADR-004` parameter; `ADR-004` R-1 to R-4 — see *Open questions this decision must NOT answer* |
 | **Supersedes** | *none* — `ADR-004` is **not** amended; this ADR supplies the physical storage that `ADR-004` left to implementation |
-| **Superseded by** | *none* |
+| **Superseded by** | **`ADR-029`** — 2026-11-03 (issue #264), by reference (`ADR-029` RA-10) |
 
 > **`Accepted` 2026-11-01 (issue #256), and in force as the storage design for administrator
 > authentication.** It was published as `Proposed` the same day and accepted after the owner's
