@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { CHALLENGE_COOKIE, clearCookie, readCookie, SESSION_COOKIE, setCookie } from "./session-cookies";
+import { CHALLENGE_COOKIE, clearCookie, readCookie, RECOVERY_COOKIE, SESSION_COOKIE, setCookie } from "./session-cookies";
 
 const TOKEN = "Zq3k8x0aB-_9ZQ3K8X0Ab-_9zq3k8x0aB-_9ZQ3K8X0";
 
@@ -54,5 +54,31 @@ describe("readCookie", () => {
     ["the other cookie only", `${CHALLENGE_COOKIE}=${TOKEN}`],
   ])("gives undefined for %s", (_label, header) => {
     expect(readCookie(header, SESSION_COOKIE)).toBeUndefined();
+  });
+});
+
+describe("the recovery cookie (issue #268 §6.1)", () => {
+  it("is a distinct __Host- cookie with exactly the production attributes, and cannot be weakened", () => {
+    expect(RECOVERY_COOKIE).toBe("__Host-admin-recovery");
+    expect(new Set([SESSION_COOKIE, CHALLENGE_COOKIE, RECOVERY_COOKIE]).size).toBe(3);
+
+    const header = setCookie(RECOVERY_COOKIE, TOKEN, 900);
+    expect(header.startsWith(`${RECOVERY_COOKIE}=${TOKEN};`)).toBe(true);
+    expect(attributesOf(header)).toEqual(["Max-Age=900", "Path=/", "Secure", "HttpOnly", "SameSite=Strict"]);
+    expect(header).not.toMatch(/Domain/i);
+    expect(clearCookie(RECOVERY_COOKIE)).toBe("__Host-admin-recovery=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Strict");
+  });
+
+  it.each([
+    ["a duplicated recovery cookie", `${RECOVERY_COOKIE}=${TOKEN}; ${RECOVERY_COOKIE}=${TOKEN}`],
+    ["a malformed recovery cookie", `${RECOVERY_COOKIE}=not a token`],
+    ["only the session cookie", `${SESSION_COOKIE}=${TOKEN}`],
+  ])("reads as undefined for %s", (_label, header) => {
+    expect(readCookie(header, RECOVERY_COOKIE)).toBeUndefined();
+  });
+
+  it("is never read as the session cookie, nor the session cookie as it", () => {
+    expect(readCookie(`${RECOVERY_COOKIE}=${TOKEN}`, SESSION_COOKIE)).toBeUndefined();
+    expect(readCookie(`${SESSION_COOKIE}=${TOKEN}; ${RECOVERY_COOKIE}=${TOKEN.split("").reverse().join("")}`, RECOVERY_COOKIE)).toBe(TOKEN.split("").reverse().join(""));
   });
 });

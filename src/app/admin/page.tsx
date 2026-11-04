@@ -34,8 +34,8 @@ export default async function AdministrativeSurfaceRoot() {
       <h1>Administration</h1>
       <p>Signed in.</p>
       <p>
-        Local synthetic sign-in only. No administrative capability exists yet, and recovery codes,
-        revocation and account management are not implemented.
+        Local synthetic sign-in only. No administrative capability exists yet, and revocation and
+        account management are not implemented.
       </p>
       <form method="post" action="/admin/sign-out">
         <button type="submit">Sign out</button>

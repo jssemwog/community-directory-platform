@@ -10,6 +10,7 @@ import { PassThrough } from "node:stream";
 
 import { describe, expect, it } from "vitest";
 
+import { enrolmentUriOf as sharedEnrolmentUriOf } from "../../src/domain/administrator-auth/totp-enrolment";
 import {
   enrolmentUriOf,
   INCOMPLETE_NOTICE,
@@ -222,5 +223,24 @@ describe("enrolmentUriOf", () => {
     expect(parsed.searchParams.get("period")).toBe("30");
     expect(parsed.searchParams.get("secret")).toBe(base32);
     expect(decodeURIComponent(parsed.pathname)).toContain("synthetic-ada");
+  });
+});
+
+describe("the recovery-code provisioning (issue #268 §3.1, §6.4)", () => {
+  it("delegates to the shared builder, with identical output", () => {
+    const secret = Buffer.alloc(20, 5);
+    expect(enrolmentUriOf("synthetic-ada", secret)).toEqual(sharedEnrolmentUriOf("synthetic-ada", secret));
+  });
+
+  it("the notice says codes are shown once and that provisioning is still incomplete under ADR-004", () => {
+    expect(INCOMPLETE_NOTICE).toMatch(/Ten recovery codes are shown once/);
+    expect(INCOMPLETE_NOTICE).toMatch(/still incomplete under ADR-004/);
+    expect(INCOMPLETE_NOTICE).not.toMatch(/not implemented: this account has none/);
+  });
+
+  it("confirms only through the RA-5 confirmation, never the caller-restricted confirmTotpEnrolment", () => {
+    const source = readFileSync(join(import.meta.dirname, "administrator-provisioning.ts"), "utf8");
+    expect(source).toMatch(/confirmTotpEnrolmentWithRecoveryCodes\(/);
+    expect(source).not.toMatch(/confirmTotpEnrolment(?!WithRecoveryCodes)/);
   });
 });

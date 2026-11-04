@@ -5,17 +5,20 @@
  * Run by an operator through `npm run demo:local:admin -- add`, never imported by the
  * application server and never on the request path. It creates one administrator whose username
  * starts with `synthetic-`, sets the password through the policy (`password-policy.ts`), enrols
- * TOTP and confirms it with one current code.
+ * TOTP and confirms it with one current code **together with ten recovery codes**, through the
+ * `ADR-029` RA-5 confirmation (issue #268 §3.1). The codes are shown **once**, to the operator's
+ * terminal only. After this, nothing calls the caller-restricted `confirmTotpEnrolment`; it stays
+ * reserved for the future operator reset (RA-7).
  *
- * **It issues no recovery codes**: migration `004` and recovery-code issuance are later work, so
- * **provisioning stays incomplete under `ADR-004`**, which is required before any public
- * reachability. The command says so every time it runs.
+ * **Provisioning stays incomplete under `ADR-004`**: disabling an account, resetting a password or
+ * TOTP, revoking sessions and the operator reset are not built, and each is required before any
+ * public reachability. The command says so every time it runs.
  *
  * The password is read without echo and never printed. The `otpauth://` URI and the base32 secret
  * are shown **once**, to the operator's terminal only: never logged, written to a file or
- * returned by any web route. On a wrong confirmation code the factor stays `pending_confirmation`,
- * so the account cannot sign in; re-enrolment is not in this unit, and `demo:local:reset` clears a
- * stranded synthetic account.
+ * returned by any web route; so are the recovery codes. On a wrong confirmation code the factor
+ * stays `pending_confirmation` and no code is stored, so the account cannot sign in; the command does
+ * not repeat the confirmation, and `demo:local:reset` clears a stranded synthetic account.
  *
  * Terminal input and output go through `ProvisioningTerminal`, so tests drive the command
  * without a TTY.
@@ -26,10 +29,8 @@ import * as readline from "node:readline";
 import { StringDecoder } from "node:string_decoder";
 
 import type { Kysely } from "kysely";
-import { Secret, TOTP } from "otpauth";
-
 import {
-  confirmTotpEnrolment,
+  confirmTotpEnrolmentWithRecoveryCodes,
   createAdministrator,
   findCredential,
   startTotpEnrolment,
@@ -38,21 +39,20 @@ import {
 import type { AdministratorAuthenticationDatabase } from "../../src/data/administrator-authentication-table";
 import { hashPassword } from "../../src/domain/administrator-auth/password-hash";
 import { checkNewPassword } from "../../src/domain/administrator-auth/password-policy";
+import { generateRecoveryCodes } from "../../src/domain/administrator-auth/recovery-code";
 import { sealTotpSecret } from "../../src/domain/administrator-auth/secret-box";
-import {
-  generateTotpSecret,
-  matchTotpStep,
-  TOTP_DIGITS,
-  TOTP_PERIOD_SECONDS,
-} from "../../src/domain/administrator-auth/totp";
+import { totpVerifierFor } from "../../src/domain/administrator-auth/sign-in";
+import { generateTotpSecret } from "../../src/domain/administrator-auth/totp";
+import { enrolmentUriOf as sharedEnrolmentUriOf, TOTP_ISSUER } from "../../src/domain/administrator-auth/totp-enrolment";
 import { isProvisionableUsername, normalizeSubmittedUsername } from "../../src/domain/administrator-auth/username";
 import { LOCAL_TOTP_KEY_VERSION } from "../../src/interface/admin/local-gate";
 
 export const SYNTHETIC_PREFIX = "synthetic-";
-export const TOTP_ISSUER = "Community Directory (local synthetic)";
+export { TOTP_ISSUER };
 
 export const INCOMPLETE_NOTICE =
-  "Recovery codes are not implemented: this account has none, and provisioning is incomplete under ADR-004. " +
+  "Ten recovery codes are shown once when enrolment is confirmed; store them offline. " +
+  "Provisioning is still incomplete under ADR-004: disabling an account, password or TOTP reset, session revocation and the operator reset are not implemented. " +
   "It is a synthetic account for the local journey only.";
 
 export interface ProvisioningTerminal {
@@ -125,20 +125,9 @@ const RULE_MESSAGES = {
   BLOCKLISTED: "That password is on the list of common or compromised passwords.",
 } as const;
 
-/** The enrolment URI an authenticator app reads; shown once. */
+/** The enrolment URI an authenticator app reads; shown once. Delegates to the shared builder. */
 export function enrolmentUriOf(username: string, secret: Buffer): { readonly uri: string; readonly base32: string } {
-  const copy = new Uint8Array(secret);
-  const shared = new Secret({ buffer: copy.buffer });
-  const totp = new TOTP({
-    issuer: TOTP_ISSUER,
-    label: username,
-    algorithm: "SHA1",
-    digits: TOTP_DIGITS,
-    period: TOTP_PERIOD_SECONDS,
-    secret: shared,
-  });
-
-  return { uri: totp.toString(), base32: shared.base32 };
+  return sharedEnrolmentUriOf(username, secret);
 }
 
 /** Provision one synthetic administrator. Writes nothing unless every check before it passed. */
@@ -209,18 +198,34 @@ export async function provisionSyntheticAdministrator(
     terminal.say(`  ${enrolment.uri}`);
     terminal.say(`  Secret (base32): ${enrolment.base32}`);
 
-    const step = matchTotpStep(secret, (await terminal.ask("Current six-digit code: ")).trim(), deps.clock());
+    // The code is verified under the lock, at the post-lock instant, with the ten codes (RA-5).
+    const code = (await terminal.ask("Current six-digit code: ")).trim();
+    const codes = generateRecoveryCodes();
+    const confirmed = await confirmTotpEnrolmentWithRecoveryCodes(
+      deps.db,
+      {
+        administratorId,
+        factorId,
+        verify: totpVerifierFor(new Map([[LOCAL_TOTP_KEY_VERSION, deps.totpKey]]), code),
+        codeDigests: codes.map((generated) => generated.digest),
+      },
+      deps.clock,
+    );
 
-    if (step === null) {
+    if (confirmed.ok && confirmed.value.code === "REFUSED" && confirmed.value.reason === "WRONG_CODE") {
       terminal.say("That code did not match. The account exists but cannot sign in until enrolment is confirmed, which this command does not repeat; run `npm run demo:local:reset` to clear it.");
       return { ok: false, reason: "NOT_CONFIRMED" };
     }
 
-    const confirmed = await confirmTotpEnrolment(deps.db, { administratorId, factorId, step }, deps.clock);
-
     if (!confirmed.ok || confirmed.value.code !== "ENROLMENT_CONFIRMED") {
-      terminal.say("TOTP enrolment could not be confirmed; the account cannot sign in. Run `npm run demo:local:reset` to clear it.");
+      terminal.say("TOTP enrolment could not be confirmed and no recovery code was stored; the account cannot sign in. Run `npm run demo:local:reset` to clear it.");
       return { ok: false, reason: "STORAGE_FAILURE" };
+    }
+
+    terminal.say("Recovery codes. Each works once, after the password, if the authenticator is lost. Store them offline now; they are shown only once:");
+
+    for (const generated of codes) {
+      terminal.say(`  ${generated.code}`);
     }
   } finally {
     secret.fill(0);

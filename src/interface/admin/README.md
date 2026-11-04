@@ -32,8 +32,8 @@ The first **local, synthetic** sign-in journey, and nothing to administer:
   administrative entry point answers 404.
 - `request-checks.ts`: `Origin`, `Sec-Fetch-Site`, form type, size and fields, before any storage
   call. A body that fails or aborts while being read is refused the same way.
-- `session-cookies.ts`: the two `__Host-` cookies, which can only be written with every production
-  attribute.
+- `session-cookies.ts`: the three `__Host-` cookies (session, challenge and, since issue #268, the
+  restricted recovery session), which can only be written with every production attribute.
 - `authentication-runtime.ts`: one runtime per process on `globalThis`, created through one shared
   promise, so `ADR-028` D-17's limiter count P is the process count (measured as 1, issue #260 §6.8).
 - `entry-points.ts` and `require-administrator.ts`: the three `POST` handlers and the page session
@@ -41,6 +41,22 @@ The first **local, synthetic** sign-in journey, and nothing to administer:
   header, refusing a duplicated session cookie. A sign-out whose deletion fails answers `503` and
   keeps the cookie, rather than appearing complete.
 
-**Still missing, deliberately:** recovery codes and the recovery session, revocation, disablement,
-the operator reset and key replacement. Authentication is therefore **incomplete** under `ADR-004`,
-and nothing here is, or may become, publicly reachable.
+## The recovery journey (issue #268)
+
+Still local and synthetic, and still nothing to administer:
+
+- `recovery-entry-points.ts`: password then a recovery code (a restricted recovery session in its
+  own cookie), TOTP re-enrolment start and completion, code regeneration, and the recovery logout.
+  - Every request passes the gate and the request checks first. A refused request (class A) makes
+    no storage call and sends no `Set-Cookie`.
+  - A refused completion code can be retried against the same factor; the secret is not shown again.
+- `require-recovery-session.ts`: the recovery page's session check. It accepts only a live
+  `recovery` session. The merged `checkSession` refreshes a live session's activity before the
+  kind is rejected; that effect is disclosed and tested.
+- `display-once.ts`: the `POST` response documents that show a new secret or codes once. They are
+  escaped and script-free, and carry no secret in any URL or request-bearing attribute.
+- `/admin` never reads the recovery cookie, and refuses a recovery session's kind.
+
+**Still missing, deliberately:** revocation, disablement, the operator reset and key replacement.
+Authentication is therefore **incomplete** under `ADR-004`, and nothing here is, or may become,
+publicly reachable.

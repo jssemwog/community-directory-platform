@@ -1,7 +1,8 @@
 /**
- * The two administrator cookies (`ADR-004` P-1, issue #260 §3.5).
+ * The three administrator cookies (`ADR-004` P-1; issue #260 §3.5; the recovery cookie, issue #268
+ * §3.3 and RJ-D1).
  *
- * Both carry exactly `Secure; HttpOnly; SameSite=Strict; Path=/` and no `Domain`, the `__Host-`
+ * All carry exactly `Secure; HttpOnly; SameSite=Strict; Path=/` and no `Domain`, the `__Host-`
  * requirements. **No function here can produce a weaker cookie**: there is no option to omit an
  * attribute, and local development uses local HTTPS rather than a development-only cookie
  * (L-3). Cookie expiry is a courtesy; the server enforces every lifetime on each request.
@@ -9,8 +10,10 @@
 
 export const SESSION_COOKIE = "__Host-admin-session";
 export const CHALLENGE_COOKIE = "__Host-admin-challenge";
+/** The restricted recovery session's token. `/admin` never reads it (issue #268 §3.5). */
+export const RECOVERY_COOKIE = "__Host-admin-recovery";
 
-export type AdministratorCookie = typeof SESSION_COOKIE | typeof CHALLENGE_COOKIE;
+export type AdministratorCookie = typeof SESSION_COOKIE | typeof CHALLENGE_COOKIE | typeof RECOVERY_COOKIE;
 
 const ATTRIBUTES = "Path=/; Secure; HttpOnly; SameSite=Strict";
 const TOKEN_FORM = /^[A-Za-z0-9_-]{1,128}$/;

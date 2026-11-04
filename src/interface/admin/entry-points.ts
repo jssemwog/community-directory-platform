@@ -38,7 +38,7 @@ import {
 } from "./authentication-runtime";
 import { openGateFor, type LocalAdministratorConfiguration } from "./local-gate";
 import { checkForm } from "./request-checks";
-import { CHALLENGE_COOKIE, clearCookie, readCookie, SESSION_COOKIE, setCookie } from "./session-cookies";
+import { CHALLENGE_COOKIE, clearCookie, readCookie, RECOVERY_COOKIE, SESSION_COOKIE, setCookie } from "./session-cookies";
 
 export const SIGN_IN_PATH = "/admin/sign-in";
 export const CODE_PATH = "/admin/sign-in/code";
@@ -59,7 +59,7 @@ export interface EntryOptions {
   readonly now?: () => number;
 }
 
-const NO_STORE = "no-store";
+export const NO_STORE = "no-store";
 
 /** The single answer for a closed gate, at every entry point and for every method. */
 export function closedGateResponse(): Response {
@@ -69,7 +69,7 @@ export function closedGateResponse(): Response {
   });
 }
 
-function seeOther(location: string, cookies: readonly string[] = []): Response {
+export function seeOther(location: string, cookies: readonly string[] = []): Response {
   const headers = new Headers({ Location: location, "Cache-Control": NO_STORE });
 
   for (const cookie of cookies) {
@@ -98,7 +98,7 @@ function outcomeLogger(options: EntryOptions): (entry: EntryPoint, outcome: stri
     write(JSON.stringify({ event: "administrator-authentication", entry, outcome, at: new Date(now()).toISOString() }));
 }
 
-function gateOf(request: Request, options: EntryOptions): LocalAdministratorConfiguration | undefined {
+export function gateOf(request: Request, options: EntryOptions): LocalAdministratorConfiguration | undefined {
   return openGateFor(options.environment ?? process.env, request.headers.get("host"));
 }
 
@@ -206,7 +206,12 @@ export async function codeEntry(request: Request, options: EntryOptions = {}): P
 
   if (outcome.code === "SESSION_ISSUED") {
     const seconds = (outcome.absoluteExpiresAt - runtime.deps.clock()) / 1000;
-    return seeOther(PROTECTED_PATH, [clearChallenge, setCookie(SESSION_COOKIE, outcome.sessionToken, seconds)]);
+    // A stale recovery cookie never survives a full sign-in (issue #268 RJ-D6).
+    return seeOther(PROTECTED_PATH, [
+      clearChallenge,
+      setCookie(SESSION_COOKIE, outcome.sessionToken, seconds),
+      clearCookie(RECOVERY_COOKIE),
+    ]);
   }
 
   return seeOther(FAILURE_LOCATION, [clearChallenge]);

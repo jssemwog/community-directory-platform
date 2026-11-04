@@ -135,11 +135,22 @@ moderation or business-administration capability exists behind it.
    whose username must start with `synthetic-`. The password (15 to 128 characters, checked
    against an offline blocklist; see `src/domain/administrator-auth/PASSWORD-BLOCKLIST.md`) is
    read without echo; Ctrl-C stops the command. The `otpauth://` URI and base32 secret are shown
-   **once**, for an authenticator app, and one current code confirms the enrolment. It refuses,
-   before starting anything, outside an interactive terminal or with `NODE_ENV=production`.
+   **once**, for an authenticator app, and one current code confirms the enrolment together with
+   **ten recovery codes, shown once**: store them offline. It refuses, before starting anything,
+   outside an interactive terminal or with `NODE_ENV=production`.
 2. Run `npm run demo:local:admin -- start` and open `https://127.0.0.1:3000/admin/sign-in`.
    If signing out cannot be completed (the local database is unavailable), the page says so and
    you may still be signed in; sign out again once the database is back.
+3. **If the authenticator is lost** (issue #268), choose "Use a recovery code instead" after the
+   password. A code works once, ends every other session and opens a **restricted recovery
+   session** of at most 15 minutes. That session can only:
+   - set up a new authenticator: its secret is shown once, then ten fresh codes are shown once and
+     the session ends;
+   - replace the recovery codes, which are shown once;
+   - end.
+
+   It is never administrator access. Reloading a page that shows a secret or codes repeats the
+   action and replaces what it showed, and a page that was lost cannot be shown again.
 
 **Local HTTPS, and a certificate warning.** The session cookie keeps its production attributes
 (`__Host-`, `Secure`, `HttpOnly`, `SameSite=Strict`), and WebKit does not send such a cookie back
@@ -153,10 +164,15 @@ unavailable.
 on first use, never printed and never committed. `demo:local:reset` deletes them together with the
 cluster and its accounts.
 
-**What is still missing, deliberately.** Recovery codes (migration `004`), the recovery session,
-revocation, disabling an account, password or TOTP reset, re-enrolment and key replacement are
-not implemented, so **provisioning is incomplete under `ADR-004`**. An account whose enrolment
-was not confirmed cannot sign in and is cleared only by `demo:local:reset`. All local sign-in
+**What is still missing, deliberately.** Revocation, disabling an account, password or TOTP reset,
+the operator reset (break-glass) and key replacement are not implemented, so **provisioning and
+authentication are incomplete under `ADR-004`**.
+- An account whose enrolment was not confirmed cannot sign in, and is cleared only by
+  `demo:local:reset`.
+- Accounts provisioned before issue #268 have no recovery codes.
+- An account left with no usable route (no working authenticator, and no recovery code the user
+  knows) cannot be recovered until the operator reset exists. `demo:local:reset` deletes all local
+  data and recovers nothing. All local sign-in
 shares one per-source throttle window (20 failures per hour). The sign-in pages claim no
 accessibility conformance level or browser support (`NOQ-5`, `NOQ-6`).
 
