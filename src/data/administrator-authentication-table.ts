@@ -7,12 +7,12 @@
  * `insertInto` or `updateTable` against these tables therefore does not compile, so no second,
  * unreviewed write path can appear.
  *
- * `ADMINISTRATOR_AUTHENTICATION_COLUMNS` is the exact column set of migration `003`. The
- * `ExactKeys` guards below fail `tsc` if a table interface and that list drift apart, and
- * `third-schema-migration.test.ts` checks the same list against the live catalogue, so the
- * typing, the list and the schema cannot disagree unnoticed.
- *
- * `administrator_recovery_code` is absent on purpose: it is migration `004`, a later slice.
+ * `ADMINISTRATOR_AUTHENTICATION_COLUMNS` is the exact column set of migrations `003` and `004`
+ * together (issue #266 adds `administrator_recovery_code` and the factor's
+ * `origin_recovery_session_id`, `ADR-029` RA-3). The `ExactKeys` guards below fail `tsc` if a
+ * table interface and that list drift apart, and `third-schema-migration.test.ts` checks the
+ * same list against the live catalogue, so the typing, the list and the schema cannot disagree
+ * unnoticed.
  */
 
 import type { ColumnType } from "kysely";
@@ -44,6 +44,8 @@ export interface AdministratorTotpFactorTable {
   key_version: ReadOnlyColumn<number | null>;
   /** `bigint`; `pg` returns it as text, and the operations parse it explicitly. */
   last_accepted_step: ReadOnlyColumn<string | null>;
+  /** `ADR-029` RA-3: the recovery session that started a pending factor; `NULL` otherwise. */
+  origin_recovery_session_id: ReadOnlyColumn<string | null>;
 }
 
 export interface AdministratorPendingChallengeTable {
@@ -70,6 +72,12 @@ export interface AdministratorSessionTable {
   absolute_expires_at: Instant;
 }
 
+/** `ADR-028` PS-6 (migration `004`): one unused recovery code, as its SHA-256 digest only. */
+export interface AdministratorRecoveryCodeTable {
+  administrator_id: ReadOnlyColumn<string>;
+  code_digest: Bytes;
+}
+
 export interface AuthenticationThrottleTable {
   scope: ReadOnlyColumn<string>;
   subject_digest: Bytes;
@@ -90,11 +98,12 @@ export interface AdministratorAuthenticationDatabase {
   administrator_pending_challenge: AdministratorPendingChallengeTable;
   administrator_consumed_challenge: AdministratorConsumedChallengeTable;
   administrator_session: AdministratorSessionTable;
+  administrator_recovery_code: AdministratorRecoveryCodeTable;
   authentication_throttle: AuthenticationThrottleTable;
   authentication_source_window: AuthenticationSourceWindowTable;
 }
 
-/** The exact column set of each table migration `003` creates, in declaration order. */
+/** The exact column set of each table, in catalogue order, after migrations `003` and `004`. */
 export const ADMINISTRATOR_AUTHENTICATION_COLUMNS = {
   administrator: [
     "id",
@@ -113,6 +122,7 @@ export const ADMINISTRATOR_AUTHENTICATION_COLUMNS = {
     "secret_tag",
     "key_version",
     "last_accepted_step",
+    "origin_recovery_session_id",
   ],
   administrator_pending_challenge: [
     "token_digest",
@@ -131,6 +141,7 @@ export const ADMINISTRATOR_AUTHENTICATION_COLUMNS = {
     "last_activity_at",
     "absolute_expires_at",
   ],
+  administrator_recovery_code: ["administrator_id", "code_digest"],
   authentication_throttle: [
     "scope",
     "subject_digest",
@@ -159,6 +170,7 @@ const columnSetsMatchTheTypes: Guarded = {
   administrator_pending_challenge: true,
   administrator_consumed_challenge: true,
   administrator_session: true,
+  administrator_recovery_code: true,
   authentication_throttle: true,
   authentication_source_window: true,
 };

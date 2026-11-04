@@ -29,6 +29,16 @@ complete `ADR-004` provisioning remains required before any public reachability.
 and `002`, it is applied only to disposable test clusters, and by the local demonstration to
 its own local database when that demonstration is started.
 
+**It also contains the fourth schema migration** —
+`004-add-administrator-recovery-codes-and-factor-origin.ts` (issue #266) — which creates
+`administrator_recovery_code` and adds `administrator_totp_factor.origin_recovery_session_id`
+with `administrator_totp_factor_origin_check`, as `ADR-029` RA-3 decides. **It implements an
+accepted decision and creates no new policy.** The `CHECK` intentionally makes the existing
+`confirmTotpEnrolment` fail for a factor with a recovery origin. Its `down` is destructive (it
+drops the table and the column) on the `ADR-018` basis that only synthetic local data exists.
+Like the others, it is applied only to disposable test clusters, and by the local demonstration
+to its own local database when that demonstration is next started.
+
 **What still does not exist:** **no database is provisioned**, **no PostgreSQL
 version is selected**, **no migration has been executed against any shared,
 hosted, staging or production database**, and **`C9` persistence is not

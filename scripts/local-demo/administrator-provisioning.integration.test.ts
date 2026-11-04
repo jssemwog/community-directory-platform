@@ -94,7 +94,10 @@ describe("provisioning (V-1)", () => {
     expect(lines.filter((line) => line.includes("Recovery codes are not implemented")).length).toBeGreaterThanOrEqual(2);
 
     const recovery = await sql<{ present: boolean }>`select to_regclass('public.administrator_recovery_code') is not null as present`.execute(db);
-    expect(recovery.rows[0]?.present).toBe(false);
+    expect(recovery.rows[0]?.present).toBe(true);
+    const codes = await sql<{ n: number }>`
+      select count(*)::int as n from administrator_recovery_code c join administrator a on a.id = c.administrator_id where a.username = ${username}`.execute(db);
+    expect(codes.rows[0]?.n).toBe(0);
   });
 });
 
