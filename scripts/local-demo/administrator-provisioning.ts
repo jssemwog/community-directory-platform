@@ -52,7 +52,7 @@ export { TOTP_ISSUER };
 
 export const INCOMPLETE_NOTICE =
   "Ten recovery codes are shown once when enrolment is confirmed; store them offline. " +
-  "Provisioning is still incomplete under ADR-004: disabling an account, password or TOTP reset, session revocation and the operator reset are not implemented. " +
+  "Provisioning is still incomplete under ADR-004: password or TOTP reset, re-enabling a disabled account and the operator reset are not implemented. " +
   "It is a synthetic account for the local journey only.";
 
 export interface ProvisioningTerminal {

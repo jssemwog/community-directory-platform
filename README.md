@@ -164,7 +164,15 @@ unavailable.
 on first use, never printed and never committed. `demo:local:reset` deletes them together with the
 cluster and its accounts.
 
-**What is still missing, deliberately.** Revocation, disabling an account, password or TOTP reset,
+**Operator commands** (issue #270). With the demo stopped, `npm run demo:local:admin -- <command>`:
+- `sessions` lists a synthetic account's sessions (id, kind, timestamps, live or not; never a token);
+- `revoke` ends one session by its id;
+- `revoke-all` ends every session of the account and invalidates its pending sign-in challenges;
+- `disable` disables the account after you retype its username. **This cannot be undone in this
+  project:** nothing re-enables an account, the future operator reset will not either, and only
+  `demo:local:reset`, which deletes all local data, removes it.
+
+**What is still missing, deliberately.** Password or TOTP reset, re-enabling a disabled account,
 the operator reset (break-glass) and key replacement are not implemented, so **provisioning and
 authentication are incomplete under `ADR-004`**.
 - An account whose enrolment was not confirmed cannot sign in, and is cleared only by
@@ -172,9 +180,11 @@ authentication are incomplete under `ADR-004`**.
 - Accounts provisioned before issue #268 have no recovery codes.
 - An account left with no usable route (no working authenticator, and no recovery code the user
   knows) cannot be recovered until the operator reset exists. `demo:local:reset` deletes all local
-  data and recovers nothing. All local sign-in
-shares one per-source throttle window (20 failures per hour). The sign-in pages claim no
-accessibility conformance level or browser support (`NOQ-5`, `NOQ-6`).
+  data and recovers nothing.
+- A disabled account cannot be used again.
+
+All local sign-in shares one per-source throttle window (20 failures per hour). The sign-in pages
+claim no accessibility conformance level or browser support (`NOQ-5`, `NOQ-6`).
 
 **Browser tests.** `npm run test:browser` runs the journey in Chromium, Firefox and WebKit with
 Playwright against its own temporary database, keys, certificate and servers. It never touches

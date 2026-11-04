@@ -1810,3 +1810,214 @@ export async function completeRecoveryReenrolment(
     return { code: "REENROLMENT_COMPLETED", administratorId } as const;
   });
 }
+
+/* ------------------------------------------------------------------------------------------- */
+/* Revocation and disablement (issue #270; ADR-004 P-1, P-6; ADR-028 PS-8, PS-8b)              */
+/* ------------------------------------------------------------------------------------------- */
+
+/** One session row as the operator listing shows it: the D-9 handle and timestamps, never a digest. */
+export interface ListedSession {
+  readonly id: string;
+  readonly kind: string;
+  readonly createdAt: number;
+  readonly lastActivityAt: number;
+  readonly absoluteExpiresAt: number;
+  /** Exactly `checkSession`'s predicate at the listing's one `$now`. */
+  readonly live: boolean;
+}
+
+export type SessionListingOutcome =
+  | {
+      readonly code: "SESSIONS_LISTED";
+      readonly account: { readonly disabledAt: number | null; readonly passwordDisabledAt: number | null };
+      readonly sessions: readonly ListedSession[];
+    }
+  | { readonly code: "ADMINISTRATOR_NOT_FOUND" };
+
+/**
+ * The operator's session listing (issue #270 §3.1 item 1, RV-D2): a read only.
+ *
+ * The clock is read **once**, before **exactly one** `SELECT` of `administrator` left-joined to
+ * `administrator_session`, so the account fields arrive even with zero sessions. `live` is
+ * computed in the statement from that one `$now`, as exactly `checkSession`'s predicate: the account
+ * enabled, the absolute lifetime not reached, and activity within 30 minutes. It takes no lock,
+ * never calls `checkSession`, so never refreshes activity, and never selects `token_digest`.
+ */
+export async function listSessions(
+  db: AuthenticationDb,
+  input: { readonly administratorId: string },
+  clock: Clock,
+): Promise<Stored<SessionListingOutcome>> {
+  const now = clock();
+
+  return single(async () => {
+    const found = await run<{
+      readonly disabled_at: number | null;
+      readonly password_disabled_at: number | null;
+      readonly id: string | null;
+      readonly kind: string | null;
+      readonly created_at: number | null;
+      readonly last_activity_at: number | null;
+      readonly absolute_expires_at: number | null;
+      readonly live: boolean | null;
+    }>(
+      db,
+      "list-sessions",
+      sql`select a.disabled_at, a.password_disabled_at,
+                 s.id, s.kind, s.created_at, s.last_activity_at, s.absolute_expires_at,
+                 (a.disabled_at is null
+                   and s.absolute_expires_at > ${at(now)}
+                   and s.last_activity_at > ${at(now)} - interval '30 minutes') as live
+            from administrator a
+            left join administrator_session s on s.administrator_id = a.id
+           where a.id = ${input.administratorId}
+           order by s.created_at, s.id`,
+    );
+    const first = found.rows[0];
+
+    if (first === undefined) {
+      return { code: "ADMINISTRATOR_NOT_FOUND" } as const;
+    }
+
+    const sessions: ListedSession[] = [];
+
+    for (const row of found.rows) {
+      if (
+        row.id !== null &&
+        row.kind !== null &&
+        row.created_at !== null &&
+        row.last_activity_at !== null &&
+        row.absolute_expires_at !== null
+      ) {
+        sessions.push({
+          id: row.id,
+          kind: row.kind,
+          createdAt: row.created_at,
+          lastActivityAt: row.last_activity_at,
+          absoluteExpiresAt: row.absolute_expires_at,
+          live: row.live === true,
+        });
+      }
+    }
+
+    return {
+      code: "SESSIONS_LISTED",
+      account: { disabledAt: first.disabled_at, passwordDisabledAt: first.password_disabled_at },
+      sessions,
+    } as const;
+  });
+}
+
+export type SessionRevocationOutcome = { readonly code: "SESSION_REVOKED" } | { readonly code: "NO_SUCH_SESSION" };
+
+/**
+ * PS-8 *Revoke one*: **one autocommitted statement**, with no administrator lock, as the ADR row and
+ * the merged `logout` (RV-D5). Either kind may be revoked. Zero rows is the ordinary
+ * `NO_SUCH_SESSION`, including another administrator's session `id`. The count is checked after the
+ * statement committed, so a count above 1 (impossible: `id` is unique) is **reported** as a protocol
+ * failure but cannot be undone (issue #270 §6.1 V-4b).
+ */
+export async function revokeSession(
+  db: AuthenticationDb,
+  input: { readonly administratorId: string; readonly sessionId: string },
+): Promise<Stored<SessionRevocationOutcome>> {
+  return single(async () => {
+    const deleted = affected(
+      await run(
+        db,
+        "revoke-session",
+        sql`delete from administrator_session
+             where id = ${input.sessionId} and administrator_id = ${input.administratorId}
+            returning 1`,
+      ),
+    );
+
+    if (deleted > 1) {
+      throw new RowCountFailure("revoke-session", 1, deleted);
+    }
+
+    return deleted === 1 ? ({ code: "SESSION_REVOKED" } as const) : ({ code: "NO_SUCH_SESSION" } as const);
+  });
+}
+
+export type AllSessionsRevocationOutcome =
+  | { readonly code: "SESSIONS_REVOKED"; readonly revoked: number }
+  | { readonly code: "ADMINISTRATOR_NOT_FOUND" };
+
+/**
+ * PS-8 *Revoke all*: one transaction. Lock the administrator (enabled not required); delete every
+ * session of both kinds; invalidate the pending challenges (RV-D3, the PS-4 reading of "deletes …
+ * pending challenges"). No credential changes, so a challenge issued after the commit from the
+ * still-current password is legitimate (the PS-8a race row). No required count, and no clock: the
+ * ADR row reads none.
+ */
+export async function revokeAllSessions(
+  db: AuthenticationDb,
+  input: { readonly administratorId: string },
+): Promise<Stored<AllSessionsRevocationOutcome>> {
+  const { administratorId } = input;
+
+  return transact(db, async (trx) => {
+    if ((await lockAdministrator(trx, administratorId)) === undefined) {
+      throw new RollBackWith({ code: "ADMINISTRATOR_NOT_FOUND" } as const);
+    }
+
+    const revoked = affected(
+      await run(trx, "revoke-all-sessions", sql`delete from administrator_session where administrator_id = ${administratorId}`),
+    );
+    await invalidatePendingChallenges(trx, administratorId);
+
+    return { code: "SESSIONS_REVOKED", revoked } as const;
+  });
+}
+
+export type AccountDisableOutcome =
+  | { readonly code: "DISABLED"; readonly revoked: number }
+  | { readonly code: "ALREADY_DISABLED" }
+  | { readonly code: "ADMINISTRATOR_NOT_FOUND" };
+
+/**
+ * PS-8 *Disable account*: one transaction. Lock (enabled not required); clock; **(required)** set
+ * `disabled_at`, where 0 rows is `ALREADY_DISABLED` and rolls back; then delete every session of both
+ * kinds and invalidate the pending challenges (RV-D3). Nothing else is written: the password hash,
+ * factor, codes, counters and throttle rows are untouched. **No operation clears `disabled_at`**
+ * (`ADR-028` D-12); the operator reset will not re-enable either (D-16).
+ */
+export async function disableAccount(
+  db: AuthenticationDb,
+  input: { readonly administratorId: string },
+  clock: Clock,
+): Promise<Stored<AccountDisableOutcome>> {
+  const { administratorId } = input;
+
+  return transact(db, async (trx) => {
+    if ((await lockAdministrator(trx, administratorId)) === undefined) {
+      throw new RollBackWith({ code: "ADMINISTRATOR_NOT_FOUND" } as const);
+    }
+
+    const now = clock();
+    const updated = affected(
+      await run(
+        trx,
+        "disable-account",
+        sql`update administrator set disabled_at = ${at(now)}
+             where id = ${administratorId} and disabled_at is null`,
+      ),
+    );
+
+    if (updated === 0) {
+      throw new RollBackWith({ code: "ALREADY_DISABLED" } as const);
+    }
+
+    if (updated !== 1) {
+      throw new RowCountFailure("disable-account", 1, updated);
+    }
+
+    const revoked = affected(
+      await run(trx, "disable-delete-sessions", sql`delete from administrator_session where administrator_id = ${administratorId}`),
+    );
+    await invalidatePendingChallenges(trx, administratorId);
+
+    return { code: "DISABLED", revoked } as const;
+  });
+}

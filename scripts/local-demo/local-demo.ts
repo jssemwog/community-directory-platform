@@ -66,6 +66,7 @@ import { createMigrationProvider } from "../../src/data/migrate";
 import { LOCAL_DEMO_DATABASE_URL } from "../../src/interface/public/local-demo-persistence";
 import { resetAndSeedSyntheticListings, SYNTHETIC_LISTINGS } from "./fixtures";
 import { administratorEnvironmentFor, ensureAdministratorKeys } from "./administrator-keys";
+import { CONTROL_SUBCOMMANDS, controlSyntheticAdministrator, type ControlSubcommand } from "./administrator-control";
 import { INCOMPLETE_NOTICE, launchRefusalOf, processTerminal, provisionSyntheticAdministrator } from "./administrator-provisioning";
 import { ensureLocalCertificate, httpsArgumentsFor } from "./local-tls";
 import {
@@ -570,6 +571,59 @@ async function adminAdd(): Promise<void> {
   process.exitCode = exitCode;
 }
 
+/**
+ * `admin sessions | revoke | revoke-all | disable` (issue #270 RV-D1): like `add`, refused before
+ * anything starts, then run with the demo stopped, under the launcher lock. It needs no keys.
+ */
+async function adminControl(subcommand: ControlSubcommand): Promise<void> {
+  const terminal = processTerminal();
+  const refusal = launchRefusalOf(terminal, process.env);
+
+  if (refusal !== undefined) {
+    terminal.say(refusal.message);
+    terminal.close();
+    process.exitCode = 1;
+    return;
+  }
+
+  const binaries = await postgresBinaries();
+  const lock = takeLauncherLock(`admin ${subcommand}`);
+  let exitCode = 0;
+
+  try {
+    await initialiseIfNeeded(binaries);
+    await startCluster(binaries);
+
+    try {
+      await prepareDatabase(readPassword(), false);
+
+      const databaseUrl = connectionStringFor(DATABASE_NAME, readPassword());
+      const persistence = createListingPersistence({ pool: { connectionString: databaseUrl, max: 1 } });
+
+      try {
+        const result = await controlSyntheticAdministrator(subcommand, terminal, {
+          // The storage module uses raw `sql`; only the row typing differs from the listing pool.
+          db: persistence.db as unknown as Parameters<typeof controlSyntheticAdministrator>[2]["db"],
+          clock: Date.now,
+          environment: process.env,
+          databaseUrl,
+        });
+
+        exitCode = result.ok ? 0 : 1;
+      } finally {
+        await persistence.shutdown();
+      }
+    } finally {
+      await stopCluster(binaries);
+    }
+  } finally {
+    lock.release();
+    terminal.close();
+  }
+
+  process.exitCode = exitCode;
+}
+
 async function admin(): Promise<void> {
   const subcommand = process.argv[3];
 
@@ -577,8 +631,10 @@ async function admin(): Promise<void> {
     await startSite(true);
   } else if (subcommand === "add") {
     await adminAdd();
+  } else if ((CONTROL_SUBCOMMANDS as readonly string[]).includes(subcommand ?? "")) {
+    await adminControl(subcommand as ControlSubcommand);
   } else {
-    say("Usage: local-demo.ts admin start | add");
+    say("Usage: local-demo.ts admin start | add | sessions | revoke | revoke-all | disable");
     process.exitCode = 1;
   }
 }
@@ -587,7 +643,7 @@ const commands: Record<string, () => Promise<void>> = { start, stop, reset, admi
 const command = commands[process.argv[2] ?? "start"];
 
 if (command === undefined) {
-  say("Usage: local-demo.ts start | stop | reset | admin start | admin add");
+  say("Usage: local-demo.ts start | stop | reset | admin start | admin add | admin sessions | admin revoke | admin revoke-all | admin disable");
   process.exit(1);
 }
 

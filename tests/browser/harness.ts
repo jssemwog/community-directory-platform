@@ -235,6 +235,20 @@ export function provisionAccount(state: Pick<HarnessState, "connectionString" | 
   return runService<SyntheticAccount>("provision", [state.connectionString, state.totpKey, options.confirm === false ? "unconfirmed" : "confirmed"]);
 }
 
+/**
+ * Invoke one issue #270 storage operation through the `control` service, as the operator commands
+ * would, while the harness server keeps running. The commands themselves need the launcher lock,
+ * which the running harness does not hold (RV-D1).
+ */
+export function controlAccount(
+  state: Pick<HarnessState, "connectionString">,
+  operation: "revoke-all" | "revoke" | "disable",
+  administratorId: string,
+  sessionId = "",
+): { readonly code: string } {
+  return runService<{ readonly code: string }>("control", [state.connectionString, operation, administratorId, sessionId]);
+}
+
 /** The real `keyedDigest`, computed by the service. */
 export function keyedDigestOf(throttleKey: string, purpose: string, value: string): Buffer {
   return Buffer.from(runService<string>("digest", [throttleKey, purpose, value]), "base64url");
@@ -712,6 +726,33 @@ async function provisionService(connectionString: string, totpKey: string, mode:
   }
 }
 
+/** The `control` service: one revocation or disable storage operation (issue #270). */
+async function controlService(connectionString: string, operation: string, administratorId: string, sessionId: string): Promise<{ readonly code: string }> {
+  const storage = await import("../../src/data/administrator-authentication");
+  const { createListingPersistence } = await import("../../src/data/connection");
+  const persistence = createListingPersistence({ pool: { connectionString, max: 1 } });
+  const db = persistence.db as never;
+
+  try {
+    const outcome =
+      operation === "revoke-all"
+        ? await storage.revokeAllSessions(db, { administratorId })
+        : operation === "revoke"
+          ? await storage.revokeSession(db, { administratorId, sessionId })
+          : operation === "disable"
+            ? await storage.disableAccount(db, { administratorId }, Date.now)
+            : undefined;
+
+    if (outcome === undefined || !outcome.ok) {
+      throw new Error(`control ${operation} gave ${JSON.stringify(outcome)}`);
+    }
+
+    return { code: outcome.value.code };
+  } finally {
+    await persistence.shutdown();
+  }
+}
+
 async function digestService(key: string, purpose: string, value: string): Promise<string> {
   const { keyedDigest } = await import("../../src/domain/administrator-auth/keyed-digest");
   return keyedDigest(Buffer.from(key, "base64url"), purpose as "password-username", value).toString("base64url");
@@ -732,7 +773,9 @@ if (invokedAsService) {
         ? await provisionService(args[0] ?? "", args[1] ?? "", args[2] ?? "confirmed")
         : command === "digest"
           ? await digestService(args[0] ?? "", args[1] ?? "", args[2] ?? "")
-          : undefined;
+          : command === "control"
+            ? await controlService(args[0] ?? "", args[1] ?? "", args[2] ?? "", args[3] ?? "")
+            : undefined;
 
     if (value === undefined) {
       return 2;

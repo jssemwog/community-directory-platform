@@ -57,6 +57,9 @@ Still local and synthetic, and still nothing to administer:
   escaped and script-free, and carry no secret in any URL or request-bearing attribute.
 - `/admin` never reads the recovery cookie, and refuses a recovery session's kind.
 
-**Still missing, deliberately:** revocation, disablement, the operator reset and key replacement.
+**Revocation and disablement** (issue #270) are operator commands, not part of this surface. Every
+session check here refuses a session they ended, and every step refuses a disabled account.
+
+**Still missing, deliberately:** re-enablement, the operator reset and key replacement.
 Authentication is therefore **incomplete** under `ADR-004`, and nothing here is, or may become,
 publicly reachable.
