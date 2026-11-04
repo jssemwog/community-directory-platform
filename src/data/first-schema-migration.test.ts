@@ -106,6 +106,12 @@ const SECOND_MIGRATION_NAME = "002-add-revision-base-version";
 const THIRD_MIGRATION_NAME = "003-create-administrator-authentication-tables";
 
 /**
+ * The fourth migration (issue #266): recovery codes and the factor's recovery origin
+ * (`ADR-029`). Named for the same reason; attacked in `fourth-schema-migration.test.ts`.
+ */
+const FOURTH_MIGRATION_NAME = "004-add-administrator-recovery-codes-and-factor-origin";
+
+/**
  * The base-version column `002` adds (`ADR-023` items 9-12).
  *
  * `001` does not create it, and this file does not attack it — but it is `not null`, so every
@@ -366,13 +372,14 @@ describe("up migration", () => {
       "select name from kysely_migration order by name",
     );
 
-    // Exactly the three governed migrations, in the order the ordinal prefixes impose. Stated
-    // exhaustively rather than as a subset: a third file appearing in the folder, or either of
+    // Exactly the four governed migrations, in the order the ordinal prefixes impose. Stated
+    // exhaustively rather than as a subset: another file appearing in the folder, or any of
     // these failing to apply, must fail here rather than pass unnoticed.
     expect(rows.map((row) => row.name)).toEqual([
       MIGRATION_NAME,
       SECOND_MIGRATION_NAME,
       THIRD_MIGRATION_NAME,
+      FOURTH_MIGRATION_NAME,
     ]);
   });
 
@@ -384,11 +391,12 @@ describe("up migration", () => {
         order by table_name`,
     );
 
-    // `001`'s two, and the seven `003` adds (issue #258).
+    // `001`'s two, the seven `003` adds (issue #258) and the one `004` adds (issue #266).
     expect(rows.map((row) => row.table_name)).toEqual([
       "administrator",
       "administrator_consumed_challenge",
       "administrator_pending_challenge",
+      "administrator_recovery_code",
       "administrator_session",
       "administrator_totp_factor",
       "authentication_source_window",
@@ -1141,9 +1149,12 @@ describe("down migration against an empty schema", () => {
    *
    * **Migration `003` (issue #258) adds a third step in front**: the first `down` now reverses
    * `003`, removing only its seven authentication tables, before `002` and `001` follow.
+   *
+   * **Migration `004` (issue #266) adds a fourth step in front of that**: the first `down` now
+   * reverses `004`, and the listing tables are untouched by it.
    */
   it(
-    "reverses one migration per step, reaching an empty schema only after all three",
+    "reverses one migration per step, reaching an empty schema only after all four",
     async () => {
       const dependencies = dependenciesFor(DOWN_DATABASE);
       const downClient = new Client({
@@ -1188,10 +1199,17 @@ describe("down migration against an empty schema", () => {
           MIGRATION_NAME,
           SECOND_MIGRATION_NAME,
           THIRD_MIGRATION_NAME,
+          FOURTH_MIGRATION_NAME,
         ]);
         expect(await revisionColumnsNow()).toContain(BASE_VERSION_COLUMN);
 
-        // `003` first (issue #258): its seven tables go, and both listing tables stay.
+        // `004` first (issue #266): both listing tables stay.
+        expect(await runMigration("down", dependencies)).toBe(SUCCESS);
+
+        expect(await appliedNow()).toEqual([MIGRATION_NAME, SECOND_MIGRATION_NAME, THIRD_MIGRATION_NAME]);
+        expect(await tablesNow()).toEqual(["listing", "listing_revision"]);
+
+        // Then `003` (issue #258): its seven tables go, and both listing tables stay.
         expect(await runMigration("down", dependencies)).toBe(SUCCESS);
 
         expect(await appliedNow()).toEqual([MIGRATION_NAME, SECOND_MIGRATION_NAME]);

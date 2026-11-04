@@ -103,6 +103,8 @@ const FIRST_MIGRATION_NAME = "001-create-listing-and-revision-tables";
 const SECOND_MIGRATION_NAME = "002-add-revision-base-version";
 /** Issue #258: applied by the governed runner after `002`; attacked in its own file. */
 const THIRD_MIGRATION_NAME = "003-create-administrator-authentication-tables";
+/** Issue #266: applied by the governed runner after `003`; attacked in its own file. */
+const FOURTH_MIGRATION_NAME = "004-add-administrator-recovery-codes-and-factor-origin";
 
 /** The column `002` adds. */
 const COLUMN = "base_listing_last_updated_at";
@@ -346,7 +348,7 @@ describe("applying the chain", () => {
     CLUSTER_TIMEOUT_MS,
   );
 
-  it("records exactly the three expected migrations, in governed order", async () => {
+  it("records exactly the four expected migrations, in governed order", async () => {
     // Exhaustive, not a subset: a third migration file, or either of these failing to apply,
     // must fail here. `FileMigrationProvider` orders by ascending name, so the ordinal
     // prefixes are the ordering, and `002` cannot precede `001`.
@@ -354,6 +356,7 @@ describe("applying the chain", () => {
       FIRST_MIGRATION_NAME,
       SECOND_MIGRATION_NAME,
       THIRD_MIGRATION_NAME,
+      FOURTH_MIGRATION_NAME,
     ]);
   });
 
@@ -365,11 +368,12 @@ describe("applying the chain", () => {
         order by table_name`,
     );
 
-    // `002` adds no table; the seven others are `003`'s (issue #258).
+    // `002` adds no table; seven others are `003`'s (issue #258) and one is `004`'s (issue #266).
     expect(rows.map((row) => row.table_name)).toEqual([
       "administrator",
       "administrator_consumed_challenge",
       "administrator_pending_challenge",
+      "administrator_recovery_code",
       "administrator_session",
       "administrator_totp_factor",
       "authentication_source_window",
@@ -707,7 +711,8 @@ describe("reversal", () => {
    * `001` must survive it intact.
    *
    * Since issue #258 the latest migration is `003`, so the test first takes `003` down, which
-   * restores exactly the state this test was written against, and then reverses `002`.
+   * restores exactly the state this test was written against, and then reverses `002`. Since
+   * issue #266 the latest is `004`, so `004` is taken down before `003`.
    */
   it(
     "removes only 002, leaves 001 intact, and restores cleanly on reapply",
@@ -725,9 +730,16 @@ describe("reversal", () => {
           FIRST_MIGRATION_NAME,
           SECOND_MIGRATION_NAME,
           THIRD_MIGRATION_NAME,
+          FOURTH_MIGRATION_NAME,
         ]);
 
-        // `003` first, so that `002` is the most recent migration again.
+        // `004` first, then `003`, so that `002` is the most recent migration again.
+        expect(await runMigration("down", dependencies)).toBe(SUCCESS);
+        expect(await appliedMigrations(client)).toEqual([
+          FIRST_MIGRATION_NAME,
+          SECOND_MIGRATION_NAME,
+          THIRD_MIGRATION_NAME,
+        ]);
         expect(await runMigration("down", dependencies)).toBe(SUCCESS);
         expect(await appliedMigrations(client)).toEqual([
           FIRST_MIGRATION_NAME,
@@ -798,12 +810,13 @@ describe("reversal", () => {
         // by name, not merely the same count.
         expect(await governedChecks()).toEqual(GOVERNED_CHECKS);
 
-        // Requirement 22 — reapplying restores 002 exactly (and `003` after it).
+        // Requirement 22 — reapplying restores 002 exactly (and `003` and `004` after it).
         expect(await runMigration("latest", dependencies)).toBe(SUCCESS);
         expect(await appliedMigrations(client)).toEqual([
           FIRST_MIGRATION_NAME,
           SECOND_MIGRATION_NAME,
           THIRD_MIGRATION_NAME,
+          FOURTH_MIGRATION_NAME,
         ]);
         expect(await columnNamesOf(client, "listing_revision")).toEqual([
           ...REVISION_COLUMNS_AFTER_001,

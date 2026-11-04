@@ -13,7 +13,16 @@ import { createHmac } from "node:crypto";
 
 export const THROTTLE_KEY_BYTES = 32;
 
-export type KeyedDigestPurpose = "password-username" | "totp-administrator" | "source-address";
+/**
+ * `recovery-code-administrator` is the `recovery_code` counter's subject (issue #266 amendment 2),
+ * kept apart from `totp-administrator`: the separate purposes prevent linking one administrator's two
+ * second-factor counter rows by equality of their subject digests alone.
+ */
+export type KeyedDigestPurpose =
+  | "password-username"
+  | "totp-administrator"
+  | "recovery-code-administrator"
+  | "source-address";
 
 const SEPARATOR = Buffer.from([0]);
 

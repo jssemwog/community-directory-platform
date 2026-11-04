@@ -6,6 +6,10 @@
  * column, foreign-key, default, trigger and extension surface against the catalogue, and take
  * the migration down and up again on a database of its own.
  *
+ * Since issue #266 the chain ends with `004`, which adds `administrator_recovery_code` and the
+ * factor's `origin_recovery_session_id`. The exact-set assertions here therefore describe the
+ * catalogue after `004`; `004`'s own attacks are in `fourth-schema-migration.test.ts`.
+ *
  * **They run against a real PostgreSQL server** from the `embedded-postgres` development
  * dependency, unconditionally, in one disposable cluster owned by `testing/embedded-cluster.ts`.
  * Nothing here touches any other database.
@@ -56,6 +60,7 @@ const MIGRATIONS = [
   "001-create-listing-and-revision-tables",
   "002-add-revision-base-version",
   "003-create-administrator-authentication-tables",
+  "004-add-administrator-recovery-codes-and-factor-origin",
 ];
 
 const AUTH_TABLES = Object.keys(ADMINISTRATOR_AUTHENTICATION_COLUMNS).sort();
@@ -132,12 +137,12 @@ beforeAll(async () => {
 }, CLUSTER_TIMEOUT_MS);
 
 describe("applying the chain", () => {
-  it("records exactly the three governed migrations, in order", async () => {
+  it("records exactly the four governed migrations, in order", async () => {
     const { rows } = await client.query<{ name: string }>("select name from kysely_migration order by name");
     expect(rows.map((row) => row.name)).toEqual(MIGRATIONS);
   });
 
-  it("creates exactly nine base tables: the two listing tables and the seven ADR-028 tables", async () => {
+  it("creates exactly ten base tables: the two listing tables and the eight ADR-028 tables", async () => {
     const { rows } = await client.query<{ table_name: string }>(
       `select table_name from information_schema.tables
         where table_schema = 'public' and table_type = 'BASE TABLE' and table_name not like 'kysely_%'
@@ -182,6 +187,7 @@ describe("applying the chain", () => {
     expect(keys.map((row) => row.conname)).toEqual([
       "administrator_consumed_challenge_administrator_fkey",
       "administrator_pending_challenge_administrator_fkey",
+      "administrator_recovery_code_administrator_fkey",
       "administrator_session_administrator_fkey",
       "administrator_totp_factor_administrator_fkey",
     ]);
@@ -343,7 +349,7 @@ describe("abuse-control constraints", () => {
 
 describe("reversal", () => {
   it(
-    "drops exactly the seven tables, leaves 001 and 002 intact, and reapplies cleanly",
+    "after 004 is taken down, drops exactly the seven tables, leaves 001 and 002 intact, and reapplies cleanly",
     async () => {
       const dependencies = dependenciesFor(REVERSAL_DATABASE);
       const reversal = new Client({ connectionString: cluster.connectionStringFor(REVERSAL_DATABASE) });
@@ -365,6 +371,10 @@ describe("reversal", () => {
       try {
         expect(await runMigration("latest", dependencies)).toBe(SUCCESS);
         expect(await applied()).toEqual(MIGRATIONS);
+
+        // `004` first (issue #266), so that `003` is the most recent migration again.
+        expect(await runMigration("down", dependencies)).toBe(SUCCESS);
+        expect(await applied()).toEqual(MIGRATIONS.slice(0, 3));
 
         expect(await runMigration("down", dependencies)).toBe(SUCCESS);
         expect(await applied()).toEqual(MIGRATIONS.slice(0, 2));

@@ -141,19 +141,21 @@ describe("migration discovery (ADR-018 FileMigrationProvider)", () => {
     );
   });
 
-  it("discovers exactly the three schema migrations, in governed order", async () => {
+  it("discovers exactly the four schema migrations, in governed order", async () => {
     // This assertion previously read "discovers no migration today, because none
     // exists", then "exactly the first schema migration, and only it". The second
     // migration landed with issue #183, so the single-element expectation became false
     // in turn — and the honest replacement is still the exact set, in the order the
     // ordinal prefixes impose, which guards against a third arriving unnoticed. The third
     // landed with issue #258, so the expectation names it, and still guards against a fourth.
+    // The fourth landed with issue #266; the expectation names it and guards against a fifth.
     const discovered = await createMigrationProvider().getMigrations();
 
     expect(Object.keys(discovered)).toEqual([
       "001-create-listing-and-revision-tables",
       "002-add-revision-base-version",
       "003-create-administrator-authentication-tables",
+      "004-add-administrator-recovery-codes-and-factor-origin",
     ]);
   });
 
