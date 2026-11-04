@@ -75,12 +75,22 @@ export function harnessState(): HarnessState {
 }
 
 /** Every new administrator path, and every method each must refuse uniformly when closed. */
-export const ENTRY_PAGES = ["/admin", "/admin/sign-in", "/admin/sign-in/code"] as const;
-export const ENTRY_HANDLERS = ["/admin/sign-in/password", "/admin/sign-in/code/verify", "/admin/sign-out"] as const;
+export const ENTRY_PAGES = ["/admin", "/admin/sign-in", "/admin/sign-in/code", "/admin/sign-in/recovery", "/admin/recovery"] as const;
+export const ENTRY_HANDLERS = [
+  "/admin/sign-in/password",
+  "/admin/sign-in/code/verify",
+  "/admin/sign-out",
+  // The recovery journey (issue #268).
+  "/admin/sign-in/recovery/verify",
+  "/admin/recovery/reenrolment/start",
+  "/admin/recovery/reenrolment/complete",
+  "/admin/recovery/codes",
+  "/admin/recovery/sign-out",
+] as const;
 export const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] as const;
 
 /** Text that only an open administrator page renders. */
-export const PAGE_MARKERS = ["Administrator sign-in", "Authenticator code", "Signed in", "Administration"] as const;
+export const PAGE_MARKERS = ["Administrator sign-in", "Authenticator code", "Signed in", "Administration", "Recovery code", "Recovery session"] as const;
 
 export interface ClosedGateEvidence {
   /** `production` is `next start` with the full gate environment; `development` is `next dev` without it. */
@@ -212,6 +222,8 @@ export interface SyntheticAccount {
   readonly password: string;
   readonly secretBase32: string;
   readonly administratorId: string;
+  /** The ten codes the provisioning command showed once (issue #268 §3.1); none when unconfirmed. */
+  readonly recoveryCodes: readonly string[];
 }
 
 /**
@@ -693,7 +705,8 @@ async function provisionService(connectionString: string, totpKey: string, mode:
     }
 
     const row = await sql<{ id: string }>`select id from administrator where username = ${username}`.execute(persistence.db);
-    return { username, password, secretBase32, administratorId: row.rows[0]?.id ?? "" };
+    const recoveryCodes = lines.filter((line) => /^  [0-9a-f]{8}(-[0-9a-f]{8}){3}$/.test(line)).map((line) => line.trim());
+    return { username, password, secretBase32, administratorId: row.rows[0]?.id ?? "", recoveryCodes };
   } finally {
     await persistence.shutdown();
   }

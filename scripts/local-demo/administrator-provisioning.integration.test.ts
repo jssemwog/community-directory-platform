@@ -14,6 +14,7 @@ import type { AdministratorAuthenticationDatabase } from "../../src/data/adminis
 import { createListingPersistence, type ListingPersistence } from "../../src/data/connection";
 import { useEmbeddedPostgres } from "../../src/data/testing/embedded-cluster";
 import { passwordBlocklist } from "../../src/domain/administrator-auth/password-policy";
+import { recoveryCodeDigest } from "../../src/domain/administrator-auth/recovery-code";
 import { totpCodeAt } from "../../src/domain/administrator-auth/totp";
 import type { Kysely } from "kysely";
 import { provisionSyntheticAdministrator, type ProvisioningResult } from "./administrator-provisioning";
@@ -76,7 +77,7 @@ const name = () => `synthetic-${randomBytes(5).toString("hex")}`;
 const PASSWORD = "a long synthetic passphrase for tests";
 
 describe("provisioning (V-1)", () => {
-  it("creates one administrator and one confirmed factor, shows the secret once, and issues no recovery codes", async () => {
+  it("creates one administrator and one confirmed factor, shows the secret once, and shows ten recovery codes once (issue #268 §6.4)", async () => {
     const username = name();
     const before = await counts();
     const { result, lines } = await run({ username, password: PASSWORD });
@@ -91,13 +92,23 @@ describe("provisioning (V-1)", () => {
 
     expect(lines.filter((line) => line.includes("otpauth://"))).toHaveLength(1);
     expect(lines.filter((line) => line.includes("Secret (base32)"))).toHaveLength(1);
-    expect(lines.filter((line) => line.includes("Recovery codes are not implemented")).length).toBeGreaterThanOrEqual(2);
+    expect(lines.filter((line) => line.includes("still incomplete under ADR-004")).length).toBeGreaterThanOrEqual(2);
+
+    // Exactly ten RD-1 codes, shown once, after the enrolment display; their digests are what is stored.
+    const shown = lines.filter((line) => /^  [0-9a-f]{8}-[0-9a-f]{8}-[0-9a-f]{8}-[0-9a-f]{8}$/.test(line)).map((line) => line.trim());
+    expect(shown).toHaveLength(10);
+    expect(new Set(shown).size).toBe(10);
+    expect(lines.findIndex((line) => line.startsWith("  ") && shown.includes(line.trim()))).toBeGreaterThan(lines.findIndex((line) => line.includes("Secret (base32)")));
 
     const recovery = await sql<{ present: boolean }>`select to_regclass('public.administrator_recovery_code') is not null as present`.execute(db);
     expect(recovery.rows[0]?.present).toBe(true);
-    const codes = await sql<{ n: number }>`
-      select count(*)::int as n from administrator_recovery_code c join administrator a on a.id = c.administrator_id where a.username = ${username}`.execute(db);
-    expect(codes.rows[0]?.n).toBe(0);
+    const codes = await sql<{ digest: string }>`
+      select encode(c.code_digest, 'hex') as digest from administrator_recovery_code c join administrator a on a.id = c.administrator_id where a.username = ${username}`.execute(db);
+    expect(codes.rows.map((row) => row.digest).sort()).toEqual(shown.map((code) => recoveryCodeDigest(code)?.toString("hex")).sort());
+
+    const origin = await sql<{ origin: string | null }>`
+      select f.origin_recovery_session_id as origin from administrator_totp_factor f join administrator a on a.id = f.administrator_id where a.username = ${username}`.execute(db);
+    expect(origin.rows[0]?.origin).toBeNull();
   });
 });
 
@@ -137,6 +148,10 @@ describe("an unconfirmed enrolment (V-3)", () => {
     const factor = await sql<{ state: string }>`
       select f.state from administrator_totp_factor f join administrator a on a.id = f.administrator_id where a.username = ${username}`.execute(db);
     expect(factor.rows[0]?.state).toBe("pending_confirmation");
+    // RA-5 activates and stores codes together, or neither (issue #268 §6.4).
+    const codes = await sql<{ n: number }>`
+      select count(*)::int as n from administrator_recovery_code c join administrator a on a.id = c.administrator_id where a.username = ${username}`.execute(db);
+    expect(codes.rows[0]?.n).toBe(0);
   });
 });
 

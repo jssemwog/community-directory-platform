@@ -10,7 +10,7 @@ Plain modules behind the seams. May depend on `data/`. **May not depend on
 | `C5` — Submission Service | The public write path | `P3` |
 | `C6` — Moderation Service | **Sole writer of status**; the lifecycle transitions | `P4` |
 | `C7` — Validation Rules | Shared, authoritative, server-side (`O-5`) | `P3`/`P4` |
-| `C8` — Identity and Access | The gate for `TB-3`, enforced on every request (`O-3`) | `P4`. Mechanism `ADR-004` and storage `ADR-028` `Accepted`; the primitives and server-side sign-in steps live in `administrator-auth/` (issue #258), local-only under issue #254 and **not reachable**: no route or command calls them. The recovery-code primitive (`recovery-code.ts`) and the server-side recovery steps (`recovery.ts`) of `ADR-029` follow (issue #266), equally **not reachable**. `DG-3` remains `Unresolved` |
+| `C8` — Identity and Access | The gate for `TB-3`, enforced on every request (`O-3`) | `P4`. Mechanism `ADR-004` and storage `ADR-028` `Accepted`; the primitives and server-side sign-in steps live in `administrator-auth/` (issue #258), local-only under issue #254 and **not reachable**: no route or command calls them. The recovery-code primitive (`recovery-code.ts`) and the server-side recovery steps (`recovery.ts`) of `ADR-029` follow (issue #266). Since issue #268 they are reachable **only** through the local gate's recovery journey, with the shared enrolment URI builder in `totp-enrolment.ts`. `DG-3` remains `Unresolved` |
 | `C10` — Audit Recorder | **Conditional** — exists only if `OQ-14`/`NOQ-8` resolves yes | `DG-3` |
 | `C11` — Abuse Safeguard | **Conditional** — the seam is built in `P3`; the mechanism is `OQ-9` | `DG-3` |
 

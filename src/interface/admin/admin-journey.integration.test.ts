@@ -225,6 +225,8 @@ describe("the code entry point and the session check", () => {
     expect(issued[0]?.headers.getSetCookie()).toEqual([
       "__Host-admin-challenge=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Strict",
       expect.stringMatching(/^__Host-admin-session=[A-Za-z0-9_-]{43}; Max-Age=\d+; Path=\/; Secure; HttpOnly; SameSite=Strict$/),
+      // Issue #268 §4 rule 2 (b): a full sign-in also clears any stale recovery cookie.
+      "__Host-admin-recovery=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Strict",
     ]);
     expect(await shape(refused[0] as Response)).toEqual({
       status: 303,

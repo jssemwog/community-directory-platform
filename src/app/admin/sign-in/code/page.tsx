@@ -29,6 +29,9 @@ export default async function SignInCodePage() {
         </p>
         <button type="submit">Sign in</button>
       </form>
+      <p>
+        <a href="/admin/sign-in/recovery">Use a recovery code instead</a>
+      </p>
     </main>
   );
 }

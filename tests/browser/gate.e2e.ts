@@ -38,7 +38,23 @@ const state = harnessState();
 const evidence = JSON.parse(readFileSync(state.closedGateEvidenceFile, "utf8")) as ClosedGateEvidence[];
 
 const EXISTING_ROUTES = ["/", "/_not-found", "/admin", "/directory", "/directory/[listingId]"];
-const NEW_ROUTES = ["/admin/sign-in", "/admin/sign-in/code", "/admin/sign-in/code/verify", "/admin/sign-in/password", "/admin/sign-out"];
+const NEW_ROUTES = [
+  "/admin/sign-in",
+  "/admin/sign-in/code",
+  "/admin/sign-in/code/verify",
+  "/admin/sign-in/password",
+  "/admin/sign-out",
+  // The recovery journey (issue #268 §6.3 P-R6).
+  "/admin/sign-in/recovery",
+  "/admin/sign-in/recovery/verify",
+  "/admin/recovery",
+  "/admin/recovery/reenrolment/start",
+  "/admin/recovery/reenrolment/complete",
+  "/admin/recovery/codes",
+  "/admin/recovery/sign-out",
+];
+/** Text only an open administrator page renders, including the recovery pages (issue #268). */
+const OPEN_PAGE_TEXT = /Administrator sign-in|Authenticator code|Signed in|Recovery code|Recovery session/;
 
 for (const phase of ["production", "development"] as const) {
   test.describe(`O-${phase === "production" ? "1" : "2"}: ${phase === "production" ? "next start with the full gate environment" : "next dev without the launcher's environment"}`, () => {
@@ -65,7 +81,7 @@ for (const phase of ["production", "development"] as const) {
           const answer = recorded?.handlers.find((entry) => entry.path === path && entry.method === method);
           console.log(`[evidence] ${phase} ${method} ${path}: ${String(answer?.status)}${answer?.allow === undefined ? "" : ` Allow: ${answer.allow}`}`);
           expect(answer?.status, `${method} ${path}`).toBe(404);
-          expect(answer?.body ?? "", `${method} ${path}`).not.toMatch(/Administrator sign-in|Authenticator code|Signed in/);
+          expect(answer?.body ?? "", `${method} ${path}`).not.toMatch(OPEN_PAGE_TEXT);
         }
       }
     });
@@ -79,7 +95,7 @@ for (const phase of ["production", "development"] as const) {
   });
 }
 
-test("O-1: the build adds exactly the five journey routes, and its client bundles hold no canary", async ({ browserName }) => {
+test("O-1: the build adds exactly the journey routes (twelve, with the recovery journey), and its client bundles hold no canary", async ({ browserName }) => {
   test.skip(browserName !== "chromium", "build evidence is engine-independent; asserted once");
   const production = evidence.find((entry) => entry.phase === "production");
   const routes = (production?.buildRoutes ?? []).map((line) => line.split(/\s+/)[2]).sort();
@@ -125,12 +141,12 @@ test("O-4: any Host other than the canonical one gets the uniform refusal", asyn
 
   for (const host of hosts) {
     for (const path of [...ENTRY_HANDLERS, ...ENTRY_PAGES]) {
-      const answer = await send(state, state.certificatePath, path.includes("/sign-in/") || path === "/admin/sign-out" ? "POST" : "GET", path, {
+      const answer = await send(state, state.certificatePath, path.includes("/sign-in/") || path === "/admin/sign-out" || path.startsWith("/admin/recovery/") ? "POST" : "GET", path, {
         headers: { Host: host, Origin: state.origin, "Sec-Fetch-Site": "same-origin", "Content-Type": "application/x-www-form-urlencoded" },
         body: path === "/admin/sign-in/code" || ENTRY_PAGES.includes(path as (typeof ENTRY_PAGES)[number]) ? undefined : "username=a&password=b",
       });
       expect(answer.status, `${host} ${path}`).toBe(404);
-      expect(answer.body).not.toMatch(/Administrator sign-in|Authenticator code|Signed in/);
+      expect(answer.body).not.toMatch(OPEN_PAGE_TEXT);
 
       if (ENTRY_HANDLERS.includes(path as (typeof ENTRY_HANDLERS)[number])) {
         expect(answer.body, `${host} ${path}`).toBe("Not Found");
@@ -212,7 +228,22 @@ test("O-5: no Server Action, no route beyond the journey, and no import of any a
   }
 
   const adminFiles = filesUnder(join(REPOSITORY_ROOT, "src", "app", "admin")).map((file) => relative(join(REPOSITORY_ROOT, "src", "app", "admin"), file).split(sep).join("/")).sort();
-  expect(adminFiles).toEqual(["layout.tsx", "page.tsx", "sign-in/code/page.tsx", "sign-in/code/verify/route.ts", "sign-in/page.tsx", "sign-in/password/route.ts", "sign-out/route.ts"]);
+  expect(adminFiles).toEqual([
+    "layout.tsx",
+    "page.tsx",
+    "recovery/codes/route.ts",
+    "recovery/page.tsx",
+    "recovery/reenrolment/complete/route.ts",
+    "recovery/reenrolment/start/route.ts",
+    "recovery/sign-out/route.ts",
+    "sign-in/code/page.tsx",
+    "sign-in/code/verify/route.ts",
+    "sign-in/page.tsx",
+    "sign-in/password/route.ts",
+    "sign-in/recovery/page.tsx",
+    "sign-in/recovery/verify/route.ts",
+    "sign-out/route.ts",
+  ]);
 
   const administrative = [
     ...filesUnder(join(REPOSITORY_ROOT, "src", "app", "admin")),

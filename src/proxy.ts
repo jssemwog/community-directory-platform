@@ -18,11 +18,12 @@ import { NextResponse, type NextRequest } from "next/server";
  *
  * **Unconditional `OPTIONS` refusal on the page paths.** Next.js answers `OPTIONS` on any page
  * route with an empty `400` before rendering, so the administrator pages' gate would never see
- * it. This answers `OPTIONS` on the three administrator page paths with the same uniform `404`
+ * it. This answers `OPTIONS` on the five administrator page paths (the recovery pages since issue
+ * #268) with the same uniform `404`
  * the closed gate gives (issue #260 §12 qualification 8), whether the gate is open or closed:
  * pages support no `OPTIONS` in either case. The Route Handlers answer their own `OPTIONS`.
  */
-const PAGE_PATHS = new Set(["/admin", "/admin/sign-in", "/admin/sign-in/code"]);
+const PAGE_PATHS = new Set(["/admin", "/admin/sign-in", "/admin/sign-in/code", "/admin/sign-in/recovery", "/admin/recovery"]);
 
 export function proxy(request: NextRequest) {
   if (request.method === "OPTIONS" && PAGE_PATHS.has(request.nextUrl.pathname)) {
