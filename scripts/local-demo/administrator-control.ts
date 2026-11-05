@@ -13,7 +13,7 @@
  * - **`revoke`** ends one session, by its `id`.
  * - **`revoke-all`** ends every session of the account and invalidates its pending challenges.
  * - **`disable`** asks for the username to be retyped (RV-D4), after warning that **nothing in this
- *   project re-enables an account** (`ADR-028` D-12), and that the future operator reset will not
+ *   project re-enables an account** (`ADR-028` D-12), and that the operator reset (`reset-credentials`) will not
  *   either (D-16).
  *
  * Every outcome is also written as one four-field outcome line (`event`, `entry`, `outcome`, `at`)
@@ -50,7 +50,7 @@ const ENTRY: Readonly<Record<ControlSubcommand, string>> = {
 
 export const DISABLE_WARNING =
   "Disabling cannot be undone in this project: the account will never sign in or use a recovery code again, " +
-  "and the future operator reset will not re-enable it. Only `npm run demo:local:reset`, which deletes all local data, removes it.";
+  "and the operator reset will not re-enable it. Only `npm run demo:local:reset`, which deletes all local data, removes it.";
 
 /**
  * Revoke-all's and disable's storage-failure message. A failure can be reported after the server
