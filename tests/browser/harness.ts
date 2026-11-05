@@ -249,6 +249,21 @@ export function controlAccount(
   return runService<{ readonly code: string }>("control", [state.connectionString, operation, administratorId, sessionId]);
 }
 
+/**
+ * Run the operator reset (the Unit OR Scope Gate) through the real command logic, driven by a
+ * scripted terminal in the `reset` service, while the harness server keeps running. Like the
+ * control service, it stands in for the operator, who would run the command under the launcher
+ * lock with the demo stopped (RV-D1). It returns the account with what the command showed once:
+ * the new password, the new secret and the ten codes, or neither for a disabled account (D-16).
+ */
+export function resetAccount(
+  state: Pick<HarnessState, "connectionString" | "totpKey" | "throttleKey">,
+  account: Pick<SyntheticAccount, "username" | "administratorId">,
+  password = `reset journey ${randomBytes(12).toString("hex")}`,
+): SyntheticAccount & { readonly outcome: string } {
+  return runService<SyntheticAccount & { readonly outcome: string }>("reset", [state.connectionString, state.totpKey, state.throttleKey, account.username, password]);
+}
+
 /** The real `keyedDigest`, computed by the service. */
 export function keyedDigestOf(throttleKey: string, purpose: string, value: string): Buffer {
   return Buffer.from(runService<string>("digest", [throttleKey, purpose, value]), "base64url");
@@ -753,6 +768,55 @@ async function controlService(connectionString: string, operation: string, admin
   }
 }
 
+/** The `reset` service: one operator reset through the real command, with a scripted terminal. */
+async function resetService(connectionString: string, totpKey: string, throttleKey: string, username: string, password: string): Promise<SyntheticAccount & { readonly outcome: string }> {
+  const { resetSyntheticAdministrator } = await import("../../scripts/local-demo/administrator-reset");
+  const { createListingPersistence } = await import("../../src/data/connection");
+  const { totpCodeAt } = await import("../../src/domain/administrator-auth/totp");
+  const { Secret } = await import("otpauth");
+  const { sql } = await import("kysely");
+  const answers = [username, username];
+  const secrets = [password, password];
+  const lines: string[] = [];
+  let secretBase32 = "";
+  const persistence = createListingPersistence({ pool: { connectionString, max: 1 } });
+
+  try {
+    const result = await resetSyntheticAdministrator(
+      {
+        interactive: true,
+        ask: async (prompt) => {
+          if (!prompt.startsWith("Current six-digit code")) {
+            return answers.shift() ?? "";
+          }
+
+          secretBase32 = lines.map((line) => /Secret \(base32\): ([A-Z2-7]+)/.exec(line)?.[1]).find((value) => value !== undefined) ?? "";
+          return totpCodeAt(Buffer.from(Secret.fromBase32(secretBase32).bytes), Date.now());
+        },
+        askSecret: async () => secrets.shift() ?? "",
+        say: (line) => lines.push(line),
+      },
+      {
+        db: persistence.db as never,
+        clock: Date.now,
+        keys: { totpKey: Buffer.from(totpKey, "base64url"), throttleKey: Buffer.from(throttleKey, "base64url") },
+        environment: {},
+        databaseUrl: connectionString,
+      },
+    );
+
+    if (result.outcome !== "CREDENTIALS_RESET_CONFIRMED" && result.outcome !== "CREDENTIALS_RESET_ACCOUNT_DISABLED") {
+      throw new Error(`reset gave ${JSON.stringify(result)}`);
+    }
+
+    const row = await sql<{ id: string }>`select id from administrator where username = ${username}`.execute(persistence.db);
+    const recoveryCodes = lines.filter((line) => /^  [0-9a-f]{8}(-[0-9a-f]{8}){3}$/.test(line)).map((line) => line.trim());
+    return { outcome: result.outcome, username, password, secretBase32, administratorId: row.rows[0]?.id ?? "", recoveryCodes };
+  } finally {
+    await persistence.shutdown();
+  }
+}
+
 async function digestService(key: string, purpose: string, value: string): Promise<string> {
   const { keyedDigest } = await import("../../src/domain/administrator-auth/keyed-digest");
   return keyedDigest(Buffer.from(key, "base64url"), purpose as "password-username", value).toString("base64url");
@@ -775,7 +839,9 @@ if (invokedAsService) {
           ? await digestService(args[0] ?? "", args[1] ?? "", args[2] ?? "")
           : command === "control"
             ? await controlService(args[0] ?? "", args[1] ?? "", args[2] ?? "", args[3] ?? "")
-            : undefined;
+            : command === "reset"
+              ? await resetService(args[0] ?? "", args[1] ?? "", args[2] ?? "", args[3] ?? "", args[4] ?? "")
+              : undefined;
 
     if (value === undefined) {
       return 2;

@@ -60,6 +60,10 @@ Still local and synthetic, and still nothing to administer:
 **Revocation and disablement** (issue #270) are operator commands, not part of this surface. Every
 session check here refuses a session they ended, and every step refuses a disabled account.
 
-**Still missing, deliberately:** re-enablement, the operator reset and key replacement.
+**The operator reset** (Unit OR) is also an operator command, not part of this surface. It ends every
+session and invalidates every pending challenge, so every check here refuses what came before it.
+It never re-enables a disabled account (`ADR-028` D-16).
+
+**Still missing, deliberately:** re-enablement and key replacement.
 Authentication is therefore **incomplete** under `ADR-004`, and nothing here is, or may become,
 publicly reachable.

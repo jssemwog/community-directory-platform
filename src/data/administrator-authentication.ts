@@ -2021,3 +2021,303 @@ export async function disableAccount(
     return { code: "DISABLED", revoked } as const;
   });
 }
+
+/* ------------------------------------------------------------------------------------------- */
+/* The operator reset (Unit OR Scope Gate, revision 4; `ADR-004` P-6 (2))                      */
+/* ------------------------------------------------------------------------------------------- */
+
+/**
+ * The credentials one reset run wrote, built **once** by the trusted caller (the reset command)
+ * before T1, from values it generated itself, and passed unchanged to T1, every T2 attempt and
+ * the probe. No field is ever read back from storage. `expectedPasswordHash` carries a fresh salt
+ * (`ADR-028` PS-2) and `factorId` is a new `randomUUID` (D-13), so both exist only in this run.
+ */
+export interface ResetRun {
+  readonly administratorId: string;
+  readonly expectedPasswordHash: string;
+  readonly factorId: string;
+  /** Exactly `RECOVERY_CODE_COUNT` distinct 32-byte digests. */
+  readonly expectedCodeDigests: readonly Buffer[];
+}
+
+/** The D-7 subject digests of the three per-subject throttle rows PS-8 *Operator reset* deletes. */
+export interface ResetThrottleSubjects {
+  /** `password-username` of the normalized username. */
+  readonly password: Buffer;
+  /** `totp-administrator` of the administrator id. */
+  readonly totp: Buffer;
+  /** `recovery-code-administrator` of the administrator id. */
+  readonly recoveryCode: Buffer;
+}
+
+export type CredentialResetOutcome =
+  | { readonly code: "CREDENTIALS_RESET"; readonly revoked: number; readonly accountDisabled: boolean }
+  | { readonly code: "ADMINISTRATOR_NOT_FOUND" };
+
+/**
+ * T1, PS-8 *Operator reset (break-glass)*: one transaction. Lock the administrator, **enabled not
+ * required** (D-16); clock; **(required, 1)** replace the password hash and clear
+ * `password_disabled_at`, never naming `disabled_at`; **(required, 1)** the factor upsert to
+ * `pending_confirmation` under the run's `factor_id`, writing `origin_recovery_session_id = NULL`
+ * in both the insert and the update (`ADR-029` RA-3); the code set replaced by exactly ten digests
+ * **(required, 10)**; every session of both kinds deleted; pending challenges invalidated (the
+ * RV-D3 reading, OR-D4); and the `password`, `totp` and `recovery_code` throttle rows deleted. The
+ * per-source window and the consumed-challenge records are not touched (OR-D12, D-15).
+ */
+export async function resetAdministratorCredentials(
+  db: AuthenticationDb,
+  input: { readonly run: ResetRun; readonly material: SealedFactorMaterial; readonly throttleSubjects: ResetThrottleSubjects },
+  clock: Clock,
+): Promise<Stored<CredentialResetOutcome>> {
+  const { run: reset, material, throttleSubjects } = input;
+  const { administratorId } = reset;
+
+  return transact(db, async (trx) => {
+    const administrator = await lockAdministrator(trx, administratorId);
+    clock();
+
+    if (administrator === undefined) {
+      throw new RollBackWith({ code: "ADMINISTRATOR_NOT_FOUND" } as const);
+    }
+
+    await required(
+      trx,
+      "reset-password",
+      1,
+      sql`update administrator set password_hash = ${reset.expectedPasswordHash}, password_disabled_at = null
+           where id = ${administratorId}`,
+    );
+    await required(
+      trx,
+      "reset-factor",
+      1,
+      sql`insert into administrator_totp_factor
+            (administrator_id, state, factor_id, secret_ciphertext, secret_iv, secret_tag,
+             key_version, last_accepted_step, origin_recovery_session_id)
+          values (${administratorId}, 'pending_confirmation', ${reset.factorId}, ${material.ciphertext},
+                  ${material.iv}, ${material.tag}, ${material.keyVersion}, null, null)
+          on conflict (administrator_id) do update set
+            state = 'pending_confirmation', factor_id = excluded.factor_id,
+            secret_ciphertext = excluded.secret_ciphertext, secret_iv = excluded.secret_iv,
+            secret_tag = excluded.secret_tag, key_version = excluded.key_version,
+            last_accepted_step = null,
+            origin_recovery_session_id = null`,
+    );
+    await deleteRecoveryCodes(trx, administratorId);
+    await insertRecoveryCodes(trx, administratorId, reset.expectedCodeDigests);
+    const revoked = affected(
+      await run(trx, "reset-delete-sessions", sql`delete from administrator_session where administrator_id = ${administratorId}`),
+    );
+    await invalidatePendingChallenges(trx, administratorId);
+    await run(
+      trx,
+      "reset-delete-throttle-rows",
+      sql`delete from authentication_throttle
+           where (scope = 'password' and subject_digest = ${throttleSubjects.password})
+              or (scope = 'totp' and subject_digest = ${throttleSubjects.totp})
+              or (scope = 'recovery_code' and subject_digest = ${throttleSubjects.recoveryCode})`,
+    );
+
+    return { code: "CREDENTIALS_RESET", revoked, accountDisabled: administrator.disabled_at !== null } as const;
+  });
+}
+
+/** Whether `expected` is a set of exactly `RECOVERY_CODE_COUNT` distinct 32-byte digests. */
+function isExpectedCodeSet(expected: readonly Buffer[]): boolean {
+  return (
+    expected.length === RECOVERY_CODE_COUNT &&
+    expected.every((digest) => digest.length === 32) &&
+    new Set(expected.map((digest) => digest.toString("hex"))).size === RECOVERY_CODE_COUNT
+  );
+}
+
+/**
+ * The exact ten-code set: the administrator's stored codes are exactly `expected`. With the
+ * primary key `(administrator_id, code_digest)` and ten distinct expected digests, `total = 10`
+ * and `matched = 10` is set equality: none missing, none extra, none foreign. A read.
+ */
+async function storedCodeSetIs(executor: AuthenticationDb | AuthenticationTrx, administratorId: string, expected: readonly Buffer[]): Promise<boolean> {
+  if (!isExpectedCodeSet(expected)) {
+    return false;
+  }
+
+  const counted = await run<{ readonly total: number; readonly matched: number }>(
+    executor,
+    "reset-code-set",
+    sql`select count(*)::int as total,
+               (count(*) filter (where code_digest = any(${expected}::bytea[])))::int as matched
+          from administrator_recovery_code where administrator_id = ${administratorId}`,
+  );
+  const row = counted.rows[0];
+
+  return row !== undefined && row.total === RECOVERY_CODE_COUNT && row.matched === RECOVERY_CODE_COUNT;
+}
+
+export type OperatorResetConfirmationOutcome =
+  | { readonly code: "RESET_CONFIRMED" }
+  | {
+      readonly code: "REFUSED";
+      readonly reason:
+        | "ADMINISTRATOR_NOT_FOUND"
+        | "ACCOUNT_DISABLED"
+        | "PASSWORD_CHANGED"
+        | "FACTOR_NOT_FROM_THIS_RESET"
+        | "FACTOR_NOT_PENDING"
+        | "FACTOR_HAS_RECOVERY_ORIGIN"
+        | "CODE_SET_CHANGED"
+        | "FACTOR_UNREADABLE"
+        | "WRONG_CODE";
+    };
+
+/**
+ * T2, PS-8 *TOTP confirmation* for the operator reset (`ADR-029` RA-6 FA-O), **bound to this run's
+ * T1** through the `ResetRun` handoff. Under the administrator lock, in order: the account exists
+ * and is enabled; `password_hash` is the run's hash; the factor row names the run's `factor_id`
+ * and is `pending_confirmation`, with no recovery origin; the stored codes are exactly the run's
+ * ten digests. Only then is the code verified, at the post-lock instant, through the injected
+ * verifier. Every refusal writes nothing and counts nothing. Success activates exactly that factor
+ * **(required, 1)** and invalidates pending challenges; no code is inserted, because under FA-O
+ * the fresh codes come from T1.
+ *
+ * It does not use the caller-restricted `confirmTotpEnrolment`: `ADR-029` RA-7 reserves that
+ * function for the reset but does not require it (OR-D2a, ruled 2026-11-05).
+ */
+export async function confirmOperatorReset(
+  db: AuthenticationDb,
+  input: { readonly run: ResetRun; readonly verify: TotpVerifier },
+  clock: Clock,
+): Promise<Stored<OperatorResetConfirmationOutcome>> {
+  const { run: reset, verify } = input;
+  const { administratorId, factorId } = reset;
+  const refuse = (reason: Extract<OperatorResetConfirmationOutcome, { code: "REFUSED" }>["reason"]) =>
+    new RollBackWith({ code: "REFUSED", reason } as const);
+
+  return transact(db, async (trx): Promise<OperatorResetConfirmationOutcome> => {
+    const administrator = await lockAdministrator(trx, administratorId);
+    const now = clock();
+
+    if (administrator === undefined) {
+      throw refuse("ADMINISTRATOR_NOT_FOUND");
+    }
+    if (administrator.disabled_at !== null) {
+      throw refuse("ACCOUNT_DISABLED");
+    }
+    if (administrator.password_hash !== reset.expectedPasswordHash) {
+      throw refuse("PASSWORD_CHANGED");
+    }
+
+    const row = await readPendingFactor(trx, administratorId);
+    if (row === undefined || row.factor_id !== factorId) {
+      throw refuse("FACTOR_NOT_FROM_THIS_RESET");
+    }
+    if (row.state !== "pending_confirmation") {
+      throw refuse("FACTOR_NOT_PENDING");
+    }
+    if (row.origin_recovery_session_id !== null) {
+      throw refuse("FACTOR_HAS_RECOVERY_ORIGIN");
+    }
+    if (!(await storedCodeSetIs(trx, administratorId, reset.expectedCodeDigests))) {
+      throw refuse("CODE_SET_CHANGED");
+    }
+
+    const factor = pendingMaterialOf(administratorId, factorId, row);
+    if (factor === undefined) {
+      throw refuse("FACTOR_NOT_PENDING");
+    }
+
+    const verdict = verify(factor, now);
+    if (verdict.kind === "unreadable") {
+      throw refuse("FACTOR_UNREADABLE");
+    }
+    if (verdict.kind === "mismatch") {
+      throw refuse("WRONG_CODE");
+    }
+
+    await required(
+      trx,
+      "confirm-operator-reset",
+      1,
+      sql`update administrator_totp_factor set state = 'active', last_accepted_step = ${verdict.step}
+           where administrator_id = ${administratorId} and factor_id = ${factorId}
+             and state = 'pending_confirmation' and origin_recovery_session_id is null`,
+    );
+    await invalidatePendingChallenges(trx, administratorId);
+
+    return { code: "RESET_CONFIRMED" } as const;
+  });
+}
+
+/** What the probe can see of one reset run: booleans and one state, never a hash, digest or count. */
+export interface OperatorResetProbe {
+  readonly found: boolean;
+  readonly passwordMatches: boolean;
+  readonly factorMatches: boolean;
+  /** The factor's state when `factorMatches`, else `null`. */
+  readonly factorState: string | null;
+  /** The origin is `NULL`, when `factorMatches`; otherwise `false`. */
+  readonly originIsNull: boolean;
+  readonly accountEnabled: boolean;
+  readonly codeSetMatches: boolean;
+}
+
+/**
+ * The probe for an uncertain commit (OR-D6): **one `SELECT`**, with no lock, no clock and no
+ * write, against the same `ResetRun`. Both identifiers matching is positive evidence that this
+ * run's T1 committed. Neither matching is consistent with a rollback **and** with an overwritten
+ * commit, so the caller never concludes a rollback from it (Scope Gate §3.6, §3.9 W-3).
+ */
+export async function probeOperatorReset(
+  db: AuthenticationDb,
+  input: { readonly run: ResetRun },
+): Promise<Stored<OperatorResetProbe>> {
+  const { run: reset } = input;
+  const expected = isExpectedCodeSet(reset.expectedCodeDigests) ? reset.expectedCodeDigests : [];
+
+  return single(async () => {
+    const found = await run<{
+      readonly password_matches: boolean;
+      readonly factor_matches: boolean;
+      readonly factor_state: string | null;
+      readonly origin_is_null: boolean;
+      readonly account_enabled: boolean;
+      readonly code_set_matches: boolean;
+    }>(
+      db,
+      "probe-operator-reset",
+      sql`select a.password_hash = ${reset.expectedPasswordHash} as password_matches,
+                 coalesce(f.factor_id = ${reset.factorId}, false) as factor_matches,
+                 case when f.factor_id = ${reset.factorId} then f.state end as factor_state,
+                 coalesce(f.factor_id = ${reset.factorId} and f.origin_recovery_session_id is null, false) as origin_is_null,
+                 a.disabled_at is null as account_enabled,
+                 (select count(*) = ${RECOVERY_CODE_COUNT}
+                         and count(*) filter (where c.code_digest = any(${expected}::bytea[])) = ${RECOVERY_CODE_COUNT}
+                    from administrator_recovery_code c where c.administrator_id = a.id) as code_set_matches
+            from administrator a
+            left join administrator_totp_factor f on f.administrator_id = a.id
+           where a.id = ${reset.administratorId}`,
+    );
+    const row = found.rows[0];
+
+    if (row === undefined) {
+      return {
+        found: false,
+        passwordMatches: false,
+        factorMatches: false,
+        factorState: null,
+        originIsNull: false,
+        accountEnabled: false,
+        codeSetMatches: false,
+      };
+    }
+
+    return {
+      found: true,
+      passwordMatches: row.password_matches === true,
+      factorMatches: row.factor_matches === true,
+      factorState: row.factor_state,
+      originIsNull: row.origin_is_null === true,
+      accountEnabled: row.account_enabled === true,
+      codeSetMatches: expected.length === RECOVERY_CODE_COUNT && row.code_set_matches === true,
+    };
+  });
+}

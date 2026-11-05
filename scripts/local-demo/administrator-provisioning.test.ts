@@ -241,7 +241,12 @@ describe("the recovery-code provisioning (issue #268 §3.1, §6.4)", () => {
   it("the notice no longer lists revocation or disabling as unimplemented (issue #270 §3.4)", () => {
     expect(INCOMPLETE_NOTICE).not.toMatch(/revocation/i);
     expect(INCOMPLETE_NOTICE).not.toMatch(/disabling an account/i);
-    expect(INCOMPLETE_NOTICE).toMatch(/re-enabling a disabled account and the operator reset are not implemented/);
+    expect(INCOMPLETE_NOTICE).toMatch(/re-enabling a disabled account are not implemented/);
+  });
+
+  it("the notice no longer lists the operator reset as unimplemented (Unit OR, OR-D11)", () => {
+    expect(INCOMPLETE_NOTICE).not.toMatch(/the operator reset are not implemented/);
+    expect(INCOMPLETE_NOTICE).toMatch(/password-only or TOTP-only reset and re-enabling a disabled account are not implemented/);
   });
 
   it("confirms only through the RA-5 confirmation, never the caller-restricted confirmTotpEnrolment", () => {

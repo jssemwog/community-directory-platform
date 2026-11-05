@@ -68,6 +68,7 @@ import { resetAndSeedSyntheticListings, SYNTHETIC_LISTINGS } from "./fixtures";
 import { administratorEnvironmentFor, ensureAdministratorKeys } from "./administrator-keys";
 import { CONTROL_SUBCOMMANDS, controlSyntheticAdministrator, type ControlSubcommand } from "./administrator-control";
 import { INCOMPLETE_NOTICE, launchRefusalOf, processTerminal, provisionSyntheticAdministrator } from "./administrator-provisioning";
+import { readResetKeys, RESET_SUBCOMMAND, resetSyntheticAdministrator } from "./administrator-reset";
 import { ensureLocalCertificate, httpsArgumentsFor } from "./local-tls";
 import {
   acquireLauncherLock,
@@ -624,6 +625,69 @@ async function adminControl(subcommand: ControlSubcommand): Promise<void> {
   process.exitCode = exitCode;
 }
 
+/**
+ * `admin reset-credentials` (the Unit OR Scope Gate): the operator reset. Refused like the control
+ * subcommands before anything starts. Under the lock, the keys file is **validated before** the
+ * cluster is initialised or started, and never created; then the reset runs with only those keys.
+ */
+async function adminReset(): Promise<void> {
+  const terminal = processTerminal();
+  const refusal = launchRefusalOf(terminal, process.env);
+
+  if (refusal !== undefined) {
+    terminal.say(refusal.message);
+    terminal.close();
+    process.exitCode = 1;
+    return;
+  }
+
+  const binaries = await postgresBinaries();
+  const lock = takeLauncherLock(`admin ${RESET_SUBCOMMAND}`);
+  let exitCode = 0;
+
+  try {
+    const keys = readResetKeys(ADMINISTRATOR_KEYS_FILE);
+
+    if (!keys.ok) {
+      terminal.say(keys.message);
+      terminal.say(JSON.stringify({ event: "administrator-authentication", entry: "operator-reset", outcome: "KEYS_UNREADABLE", at: new Date().toISOString() }));
+      exitCode = 1;
+      return;
+    }
+
+    await initialiseIfNeeded(binaries);
+    await startCluster(binaries);
+
+    try {
+      await prepareDatabase(readPassword(), false);
+
+      const databaseUrl = connectionStringFor(DATABASE_NAME, readPassword());
+      const persistence = createListingPersistence({ pool: { connectionString: databaseUrl, max: 1 } });
+
+      try {
+        const result = await resetSyntheticAdministrator(terminal, {
+          // The storage module uses raw `sql`; only the row typing differs from the listing pool.
+          db: persistence.db as unknown as Parameters<typeof resetSyntheticAdministrator>[1]["db"],
+          clock: Date.now,
+          keys: keys.keys,
+          environment: process.env,
+          databaseUrl,
+        });
+
+        exitCode = result.ok ? 0 : 1;
+      } finally {
+        await persistence.shutdown();
+      }
+    } finally {
+      await stopCluster(binaries);
+    }
+  } finally {
+    lock.release();
+    terminal.close();
+    process.exitCode = exitCode;
+  }
+}
+
 async function admin(): Promise<void> {
   const subcommand = process.argv[3];
 
@@ -633,8 +697,10 @@ async function admin(): Promise<void> {
     await adminAdd();
   } else if ((CONTROL_SUBCOMMANDS as readonly string[]).includes(subcommand ?? "")) {
     await adminControl(subcommand as ControlSubcommand);
+  } else if (subcommand === RESET_SUBCOMMAND) {
+    await adminReset();
   } else {
-    say("Usage: local-demo.ts admin start | add | sessions | revoke | revoke-all | disable");
+    say("Usage: local-demo.ts admin start | add | sessions | revoke | revoke-all | disable | reset-credentials");
     process.exitCode = 1;
   }
 }
@@ -643,7 +709,7 @@ const commands: Record<string, () => Promise<void>> = { start, stop, reset, admi
 const command = commands[process.argv[2] ?? "start"];
 
 if (command === undefined) {
-  say("Usage: local-demo.ts start | stop | reset | admin start | admin add | admin sessions | admin revoke | admin revoke-all | admin disable");
+  say("Usage: local-demo.ts start | stop | reset | admin start | admin add | admin sessions | admin revoke | admin revoke-all | admin disable | admin reset-credentials");
   process.exit(1);
 }
 

@@ -169,19 +169,25 @@ cluster and its accounts.
 - `revoke` ends one session by its id;
 - `revoke-all` ends every session of the account and invalidates its pending sign-in challenges;
 - `disable` disables the account after you retype its username. **This cannot be undone in this
-  project:** nothing re-enables an account, the future operator reset will not either, and only
-  `demo:local:reset`, which deletes all local data, removes it.
+  project:** nothing re-enables an account, the operator reset will not either, and only
+  `demo:local:reset`, which deletes all local data, removes it;
+- `reset-credentials` is the operator reset (break-glass, Unit OR). After you retype the username
+  and enter a new password twice, it replaces the password, the authenticator and all ten recovery
+  codes, ends every session, and clears the account's sign-in waits. It then shows the new
+  authenticator once and asks for its current code. Only after that code is confirmed does it show
+  the ten new codes, once. The per-address limit is not cleared. **A disabled account stays
+  disabled:** its credentials are replaced, nothing is shown, and it still cannot sign in. If the
+  command cannot confirm whether its change was applied, it says so; run it again, and the new run
+  replaces everything. It needs `.local-demo/administrator-keys.json` and never creates it.
 
-**What is still missing, deliberately.** Password or TOTP reset, re-enabling a disabled account,
-the operator reset (break-glass) and key replacement are not implemented, so **provisioning and
-authentication are incomplete under `ADR-004`**.
-- An account whose enrolment was not confirmed cannot sign in, and is cleared only by
-  `demo:local:reset`.
-- Accounts provisioned before issue #268 have no recovery codes.
-- An account left with no usable route (no working authenticator, and no recovery code the user
-  knows) cannot be recovered until the operator reset exists. `demo:local:reset` deletes all local
-  data and recovers nothing.
-- A disabled account cannot be used again.
+**What is still missing, deliberately.** Password-only or TOTP-only reset, re-enabling a disabled
+account and key replacement are not implemented, so **provisioning and authentication are
+incomplete under `ADR-004`**.
+- An account whose enrolment was not confirmed, an account provisioned before issue #268 (no
+  recovery codes), and an account left with no usable route (no working authenticator, and no
+  recovery code the user knows) can each be recovered with `reset-credentials`.
+  `demo:local:reset` deletes all local data and recovers nothing.
+- A disabled account cannot be used again, reset or not.
 
 All local sign-in shares one per-source throttle window (20 failures per hour). The sign-in pages
 claim no accessibility conformance level or browser support (`NOQ-5`, `NOQ-6`).
