@@ -6,7 +6,7 @@
  * TOTP challenge-to-session transaction; and provisioning **persistence** (create an
  * administrator, start and confirm TOTP enrolment), with no command around it. Issue #266 adds
  * the recovery-code and recovery-session operations of `ADR-029` (at the end of this file);
- * revoke, disable, reset, key replacement, re-encryption and housekeeping are later slices.
+ * revocation (#270), the reset (#272) and housekeeping (#274) follow; key replacement is later.
  *
  * Every transaction follows `ADR-028` exactly:
  *
@@ -30,6 +30,7 @@
  */
 
 import { sql, type Kysely, type RawBuilder, type Transaction } from "kysely";
+import { createRequire } from "node:module";
 
 import type { AdministratorAuthenticationDatabase } from "./administrator-authentication-table";
 import { timestamptzFromEpochMilliseconds } from "./row-mapping";
@@ -2320,4 +2321,118 @@ export async function probeOperatorReset(
       codeSetMatches: expected.length === RECOVERY_CODE_COUNT && row.code_set_matches === true,
     };
   });
+}
+
+/* ------------------------------------------------------------------------------------------- */
+/* Housekeeping (Unit HK Scope Gate, issue #274; ADR-028 PS-1 rule 4, PS-4, PS-8)               */
+/* ------------------------------------------------------------------------------------------- */
+
+/**
+ * One statement's result (§3.1). **Only `deleted` carries a number**, and only because PostgreSQL
+ * acknowledged the statement with it. `rolled-back` needs driver evidence that this `DELETE`
+ * aborted (E1 to E3); every other failure is `unknown`, because the statement may have committed.
+ */
+export type HousekeepingResult =
+  | { readonly status: "deleted"; readonly count: number }
+  | { readonly status: "rolled-back" }
+  | { readonly status: "unknown" }
+  | { readonly status: "not-run" };
+
+export interface HousekeepingReport {
+  /** True only when all three statements were acknowledged. */
+  readonly completed: boolean;
+  readonly pendingChallenges: HousekeepingResult;
+  readonly consumedChallenges: HousekeepingResult;
+  readonly sessions: HousekeepingResult;
+}
+
+/**
+ * E3: the closed list of execution-time aborts. Each is raised only by the statement's own
+ * execution inside its implicit transaction, so it establishes that the `DELETE` aborted. Adding a
+ * code is a Scope Gate change (§3.1); `57014`, connection classes and every other code stay out.
+ */
+const CONFIRMED_ABORT_STATES: readonly string[] = ["P0001", "40P01"];
+
+/** The driver's server-error class, reached as `connection.ts` reaches `pg` (E1). */
+function isDriverDatabaseError(cause: unknown): cause is { readonly severity?: unknown; readonly code?: unknown } {
+  const { DatabaseError } = createRequire(import.meta.url)("pg") as { DatabaseError: abstract new (...args: never[]) => object };
+  return cause instanceof DatabaseError;
+}
+
+/** E1 to E3, all exposed by the driver for the failed statement; anything less is `unknown`. */
+function failedResult(cause: unknown): HousekeepingResult {
+  const confirmed =
+    isDriverDatabaseError(cause) &&
+    cause.severity === "ERROR" &&
+    typeof cause.code === "string" &&
+    CONFIRMED_ABORT_STATES.includes(cause.code);
+
+  return confirmed ? { status: "rolled-back" } : { status: "unknown" };
+}
+
+/**
+ * Remove expired authentication rows (Scope Gate §3.1, HK-D1 to HK-D3).
+ *
+ * The clock is read **once**; then three **single autocommitted** statements run in order, each
+ * deleting only rows its own subselect locked with `FOR UPDATE SKIP LOCKED`, so a row another
+ * transaction holds is skipped. That covers **row** locks only: a conflicting table lock can still
+ * make a statement wait. Equality means expired, as in PS-4 and the session check. No
+ * administrator, factor, code, throttle or source-window row is touched, no retention period is
+ * set, and nothing is sent after the first failure.
+ */
+export async function removeExpiredAuthenticationRows(db: AuthenticationDb, clock: Clock): Promise<HousekeepingReport> {
+  const now = clock();
+  const statements: readonly [string, RawBuilder<unknown>][] = [
+    [
+      "housekeeping-pending-challenges",
+      sql`delete from administrator_pending_challenge
+           where token_digest in (select token_digest from administrator_pending_challenge
+                                   where expires_at <= ${at(now)}
+                                   for update skip locked)`,
+    ],
+    [
+      "housekeeping-consumed-challenges",
+      sql`delete from administrator_consumed_challenge
+           where token_digest in (select token_digest from administrator_consumed_challenge
+                                   where expires_at <= ${at(now)}
+                                   for update skip locked)`,
+    ],
+    [
+      "housekeeping-sessions",
+      sql`delete from administrator_session
+           where id in (select id from administrator_session
+                         where absolute_expires_at <= ${at(now)}
+                            or last_activity_at <= ${at(now)} - interval '30 minutes'
+                         for update skip locked)`,
+    ],
+  ];
+  const results: HousekeepingResult[] = [];
+
+  for (const [label, body] of statements) {
+    if (results.some((result) => result.status !== "deleted")) {
+      results.push({ status: "not-run" });
+      continue;
+    }
+
+    let acknowledged: bigint | undefined;
+
+    try {
+      acknowledged = (await run(db, label, body)).numAffectedRows;
+    } catch (cause) {
+      results.push(failedResult(cause));
+      continue;
+    }
+
+    // Only the server's own row count acknowledges a deletion (§3.1). A result without one is
+    // `unknown`, never read as 0; an explicitly acknowledged 0 stays `deleted: 0`.
+    results.push(acknowledged === undefined ? { status: "unknown" } : { status: "deleted", count: Number(acknowledged) });
+  }
+
+  const [pendingChallenges, consumedChallenges, sessions] = results as [HousekeepingResult, HousekeepingResult, HousekeepingResult];
+  return {
+    completed: results.every((result) => result.status === "deleted"),
+    pendingChallenges,
+    consumedChallenges,
+    sessions,
+  };
 }

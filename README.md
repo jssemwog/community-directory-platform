@@ -179,6 +179,11 @@ cluster and its accounts.
   disabled:** its credentials are replaced, nothing is shown, and it still cannot sign in. If the
   command cannot confirm whether its change was applied, it says so; run it again, and the new run
   replaces everything. It needs `.local-demo/administrator-keys.json` and never creates it.
+- `housekeeping` (issue #274) removes expired sign-in challenges, expired replay records and
+  ended sessions, and nothing else: no account, authenticator, recovery code or sign-in wait. It
+  takes no username and reads no key. It prints each count only when the database confirmed it;
+  a result it cannot confirm is shown as unknown, and running it again finishes the work. It sets
+  no retention period.
 
 **What is still missing, deliberately.** Password-only or TOTP-only reset, re-enabling a disabled
 account and key replacement are not implemented, so **provisioning and authentication are

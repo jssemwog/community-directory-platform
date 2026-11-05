@@ -69,6 +69,7 @@ import { administratorEnvironmentFor, ensureAdministratorKeys } from "./administ
 import { CONTROL_SUBCOMMANDS, controlSyntheticAdministrator, type ControlSubcommand } from "./administrator-control";
 import { INCOMPLETE_NOTICE, launchRefusalOf, processTerminal, provisionSyntheticAdministrator } from "./administrator-provisioning";
 import { readResetKeys, RESET_SUBCOMMAND, resetSyntheticAdministrator } from "./administrator-reset";
+import { HOUSEKEEPING_SUBCOMMAND, housekeepingOutcomeLine, runHousekeeping } from "./administrator-housekeeping";
 import { ensureLocalCertificate, httpsArgumentsFor } from "./local-tls";
 import {
   acquireLauncherLock,
@@ -626,6 +627,61 @@ async function adminControl(subcommand: ControlSubcommand): Promise<void> {
 }
 
 /**
+ * `admin housekeeping` (the Unit HK Scope Gate, issue #274): removes expired authentication rows.
+ * R1 refuses before the binaries, the lock or the cluster are touched, and writes its outcome
+ * line here. Under the lock the cluster starts and the database is prepared; no key file is read
+ * or created. `runHousekeeping` then applies R3 before any housekeeping statement.
+ */
+async function adminHousekeeping(): Promise<void> {
+  const terminal = processTerminal();
+  const refusal = launchRefusalOf(terminal, process.env);
+
+  if (refusal !== undefined) {
+    terminal.say(refusal.message);
+    terminal.say(housekeepingOutcomeLine(refusal.reason, Date.now()));
+    terminal.close();
+    process.exitCode = 1;
+    return;
+  }
+
+  const binaries = await postgresBinaries();
+  const lock = takeLauncherLock(`admin ${HOUSEKEEPING_SUBCOMMAND}`);
+  let exitCode = 0;
+
+  try {
+    await initialiseIfNeeded(binaries);
+    await startCluster(binaries);
+
+    try {
+      await prepareDatabase(readPassword(), false);
+
+      const databaseUrl = connectionStringFor(DATABASE_NAME, readPassword());
+      const persistence = createListingPersistence({ pool: { connectionString: databaseUrl, max: 1 } });
+
+      try {
+        const result = await runHousekeeping(terminal, {
+          // The storage module uses raw `sql`; only the row typing differs from the listing pool.
+          db: persistence.db as unknown as Parameters<typeof runHousekeeping>[1]["db"],
+          clock: Date.now,
+          environment: process.env,
+          databaseUrl,
+        });
+
+        exitCode = result.ok ? 0 : 1;
+      } finally {
+        await persistence.shutdown();
+      }
+    } finally {
+      await stopCluster(binaries);
+    }
+  } finally {
+    lock.release();
+    terminal.close();
+    process.exitCode = exitCode;
+  }
+}
+
+/**
  * `admin reset-credentials` (the Unit OR Scope Gate): the operator reset. Refused like the control
  * subcommands before anything starts. Under the lock, the keys file is **validated before** the
  * cluster is initialised or started, and never created; then the reset runs with only those keys.
@@ -699,8 +755,10 @@ async function admin(): Promise<void> {
     await adminControl(subcommand as ControlSubcommand);
   } else if (subcommand === RESET_SUBCOMMAND) {
     await adminReset();
+  } else if (subcommand === HOUSEKEEPING_SUBCOMMAND) {
+    await adminHousekeeping();
   } else {
-    say("Usage: local-demo.ts admin start | add | sessions | revoke | revoke-all | disable | reset-credentials");
+    say("Usage: local-demo.ts admin start | add | sessions | revoke | revoke-all | disable | reset-credentials | housekeeping");
     process.exitCode = 1;
   }
 }
@@ -709,7 +767,7 @@ const commands: Record<string, () => Promise<void>> = { start, stop, reset, admi
 const command = commands[process.argv[2] ?? "start"];
 
 if (command === undefined) {
-  say("Usage: local-demo.ts start | stop | reset | admin start | admin add | admin sessions | admin revoke | admin revoke-all | admin disable | admin reset-credentials");
+  say("Usage: local-demo.ts start | stop | reset | admin start | admin add | admin sessions | admin revoke | admin revoke-all | admin disable | admin reset-credentials | admin housekeeping");
   process.exit(1);
 }
 
