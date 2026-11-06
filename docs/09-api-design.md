@@ -273,10 +273,14 @@ not answer `OQ-3`**. **Not built:** search and filter criteria (`OQ-4`), paginat
 transport and UI. **`BI-4` remains pending.** Issue #246 adds partial equivalence evidence at
 this read level only: `OP-2`'s outcome value and shape and `OP-1`'s count and order, plus a
 statement-footprint check that is structural evidence only (`docs/traceability-matrix.md`,
-`BI-4`). Identical SQL is not evidence of identical execution or timing, and no plan or executor
-behaviour is asserted. Under the tested conditions a present non-public row was observed to be
-fetched and filtered out while an absent key was not. **Timing equivalence is not claimed** and
-no timing method or threshold is decided.
+`BI-4`). Slice 2 adds `OP-2` reads of fixed identities, each compared with its own never-existed
+baseline with SQL and parameters unmasked. It also compares `OP-1` with an explicit public-only
+baseline for each non-public state alone and then all three together, with the rows placed by
+the sort key. Identical SQL is not evidence of identical execution or timing, and no plan or
+executor behaviour is asserted. Under the tested conditions a present non-public row was observed
+to be fetched and filtered out while an absent key was not. **Timing is part of `BI-4` and
+remains outstanding:** timing equivalence is not claimed and no timing method or threshold is
+decided.
 
 ---
 
