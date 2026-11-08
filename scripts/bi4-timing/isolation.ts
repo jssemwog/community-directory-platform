@@ -1146,23 +1146,43 @@ export interface EventSource {
 }
 
 /**
- * Turn every signal, uncaught exception and unhandled rejection into an abort, deferring exit so
- * teardown can run. A second event is logged and ignored. Returns the uninstaller.
+ * The label S-B's stop records. S-B calls the shared abort handler directly under this name; no
+ * signal is sent or emitted, so no other `SIGINT` listener in the process (for example a
+ * dependency's exit hook) is reached.
+ */
+export const SIMULATED_SIGINT = "simulated SIGINT";
+
+/** The one abort handler every real signal listener and S-B's simulated `SIGINT` share. */
+export type SignalAbortHandler = (event: string, ...args: unknown[]) => void;
+
+/**
+ * The shared abort handler: the first event aborts the run, deferring exit so teardown can run;
+ * a later event is logged and ignored.
+ */
+export function createSignalAbortHandler(controller: AbortController, note: (message: string) => void = () => {}): SignalAbortHandler {
+  return (event, ...args) => {
+    if (controller.signal.aborted) {
+      note(`${event} received again; ignored while teardown runs`);
+      return;
+    }
+    note(`${event} received; aborting the run`);
+    controller.abort(new Error(`${event}${args[0] instanceof Error ? `: ${args[0].message}` : ""}`));
+  };
+}
+
+/**
+ * Turn every signal, uncaught exception and unhandled rejection into an abort through the shared
+ * handler, deferring exit so teardown can run. A second event is logged and ignored. Returns the
+ * uninstaller.
  */
 export function installAbortOnSignals(
   controller: AbortController,
   source: EventSource = process as unknown as EventSource,
   note: (message: string) => void = () => {},
+  handler: SignalAbortHandler = createSignalAbortHandler(controller, note),
 ): () => void {
   const listeners = ABORT_EVENTS.map((event) => {
-    const listener = (...args: unknown[]): void => {
-      if (controller.signal.aborted) {
-        note(`${event} received again; ignored while teardown runs`);
-        return;
-      }
-      note(`${event} received; aborting the run`);
-      controller.abort(new Error(`${event}${args[0] instanceof Error ? `: ${args[0].message}` : ""}`));
-    };
+    const listener = (...args: unknown[]): void => handler(event, ...args);
     source.on(event, listener);
     return [event, listener] as const;
   });
@@ -1546,12 +1566,32 @@ export type ForcedPassReport = ForcedPassResult & {
   readonly residue: readonly string[];
 };
 
-/** The one abort S-B is expected to record: its own SIGINT after the 10th measured request. */
-export const S_B_EXPECTED_ABORT = "Aborted: SIGINT";
+/** The one abort S-B is expected to record: its simulated SIGINT after the 10th measured request. */
+export const S_B_EXPECTED_ABORT = `Aborted: ${SIMULATED_SIGINT}`;
+
+/**
+ * What a run does after each measured request (outside the timed region). S-B, after exactly the
+ * 10th, calls the shared abort handler directly as a simulated `SIGINT` — it never sends, emits
+ * or broadcasts a signal — and the runner stops before its next request. S-C, after exactly the
+ * 10th, holds at its checkpoint. Every other pass and count does nothing.
+ */
+export function measuredCheckpoint(
+  pass: SmokePass | undefined,
+  count: number,
+  seams: { readonly abort: SignalAbortHandler; readonly hold: (count: number) => Promise<void> },
+): void | Promise<void> {
+  if (count !== FORCED_KILL_AFTER) return undefined;
+  if (pass === "S-B") {
+    seams.abort(SIMULATED_SIGINT);
+    return undefined;
+  }
+  if (pass === "S-C") return seams.hold(count);
+  return undefined;
+}
 
 /**
  * S-A is expected to run to completion: exit 0, nothing Invalid, not stopped, at least one
- * request, and zero residue. S-B is expected to be stopped by its own signal after exactly
+ * request, and zero residue. S-B is expected to be stopped by its simulated SIGINT after exactly
  * the 10th measured request, record that abort and nothing else, and leave zero residue. Any
  * refusal (exit 2) is reported as refused.
  */
@@ -1566,7 +1606,7 @@ export function evaluateInProcessPass(pass: "S-A" | "S-B", report: InProcessPass
     if (report.stoppedBy !== null) reasons.push(`stopped by ${report.stoppedBy}; S-A is expected to run to completion`);
     if (report.requests === 0) reasons.push("no request was made");
   } else {
-    if (report.stoppedBy !== "abort") reasons.push(`stopped by ${report.stoppedBy ?? "nothing"}; S-B is expected to be stopped by its own signal`);
+    if (report.stoppedBy !== "abort") reasons.push(`stopped by ${report.stoppedBy ?? "nothing"}; S-B is expected to be stopped by its simulated SIGINT`);
     if (report.measured !== FORCED_KILL_AFTER) reasons.push(`${report.measured} measured requests; S-B is expected to stop after exactly ${FORCED_KILL_AFTER}`);
     if (!report.invalid.includes(S_B_EXPECTED_ABORT)) reasons.push(`the expected "${S_B_EXPECTED_ABORT}" was not recorded`);
     for (const reason of report.invalid.filter((entry) => entry !== S_B_EXPECTED_ABORT)) reasons.push(`unexpected: ${reason}`);
