@@ -39,10 +39,10 @@ import {
   cleanupExitCode,
   CLUSTER_PARENT_PREFIX,
   createGitOps,
+  createSignalAbortHandler,
   databaseUrlProblems,
   directoryEntries,
   driveSmoke,
-  FORCED_KILL_AFTER,
   forcedPass,
   holdAtCheckpoint,
   helperClusterOps,
@@ -50,6 +50,7 @@ import {
   IntentLog,
   isHarnessRoot,
   locateClusterRoot,
+  measuredCheckpoint,
   outputDirectoryProblems,
   PERSONAL_DEMO_PORTS,
   portIsFree,
@@ -248,7 +249,9 @@ async function runBoundary(options: BoundaryOptions): Promise<BoundaryResult> {
   const plan = buildPlan({ boundary: options.boundary, mode: options.mode, seed: options.seed, delaysNs: options.delaysNs, background: options.background });
   const log = new IntentLog(join(options.out, "run-state.json"));
   const controller = new AbortController();
-  const uninstall = installAbortOnSignals(controller, undefined, (message) => log.note(message));
+  // One shared handler for the real signal listeners and S-B's simulated SIGINT.
+  const abortOn = createSignalAbortHandler(controller, (message) => log.note(message));
+  const uninstall = installAbortOnSignals(controller, undefined, (message) => log.note(message), abortOn);
   const invalid: string[] = [];
   const records: MeasurementRecord[] = [];
   const requestsFd = openSync(join(options.out, "requests.ndjson"), "a");
@@ -282,9 +285,8 @@ async function runBoundary(options: BoundaryOptions): Promise<BoundaryResult> {
   };
   const onMeasured = (count: number): void | Promise<void> => {
     if (options.mode === "smoke") writeFileSync(join(options.out, "progress.json"), `${JSON.stringify({ measured: count })}\n`);
-    if (options.pass === "S-B" && count === FORCED_KILL_AFTER) process.emit("SIGINT");
-    if (options.pass === "S-C" && count === FORCED_KILL_AFTER) return holdForParent(count);
-    return undefined;
+    // S-B: a direct call to the shared handler, never process.emit("SIGINT"). S-C: the checkpoint.
+    return measuredCheckpoint(options.pass, count, { abort: abortOn, hold: holdForParent });
   };
   /** S-C: publish the ready marker and send nothing more until the parent acts or the bound passes. */
   const holdForParent = async (count: number): Promise<void> => {

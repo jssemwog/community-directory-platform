@@ -45,14 +45,14 @@ node --experimental-transform-types --import ./scripts/local-demo/register.mjs s
 | Subcommand | Does |
 |---|---|
 | `--help` | Prints usage and starts nothing. Also proves the harness and the cluster helper load outside the test runner |
-| `smoke --boundary e1\|e2 …` | Three operational passes (§5): S-A normal, S-B self-signal after the 10th measured request, S-C forced termination of the harness alone, while it is held at its post-10th-request checkpoint, followed by recovery `cleanup` and a second, no-op `cleanup`. Caps: 200 requests / 10 min (E1), 250 / 30 min (E2). Each pass is checked against its expected outcome; a later pass starts only if the earlier one passed and no cap was reached. Writes `smoke-report.json` after every pass and on failure, with the §5.5 runtime projection from a passed S-A. Exits 0 only if all three passed |
+| `smoke --boundary e1\|e2 …` | Three operational passes (§5): S-A normal, S-B simulated SIGINT after the 10th measured request, S-C forced termination of the harness alone, while it is held at its post-10th-request checkpoint, followed by recovery `cleanup` and a second, no-op `cleanup`. Caps: 200 requests / 10 min (E1), 250 / 30 min (E2). Each pass is checked against its expected outcome; a later pass starts only if the earlier one passed and no cap was reached. Writes `smoke-report.json` after every pass and on failure, with the §5.5 runtime projection from a passed S-A. Exits 0 only if all three passed |
 | `e1 --replicate 1\|2 …` / `e2 --replicate 1\|2 …` | One full replicate: 29,040 (E1) or 38,730 (E2) requests, under a 20- or 75-minute ceiling |
 | `analyze --run <run> --out <dir>` | Statistics, gates and report for one full replicate. Refuses smoke data. 45-minute **cooperative** deadline, checked inside each comparison's loops (not a hard ceiling; see Known limits). When a check finds it passed, `analyze` exits 1 and writes only `incomplete/partial-report.{json,md}`, never `report.json`/`report.md` |
 | `cleanup --run <run>` | Replays `run-state.json` and applies the ownership checks to every resource left behind |
 
 Smoke results are **operational checks only**: no timing statistic, comparison, lead or finding.
-Expected outcomes: S-A runs to completion with nothing Invalid; S-B is stopped by its own `SIGINT`
-after exactly 10 measured requests and records only `Aborted: SIGINT`; S-C is exercised, its first
+Expected outcomes: S-A runs to completion with nothing Invalid; S-B is stopped by a simulated
+`SIGINT` after exactly 10 measured requests and records only `Aborted: simulated SIGINT`; S-C is exercised, its first
 `cleanup` leaves nothing and its second does nothing. Every pass must also leave zero residue.
 Anything else (failed, refused, Not exercised, or not started) is a nonzero exit.
 If a projected full replicate exceeds 80% of its ceiling, no full run is proposed until the owner
@@ -140,6 +140,14 @@ masked bodies and recorded offsets and checked against their raw hashes.
   or a cluster shutdown needs both fields non-blank on the recorded **and** the live identity,
   and equal to each other. Two missing values are not a match. PID reuse is still decided by valid
   creation times alone.
+- **S-B's interruption is simulated, not a signal.** After its 10th measured request, S-B calls
+  the same abort handler the real `SIGINT`, `SIGTERM`, `SIGBREAK` and `SIGHUP` listeners use,
+  directly, and records `Aborted: simulated SIGINT`. It does not call `process.emit("SIGINT")` or
+  send a signal, so no other `SIGINT` listener in the process runs. The first E1 smoke (on
+  `9a5e427`) emitted `SIGINT`, and its embedded-cluster shutdown failed at `complete-shutdown`.
+  The suspected cause is a race with `embedded-postgres`'s own exit hook, which also listens for
+  `SIGINT`. That cause is a hypothesis: it has not been reproduced. S-B therefore no longer
+  exercises the real signal-delivery path. That path is covered only by fake-source unit tests.
 - **S-C has a deterministic kill point.** After its 10th measured request the child writes
   `sc-ready.json` (its PID, count and identity), then sends nothing while it holds for up to 60
   s. The parent kills it only after checking that marker against the identity it recorded at

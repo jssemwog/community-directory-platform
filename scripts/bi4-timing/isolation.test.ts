@@ -1,7 +1,9 @@
 /**
  * Isolation, run state and cleanup for the `BI-4` timing pilot (issue #246; harness gate
  * revision 5 §5, §7–§10, §12; `H-D18`), with fakes only: no process, port, worktree or cluster
- * is touched. The single exception is one test that creates and removes its own temporary directory.
+ * is touched, and no signal is sent. S-B's simulated SIGINT goes through the shared abort handler
+ * without process.emit; the 10-request stop is checked against the E1 runner with malformed
+ * identities that never reach the fake database. The single exception is one test that creates and removes its own temporary directory.
  * It proves that a root made through `os.tmpdir()` lands in the run-specific cluster parent.
  *
  * The intent log; abort-driven teardown; ownership checks before every removal; process identity
@@ -19,7 +21,10 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import type { Kysely } from "kysely";
+import { describe, expect, it, vi } from "vitest";
+
+import type { ListingDatabase } from "../../src/data/listing-table";
 
 import {
   adminRecordOf,
@@ -30,6 +35,7 @@ import {
   clusterLocationProblems,
   clusterRootPattern,
   createGitOps,
+  createSignalAbortHandler,
   databaseUrlProblems,
   driveSmoke,
   establishClusterStopped,
@@ -42,6 +48,7 @@ import {
   installAbortOnSignals,
   IntentLog,
   locateClusterRoot,
+  measuredCheckpoint,
   outputDirectoryProblems,
   parseInspection,
   parseWorktreeList,
@@ -56,6 +63,7 @@ import {
   restrictedChanges,
   restrictedMetadataOf,
   S_B_EXPECTED_ABORT,
+  SIMULATED_SIGINT,
   startUnderParent,
   taskkillArguments,
   TEMP_VARIABLES,
@@ -77,6 +85,8 @@ import {
   type TeardownSeams,
   type WorktreeEntry,
 } from "./isolation";
+import { runOperation } from "./run-operation";
+import type { Plan } from "./schedule";
 
 const ROOT = resolve(sep, "bi4-fake");
 const TEMP = join(ROOT, "Temp");
@@ -268,6 +278,134 @@ describe("abort-driven teardown (§9.3)", () => {
 
     uninstall();
     expect([...listeners.values()].every((entries) => entries.length === 0)).toBe(true);
+  });
+
+  it("routes real signals and the simulated SIGINT through one shared handler", () => {
+    const { source, emit } = emitter();
+    const controller = new AbortController();
+    const notes: string[] = [];
+    const calls: string[] = [];
+    const shared = createSignalAbortHandler(controller, (message) => notes.push(message));
+    const handler = (event: string, ...args: unknown[]): void => {
+      calls.push(event);
+      shared(event, ...args);
+    };
+    const uninstall = installAbortOnSignals(controller, source, (message) => notes.push(message), handler);
+
+    // The simulated SIGINT is a direct call: it aborts with its own label.
+    handler(SIMULATED_SIGINT);
+    expect(controller.signal.aborted).toBe(true);
+    expect((controller.signal.reason as Error).message).toBe(SIMULATED_SIGINT);
+
+    // A real signal afterwards reaches the same handler and is ignored as a second event.
+    emit("SIGINT");
+    expect(calls).toEqual([SIMULATED_SIGINT, "SIGINT"]);
+    expect(notes).toEqual([`${SIMULATED_SIGINT} received; aborting the run`, "SIGINT received again; ignored while teardown runs"]);
+    expect(S_B_EXPECTED_ABORT).toBe(`Aborted: ${SIMULATED_SIGINT}`);
+    uninstall();
+  });
+
+  it("acts after exactly the 10th measured request only: S-B aborts, S-C holds, S-A does nothing", async () => {
+    const aborts: string[] = [];
+    const holds: number[] = [];
+    const seams = { abort: (event: string) => void aborts.push(event), hold: async (count: number) => void holds.push(count) };
+
+    for (let count = 1; count <= 20; count += 1) {
+      if (count !== FORCED_KILL_AFTER) {
+        expect(measuredCheckpoint("S-B", count, seams)).toBeUndefined();
+        expect(measuredCheckpoint("S-C", count, seams)).toBeUndefined();
+      }
+      expect(measuredCheckpoint("S-A", count, seams)).toBeUndefined();
+      expect(measuredCheckpoint(undefined, count, seams)).toBeUndefined();
+    }
+    expect(aborts).toEqual([]);
+    expect(holds).toEqual([]);
+
+    expect(measuredCheckpoint("S-B", FORCED_KILL_AFTER, seams)).toBeUndefined();
+    await measuredCheckpoint("S-C", FORCED_KILL_AFTER, seams);
+    expect(aborts).toEqual([SIMULATED_SIGINT]);
+    expect(holds).toEqual([FORCED_KILL_AFTER]);
+  });
+
+  // A synthetic E1 plan of malformed identities: OP-2 refuses each before any query, so the fake
+  // database is never reached. Warm-up requests come first, then 30 measured ones.
+  function malformedPlan(): Plan {
+    const identities = Array.from({ length: 5 }, (_, index) => ({ index, key: `not-a-uuid-${index}`, cls: "MF" as const, target: "operation" as const }));
+    const requests = [
+      ...Array.from({ length: 6 }, (_, sequence) => ({ sequence, phase: "warmup" as const, block: 1, identity: sequence % 5 })),
+      ...Array.from({ length: 30 }, (_, i) => ({ sequence: 6 + i, phase: "measured" as const, block: 2 + Math.floor(i / 5), identity: i % 5 })),
+    ];
+    return { boundary: "e1", mode: "smoke", seed: "fake", delaysNs: [1, 2, 3], identities, background: [], requests, measuredBlocks: 6, warmupBlocks: 1 };
+  }
+  const neverQueried = new Proxy({}, { get: () => { throw new Error("the fake database was reached"); } }) as unknown as Kysely<ListingDatabase>;
+
+  it("stops S-B before its next request after exactly 10 measured requests, aborted as a simulated SIGINT", async () => {
+    const controller = new AbortController();
+    const phases: string[] = [];
+    const abort = createSignalAbortHandler(controller);
+
+    const outcome = await runOperation(malformedPlan(), neverQueried, {
+      signal: controller.signal,
+      requestCap: 200,
+      onRecord: (record) => phases.push(record.phase),
+      onMeasured: (count) => measuredCheckpoint("S-B", count, { abort, hold: async () => {} }),
+    });
+
+    expect(outcome).toEqual({ completed: 16, stoppedBy: "abort" });
+    expect(phases.filter((phase) => phase === "measured")).toHaveLength(FORCED_KILL_AFTER);
+    expect((controller.signal.reason as Error).message).toBe(SIMULATED_SIGINT);
+
+    // S-A, with the same plan, runs to completion.
+    const sa = new AbortController();
+    const all = await runOperation(malformedPlan(), neverQueried, {
+      signal: sa.signal,
+      requestCap: 200,
+      onRecord: () => {},
+      onMeasured: (count) => measuredCheckpoint("S-A", count, { abort: createSignalAbortHandler(sa), hold: async () => {} }),
+    });
+    expect(all).toEqual({ completed: 36 });
+    expect(sa.signal.aborted).toBe(false);
+  });
+
+  it("aborts and cleans up without sending, emitting or broadcasting SIGINT to other listeners", async () => {
+    // Stands in for any other process-level SIGINT listener, such as a dependency's exit hook.
+    const otherListener = vi.fn();
+    process.on("SIGINT", otherListener);
+    const emitSpy = vi.spyOn(process, "emit");
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+
+    try {
+      const controller = new AbortController();
+      const notes: string[] = [];
+      const { source } = emitter();
+      const abort = createSignalAbortHandler(controller, (message) => notes.push(message));
+      const uninstall = installAbortOnSignals(controller, source, (message) => notes.push(message), abort);
+
+      const outcome = await runOperation(malformedPlan(), neverQueried, {
+        signal: controller.signal,
+        requestCap: 200,
+        onRecord: () => {},
+        onMeasured: (count) => measuredCheckpoint("S-B", count, { abort, hold: async () => {} }),
+      });
+      expect(outcome.stoppedBy).toBe("abort");
+
+      // Teardown runs as usual after the abort and leaves nothing.
+      const run = recordedRun();
+      const report = await teardown(run.seams);
+      expect(report.left).toEqual([]);
+      expect(run.processes.stopped).toEqual([201, 300, 200]);
+
+      expect(otherListener).not.toHaveBeenCalled();
+      expect(emitSpy.mock.calls.filter((call) => (call[0] as unknown) === "SIGINT")).toEqual([]);
+      expect(killSpy).not.toHaveBeenCalled();
+      // Only the direct call aborted the run; the installed real listeners never fired.
+      expect(notes).toEqual([`${SIMULATED_SIGINT} received; aborting the run`]);
+      uninstall();
+    } finally {
+      emitSpy.mockRestore();
+      killSpy.mockRestore();
+      process.off("SIGINT", otherListener);
+    }
   });
 });
 
@@ -733,7 +871,7 @@ describe("smoke pass outcomes (§5)", () => {
     expect(evaluateInProcessPass("S-A", sa({ residue: ["root C:\\x still exists"] })).reasons).toEqual(["residue: root C:\\x still exists"]);
   });
 
-  it("passes S-B only when its own signal stopped it after exactly the 10th measured request, and nothing else went wrong", () => {
+  it("passes S-B only when its simulated SIGINT stopped it after exactly the 10th measured request, and nothing else went wrong", () => {
     expect(evaluateInProcessPass("S-B", sb())).toEqual({ status: "passed", reasons: [] });
     // Running to completion is the wrong outcome for the interruption pass.
     expect(evaluateInProcessPass("S-B", sb({ exitCode: 0, stoppedBy: null, invalid: [], measured: 30 })).status).toBe("failed");
