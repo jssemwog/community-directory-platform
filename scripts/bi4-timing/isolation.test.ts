@@ -9,6 +9,9 @@
  * The intent log; abort-driven teardown; ownership checks before every removal; process identity
  * (a reused PID is never stopped, stops are never `/T`, an unrecorded child is reported and left);
  * worktree removal limited to the recorded path with no `prune`, and a stale record reported;
+ * worktree removal gated on confirmed process exit, retried within the allowance, settled only
+ * when the directory and registration are both gone, and never replaced by a recursive delete;
+ * a harness root kept while any recorded resource inside it is unresolved;
  * the refusal conditions; the explicit database URL; the restricted-file metadata guard; cleanup
  * idempotence; the teardown allowance; the forced smoke pass; each smoke pass's expected outcome
  * and the order passes may run in; the run-specific cluster location; the S-C checkpoint and its
@@ -52,6 +55,7 @@ import {
   outputDirectoryProblems,
   parseInspection,
   parseWorktreeList,
+  PROCESS_EXIT_POLL_MS,
   ProcessInspectionError,
   readPidFileEvidence,
   readyMarkerProblems,
@@ -69,6 +73,8 @@ import {
   TEMP_VARIABLES,
   teardown,
   windowsProcessOps,
+  WORKTREE_REMOVE_ATTEMPTS,
+  WORKTREE_RETRY_DELAY_MS,
   type ClusterOps,
   type EventSource,
   type ForcedPassReport,
@@ -528,7 +534,213 @@ describe("worktree removal (§9.2, H-D18)", () => {
 
     expect(run.git.removed).toEqual([]);
     expect(report.left.find((entry) => entry.id === run.ids.worktree)?.reason).toMatch(/administrative record remains; not pruned/);
-    expect(report.left.find((entry) => entry.id === run.ids.root)?.reason).toMatch(/worktree was left in place/);
+    expect(report.left.find((entry) => entry.id === run.ids.root)?.reason).toMatch(/root preserved: it holds unresolved recorded resource\(s\) 1 \(worktree worktree\)/);
+  });
+
+  describe("removal failures, retries and the parent root", () => {
+    const WORKTREE = join(TEMP, "cdp-bi4-http-abc", "worktree");
+    const ADMIN = join(GIT_DIR, "worktrees", "worktree");
+    const ROOT_DIR = join(TEMP, "cdp-bi4-http-abc");
+
+    /** A run whose `git worktree remove` follows a script: "fail" throws and changes nothing, "partial" throws after removing only part. */
+    function scripted(script: readonly ("fail" | "ok" | "partial-registration" | "partial-directory")[]) {
+      const run = recordedRun();
+      const sleeps: number[] = [];
+      let attempt = 0;
+      run.seams = { ...run.seams, sleep: async (ms) => void sleeps.push(ms) };
+      run.git.removeWorktree = async (path: string) => {
+        run.git.removed.push(path);
+        const step = script[Math.min(attempt, script.length - 1)];
+        attempt += 1;
+        if (step === "ok" || step === "partial-registration") {
+          // The Git registration goes (git deletes its record even when the directory delete fails).
+          run.git.worktrees = run.git.worktrees.filter((entry) => resolve(entry.path) !== resolve(path));
+          run.directories.delete(ADMIN);
+        }
+        if (step === "ok" || step === "partial-directory") run.directories.delete(path);
+        if (step !== "ok") throw new Error(`git worktree exited 255: error: failed to delete '${path}': Permission denied`);
+      };
+      return { ...run, sleeps };
+    }
+
+    it("retries a transient failure and settles once the directory and registration are gone, keeping the original error", async () => {
+      const run = scripted(["fail", "fail", "ok"]);
+      const report = await teardown(run.seams);
+
+      expect(run.git.removed).toEqual([WORKTREE, WORKTREE, WORKTREE]);
+      expect(run.sleeps.filter((ms) => ms === WORKTREE_RETRY_DELAY_MS)).toHaveLength(2);
+      expect(report.removed).toContain(run.ids.worktree);
+      const worktree = run.log.entries()[run.ids.worktree] as ResourceEntry;
+      expect(worktree.state).toBe("removed");
+      expect(worktree.reason).toMatch(/git worktree remove failed 2 time\(s\) \(first: git worktree exited 255: .*Permission denied/);
+      expect(worktree.reason).toMatch(/both confirmed gone/);
+      const events = (JSON.parse(run.store.files.get(join(OUT, "run-state.json")) as string) as { events: { event: string }[] }).events;
+      expect(events.filter(({ event }) => /git worktree remove attempt \d failed: .*Permission denied/.test(event))).toHaveLength(2);
+      // With nothing unresolved inside it, the root is removed through the ordinary root removal.
+      expect(report.removed).toContain(run.ids.root);
+      expect(report.left).toEqual([]);
+    });
+
+    it("leaves a persistently failing worktree after the bounded attempts and preserves it and its root", async () => {
+      const run = scripted(["fail"]);
+      const report = await teardown(run.seams);
+
+      expect(run.git.removed).toHaveLength(WORKTREE_REMOVE_ATTEMPTS);
+      expect(run.directories.has(WORKTREE)).toBe(true);
+      expect(run.directories.has(ADMIN)).toBe(true);
+      expect(report.left.find((entry) => entry.id === run.ids.worktree)?.reason).toMatch(
+        new RegExp(`failed ${WORKTREE_REMOVE_ATTEMPTS} time\\(s\\).*the worktree is still in place; what remains is preserved`),
+      );
+      expect(report.left.find((entry) => entry.id === run.ids.root)?.reason).toMatch(/root preserved/);
+      expect(run.removedDirectories).toEqual([]);
+      expect(run.directories.has(ROOT_DIR)).toBe(true);
+    });
+
+    it("stops retrying when the allowance would be passed", async () => {
+      const run = scripted(["fail"]);
+      let clock = 0;
+      run.seams = { ...run.seams, now: () => clock, deadline: WORKTREE_RETRY_DELAY_MS / 2, sleep: async (ms) => void (clock += ms) };
+      const report = await teardown(run.seams);
+
+      expect(run.git.removed).toHaveLength(1);
+      expect(report.left.map((entry) => entry.id)).toEqual(expect.arrayContaining([run.ids.worktree, run.ids.root]));
+    });
+
+    it("starts no removal command when inspection crosses the deadline, and keeps the worktree and its root", async () => {
+      const run = scripted(["ok"]);
+      let clock = 0;
+      const deadline = 1_000;
+      // Every git worktree list (inspection) takes 600 ms on the fake clock. The process-exit check
+      // and the first inspection begin before the deadline, and the inspection ends after it.
+      const list = run.git.worktreeList.bind(run.git);
+      run.git.worktreeList = async () => {
+        clock += 600;
+        return list();
+      };
+      run.seams = { ...run.seams, now: () => clock, deadline, sleep: async (ms) => void (clock += ms) };
+      clock = deadline - 500;
+
+      const report = await teardown(run.seams);
+
+      expect(clock).toBeGreaterThan(deadline);
+      expect(run.git.removed).toEqual([]);
+      expect(run.directories.has(WORKTREE)).toBe(true);
+      expect(run.directories.has(ADMIN)).toBe(true);
+      expect(report.allowanceExhausted).toBe(true);
+      expect(report.left.find((entry) => entry.id === run.ids.worktree)?.reason).toMatch(
+        /teardown allowance exhausted before git worktree remove attempt 1; no removal command was started/,
+      );
+      // The root is never removed: the allowance has passed, and its worktree is unresolved.
+      expect(report.left.find((entry) => entry.id === run.ids.root)?.reason).toBe("teardown allowance exhausted; no further step attempted");
+      expect(run.removedDirectories).toEqual([]);
+      expect(run.directories.has(ROOT_DIR)).toBe(true);
+    });
+
+    it("treats partial removal as unresolved and never recursively deletes what remains", async () => {
+      // The E2 smoke's shape: the registration is gone but the directory remains.
+      const registrationGone = scripted(["partial-registration"]);
+      const first = await teardown(registrationGone.seams);
+      expect(registrationGone.git.removed).toEqual([WORKTREE]);
+      expect(first.left.find((entry) => entry.id === registrationGone.ids.worktree)?.reason).toMatch(
+        /failed 1 time\(s\).*git worktree list does not show a worktree at the recorded path; what remains is preserved/,
+      );
+      expect(registrationGone.directories.has(WORKTREE)).toBe(true);
+      expect(registrationGone.removedDirectories).toEqual([]);
+      expect(first.left.find((entry) => entry.id === registrationGone.ids.root)?.reason).toMatch(/root preserved/);
+
+      // The other half: the directory is gone but the registration remains. Not pruned.
+      const directoryGone = scripted(["partial-directory"]);
+      const second = await teardown(directoryGone.seams);
+      expect(directoryGone.git.removed).toEqual([WORKTREE]);
+      expect(second.left.find((entry) => entry.id === directoryGone.ids.worktree)?.reason).toMatch(/administrative record remains; not pruned/);
+      expect(directoryGone.directories.has(ADMIN)).toBe(true);
+      expect(directoryGone.directories.has(ROOT_DIR)).toBe(true);
+      expect(directoryGone.removedDirectories).toEqual([]);
+    });
+
+    it("leaves the worktree unresolved when it cannot be inspected after a failure", async () => {
+      const run = scripted(["fail"]);
+      let calls = 0;
+      const list = run.git.worktreeList.bind(run.git);
+      run.git.worktreeList = async () => {
+        calls += 1;
+        if (calls > 1) throw new Error("git worktree exited 128: fatal: unable to read");
+        return list();
+      };
+      const report = await teardown(run.seams);
+
+      expect(run.git.removed).toHaveLength(1);
+      expect(report.left.find((entry) => entry.id === run.ids.worktree)?.reason).toMatch(/the worktree could not be inspected: .*unable to read; what remains is preserved/);
+      expect(report.left.find((entry) => entry.id === run.ids.root)?.reason).toMatch(/root preserved/);
+      expect(run.removedDirectories).toEqual([]);
+    });
+
+    it("removes the worktree only after every owned process is confirmed exited, polling within the allowance", async () => {
+      const run = scripted(["ok"]);
+      const order: string[] = [];
+      let lingering = 2;
+      const stop = run.processes.stop.bind(run.processes);
+      // Process 300 stays visible for two more inspections after it is stopped, then exits.
+      run.processes.stop = async (pid: number) => {
+        order.push(`stop ${pid}`);
+        if (pid !== 300) return stop(pid);
+        run.processes.stopped.push(pid);
+      };
+      const inspect = run.processes.inspect.bind(run.processes);
+      run.processes.inspect = async (pid: number) => {
+        if (pid === 300 && run.processes.stopped.includes(300)) {
+          if (lingering === 0) return undefined;
+          lingering -= 1;
+        }
+        return inspect(pid);
+      };
+      const remove = run.git.removeWorktree;
+      run.git.removeWorktree = async (path: string) => {
+        order.push("remove worktree");
+        return remove(path);
+      };
+
+      const report = await teardown(run.seams);
+
+      expect(run.sleeps.filter((ms) => ms === PROCESS_EXIT_POLL_MS).length).toBeGreaterThanOrEqual(1);
+      expect(order.at(-1)).toBe("remove worktree");
+      expect(report.left).toEqual([]);
+    });
+
+    it("never removes the worktree while an owned process is unresolved or cannot be inspected, and keeps the root", async () => {
+      // A recorded process whose PID is reused by a different executable is left (mismatch).
+      const mismatched = scripted(["ok"]);
+      mismatched.processes.add(identity(300, { executable: "C:\\other.exe" }));
+      const first = await teardown(mismatched.seams);
+      expect(mismatched.git.removed).toEqual([]);
+      expect(first.left.find((entry) => entry.id === mismatched.ids.worktree)?.reason).toMatch(/worktree not removed: process entry \d+ \(calibration server\) is unresolved/);
+      expect(first.left.find((entry) => entry.id === mismatched.ids.root)?.reason).toMatch(/root preserved/);
+
+      // A failed lookup after the stops is never read as an exit.
+      const failing = scripted(["ok"]);
+      const inspect = failing.processes.inspect.bind(failing.processes);
+      failing.processes.inspect = async (pid: number) => {
+        if (failing.processes.stopped.length === 3) throw new ProcessInspectionError("CIM query failed");
+        return inspect(pid);
+      };
+      const second = await teardown(failing.seams);
+      expect(failing.git.removed).toEqual([]);
+      expect(second.left.find((entry) => entry.id === failing.ids.worktree)?.reason).toMatch(/worktree not removed: the exit of process entry \d+ \(.+\) could not be confirmed: process inspection failed: CIM query failed/);
+      expect(failing.directories.has(WORKTREE)).toBe(true);
+      expect(failing.removedDirectories).toEqual([]);
+    });
+
+    it("protects the parent root whenever any recorded resource inside it is unresolved", async () => {
+      const run = recordedRun();
+      // A second recorded resource inside the root, left unresolved by an earlier teardown.
+      const extra = run.log.intend("harness-root", "nested", { path: join(TEMP, "cdp-bi4-http-abc", "nested") });
+      run.log.update(extra, { state: "left", reason: "left earlier" });
+      const report = await teardown({ ...run.seams, sleep: async () => {} });
+
+      expect(report.removed).toContain(run.ids.worktree);
+      expect(report.left.find((entry) => entry.id === run.ids.root)?.reason).toMatch(/root preserved: .*nested/);
+      expect(run.removedDirectories).toEqual([]);
+    });
   });
 
   it("refuses a worktree whose HEAD, detachment or administrative record does not match", async () => {
