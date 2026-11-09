@@ -12,8 +12,8 @@
  * Nothing here applies a threshold or issues a verdict. `BI-4` stays pending.
  */
 
-import { spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync, writeSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, writeFileSync, writeSync } from "node:fs";
 import { cpus, platform, release, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -75,6 +75,7 @@ import {
   type RestrictedMetadata,
   type TeardownReport,
 } from "./isolation";
+import { liveIdentityOf, readInstalledNext, readLockfileEvidence, type NextVersionEvidence } from "./next-evidence";
 import { runOperation } from "./run-operation";
 import { runHttp, waitReady } from "./run-http";
 import {
@@ -398,7 +399,11 @@ async function runBoundary(options: BoundaryOptions): Promise<BoundaryResult> {
         const outcome = await runOperation(plan, persistence.db, control);
         stoppedBy = outcome.stoppedBy;
       } else {
-        const outcome = await runE2(plan, url, options, log, processes, git, control, (ms) => (setupMs = ms), setupStart);
+        const recordNextEvidence = (evidence: NextVersionEvidence): void => {
+          manifest = { ...manifest, nextEvidence: evidence };
+          writeManifest();
+        };
+        const outcome = await runE2(plan, url, options, log, processes, git, control, (ms) => (setupMs = ms), setupStart, recordNextEvidence);
         stoppedBy = outcome.stoppedBy;
       }
     } finally {
@@ -450,7 +455,22 @@ async function runBoundary(options: BoundaryOptions): Promise<BoundaryResult> {
   };
 }
 
-/** E2 setup inside the cluster body: root, worktree, `npm ci`, `next dev`, calibration server. */
+/** Run a collection step; a failure leaves the field absent, and the version guard then withholds. */
+function collected<T>(read: () => T | undefined): T | undefined {
+  try {
+    return read();
+  } catch {
+    return undefined;
+  }
+}
+
+/** File reads for the Next.js evidence: exact bytes, and real paths that follow links. */
+const NEXT_EVIDENCE_FILES = { readFile: (path: string) => readFileSync(path), realpath: (path: string) => realpathSync.native(path) };
+
+/**
+ * E2 setup inside the cluster body: root, worktree, `npm ci`, `next dev`, calibration server.
+ * Records the Next.js version evidence (amendment §4.2–4.3) through `recordNextEvidence`.
+ */
 async function runE2(
   plan: ReturnType<typeof buildPlan>,
   url: string,
@@ -461,6 +481,7 @@ async function runE2(
   control: Parameters<typeof runHttp>[2],
   setSetupMs: (ms: number) => void,
   setupStart: number,
+  recordNextEvidence: (evidence: NextVersionEvidence) => void,
 ): ReturnType<typeof runHttp> {
   // The root's exact path is recorded before it is created.
   const root = join(tmpdir(), `cdp-bi4-http-${randomBytes(6).toString("hex")}`);
@@ -476,6 +497,25 @@ async function runE2(
   log.update(worktreeEntry, { state: "created", ...(adminRecord === undefined ? {} : { adminRecord }) });
   const listed = (await git.worktreeList()).find((entry) => resolve(entry.path).toLowerCase() === resolve(worktree).toLowerCase());
   if (listed?.head !== options.commit || !listed.detached) throw new Error("the disposable worktree is not detached at the authorized commit");
+
+  // The lockfile comes from the run commit's object; the worktree's copy is hashed before `npm ci`.
+  let evidence: NextVersionEvidence = {
+    runCommit: options.commit,
+    ...optional("worktreePath", collected(() => realpathSync.native(worktree))),
+    ...optional("worktreeHead", collected(() => execFileSync("git", ["-C", worktree, "rev-parse", "HEAD"], { encoding: "utf8" }).trim())),
+    ...optional(
+      "lockfile",
+      readLockfileEvidence(
+        options.commit,
+        {
+          show: (spec) => execFileSync("git", ["-C", REPOSITORY_ROOT, "show", spec], { maxBuffer: 256 * 1024 * 1024 }),
+          blobId: (spec) => execFileSync("git", ["-C", REPOSITORY_ROOT, "rev-parse", spec], { encoding: "utf8" }),
+        },
+        () => readFileSync(join(worktree, "package-lock.json")),
+      ),
+    ),
+  };
+  recordNextEvidence(evidence);
 
   const npmCli = join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
   if (!existsSync(npmCli)) throw new Error("Invalid (setup): npm-cli.js was not found beside the running node");
@@ -500,16 +540,37 @@ async function runE2(
     const value = process.env[name];
     return value === undefined ? {} : { [name]: value };
   };
+  // Pre-start: the installed package manifest, after `npm ci` and before `next dev` starts.
+  evidence = { ...evidence, ...optional("installedBeforeStart", readInstalledNext(worktree, NEXT_EVIDENCE_FILES)) };
+  recordNextEvidence(evidence);
+
+  const nextEntry = join(worktree, "node_modules", "next", "dist", "bin", "next");
   const next = await startOwnedProcess(log, processes, {
     label: "next dev",
     command: process.execPath,
-    args: [join(worktree, "node_modules", "next", "dist", "bin", "next"), "dev", "--hostname", "127.0.0.1", "--port", String(nextPort)],
+    args: [nextEntry, "dev", "--hostname", "127.0.0.1", "--port", String(nextPort)],
     cwd: worktree,
     env: { ...allow("PATH"), ...allow("SystemRoot"), ...allow("TEMP"), ...allow("TMP"), NEXT_TELEMETRY_DISABLED: "1", LOCAL_DEMO_DATABASE_URL: url },
     port: nextPort,
     stdoutPath: join(options.out, "next-dev.out.log"),
     stderrPath: join(options.out, "next-dev.err.log"),
   });
+  // Launch: the exact entry script and the identity the operating system recorded for it.
+  const launched = log.entries()[next.entry]?.identity;
+  if (launched !== undefined && launched.commandLine !== null && launched.commandLine !== "") {
+    evidence = {
+      ...evidence,
+      launch: {
+        nodeExecutable: process.execPath,
+        entryPath: nextEntry,
+        port: nextPort,
+        pid: launched.pid,
+        creationTime: launched.creationTime,
+        commandLine: launched.commandLine,
+      },
+    };
+    recordNextEvidence(evidence);
+  }
   const calibration = await startOwnedProcess(log, processes, {
     label: "calibration server",
     command: process.execPath,
@@ -528,7 +589,25 @@ async function runE2(
   await recordDescendants(log, processes, calibration.entry, calibrationPort);
   setSetupMs(Date.now() - setupStart);
 
-  return runHttp(plan, { nextPort, calibrationPort, bodiesDirectory: join(options.out, "bodies") }, control);
+  const outcome = await runHttp(plan, { nextPort, calibrationPort, bodiesDirectory: join(options.out, "bodies") }, control);
+
+  // Post-measurement, before teardown: only when every measured request completed.
+  if (outcome.stoppedBy === undefined) {
+    const after = readInstalledNext(worktree, NEXT_EVIDENCE_FILES);
+    if (after !== undefined) {
+      const pid = evidence.launch?.pid ?? log.entries()[next.entry]?.identity?.pid;
+      const live = pid === undefined ? undefined : liveIdentityOf(await processes.inspect(pid).catch(() => undefined));
+      evidence = { ...evidence, installedAfterMeasured: { ...after, ...(live === undefined ? {} : { liveIdentity: live }) } };
+      recordNextEvidence(evidence);
+    }
+  }
+
+  return outcome;
+}
+
+/** `{ [key]: value }` when the value is present, otherwise nothing: absence is recorded as absence. */
+function optional<K extends string, V>(key: K, value: V | undefined): { [P in K]?: V } {
+  return (value === undefined ? {} : { [key]: value }) as { [P in K]?: V };
 }
 
 /** `cleanup --run <out>`: replay the intent log and apply §9.2 to every resource. */

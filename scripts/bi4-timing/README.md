@@ -111,16 +111,56 @@ rules (`H-D16`).
 
 ## Response bodies and headers (E2)
 
+This follows harness gate revision 5 as changed by the approved E2 Next.js body-mask amendment,
+revision 4 (§7.3, §11.2A, §11.3, §11.4, §11.4A).
+
 HTTP timing is interpreted only if every measured never-existed, pending, rejected and unpublished
-response agrees exactly: the body after masking **only** the request's own UUID (same replacement
-count, same status), and the headers compared exactly after the same masking, with `Date` the
-only header removed and checked instead by a fixed **timestamp plausibility check** — not proof
-that `Date` is independent of state. Any difference withholds timing interpretation for that
-boundary replicate ("Withheld — masked body mismatch" / "Withheld — response header mismatch")
-and preserves the raw evidence. A header mismatch is labelled state-associated only when the
-evidence separates listing states. The variation model is diagnostic only and never establishes
-agreement. Raw headers are kept for every request; raw bodies are rebuilt exactly from the stored
-masked bodies and recorded offsets and checked against their raw hashes.
+response agrees exactly: the body after masking the request's own UUID and then the one `next dev`
+request-ID value below (same replacement counts, same status), and the headers compared exactly
+after the UUID masking, with `Date` the only header removed and checked instead by a fixed
+**timestamp plausibility check** — not proof that `Date` is independent of state.
+
+**The `next dev` request-ID mask (`H-D20`).** At E2 only, on a copy of each stored UUID-masked
+body, exactly one 21-byte value (`A–Z a–z 0–9 _ -`) is replaced with 21 `*` bytes, and only
+inside the exact context `<script id="_R_">self.__next_r="` … `";if(document.cookie.indexOf('next-instant-navigation-testing=')>-1){`,
+followed by a `</script>`. A missing, duplicate, unexpected or malformed occurrence withholds
+("Withheld — next dev request-ID mask failed"), as does a value repeated across measured
+responses ("Withheld — next dev request-ID value repeated"). When any response in the agreement
+set fails the mask, replicate-wide post-mask agreement is reported as not established; the
+successful responses are still compared, and that result is labelled a subset comparison, which
+can add a body mismatch but never establishes agreement. Every other byte is compared
+exactly. **This is an exploratory local rule.** It does not establish independence from listing
+state, stream-chunk equivalence or anything about production timing, and all-unique values do not
+establish independence from listing state. No other field is masked.
+
+**The Next.js version guard.** The run records the lockfile from the run commit's object (with the
+worktree's copy, read before `npm ci`, required to match), the worktree's
+`node_modules/next/package.json` before `next dev` starts and again after measuring, and the
+launched process's entry script, observed command line and live identity. Both reads must give
+the same name, version and manifest SHA-256, and the same canonical resolved paths for the
+manifest and the entry script, each inside the package and the worktree. The observed Windows
+command line must parse into exactly the expected arguments: the Node executable, the entry
+script, `dev`, `--hostname`, `127.0.0.1`, `--port` and the port. Normal Windows quoting of the two
+paths is accepted, including paths with spaces; malformed quoting, changed, extra or reordered
+arguments, and ambiguous paths withhold. Missing or mismatched evidence, or any version other than
+the reviewed `16.3.3`, withholds ("Withheld — Next.js version guard, pending review"). The
+Next.js version guard is evidence of the pinned version, the package manifest and that
+manifest's link to the launched executable. It does not verify every installed file: the entry
+script's bytes and every installed file other than the manifest are not hashed, so a content
+change at an unchanged resolved path is not detected. Runs made before this guard existed,
+including the second E2 smoke, have no such evidence and stay withheld.
+
+Any difference withholds timing interpretation for that boundary replicate ("Withheld — masked
+body mismatch" / "Withheld — response header mismatch") and preserves the raw evidence. An E2 body
+mismatch is withheld, not Invalid, and any independent Invalid condition still takes priority. It
+is described with counts, recurrence within each state and overlap between states, and is never
+called state-associated or a possible non-timing `BI-4` finding on the strength of disjoint or
+all-unique signatures. A header mismatch is labelled state-associated only when the evidence
+separates listing states. The variation model is diagnostic only: it runs on the UUID-masked
+bodies, before the request-ID mask, whenever they differ, and never establishes agreement or lifts
+withholding. Raw headers are kept for every request; raw bodies are rebuilt exactly from the
+stored masked bodies and recorded offsets and checked against their raw hashes. A stored body that
+is absent or does not match its hash counts as a failed mask.
 
 ## Known limits
 

@@ -16,11 +16,23 @@
  * lift that: the diagnostic variation model (§11.5) locates differences and is labelled as unable
  * to establish agreement.
  *
+ * ## The E2 `next dev` request-ID mask (approved amendment revision 4, §11.2A, `H-D20`)
+ *
+ * At E2 only, after the UUID mask and on a copy, exactly one 21-byte value in the
+ * `self.__next_r` assignment inside the inline `<script id="_R_">` is replaced
+ * (`maskNextRequestId`). It is an **exploratory local rule**: it does not establish independence
+ * from listing state, stream-chunk equivalence or anything about production timing. A missing,
+ * duplicate, unexpected or malformed occurrence withholds; a value repeated across measured
+ * responses withholds; and the Next.js version guard (`next-evidence.ts`, §7.3) must pass. The
+ * remaining bytes are compared exactly (`evaluateE2Gates`). The UUID-only comparison is kept as a
+ * diagnostic stage that never affects withholding. The body variation summary describes
+ * signatures and classifies nothing.
+ *
  * ## What is never done
  *
  * No other normalization, no tolerance, no learned allowance. Malformed (`MF`) responses are
  * compared and reported, but are outside the gate. Nothing here measures time or reaches a
- * network, a process or a database.
+ * network, a process, a file or a database.
  */
 
 import { createHash } from "node:crypto";
@@ -38,6 +50,10 @@ export const HEADER_WITHHELD = "Withheld — response header mismatch";
 export const STATE_ASSOCIATED = "State-associated";
 export const NOT_SHOWN_STATE_ASSOCIATED = "Unexplained — not shown to be state-associated";
 export const DIAGNOSTIC_LABEL = "diagnostic — does not establish agreement";
+export const REQUEST_ID_MASK_WITHHELD = "Withheld — next dev request-ID mask failed";
+export const REQUEST_ID_VALUE_REPEATED = "Withheld — next dev request-ID value repeated";
+export const NEXT_VERSION_WITHHELD = "Withheld — Next.js version guard, pending review";
+export const BODY_VARIATION_LABEL = "descriptive only — observed body signatures";
 
 /** The classes whose measured responses form the agreement set, and the listing state of each. */
 const STATE_OF: Readonly<Partial<Record<ItemClass, TestClass>>> = {
@@ -281,8 +297,8 @@ export interface BodyGateResult {
   /** Requests whose signature differs from the reference. */
   readonly differing: readonly number[];
   readonly perState: CountsByState;
-  /** Descriptive only: whether the differences separate listing states. Never lifts withholding. */
-  readonly separatesStates: boolean;
+  /** Descriptive only: counts, recurrence and overlap of observed signatures. Classifies nothing. */
+  readonly variationSummary: BodyVariationSummary;
 }
 
 function bodySignature(observation: ResponseObservation): string {
@@ -310,7 +326,285 @@ export function evaluateBodyGate(observations: readonly ResponseObservation[]): 
     reference,
     differing: gated.filter((entry) => entry.signature !== reference).map((entry) => entry.observation.request),
     perState,
-    separatesStates: !agreement && separatesStates(perState),
+    variationSummary: summarizeBodyVariation(
+      gated.map((entry) => ({ state: entry.state, signature: entry.signature, identity: entry.observation.identity })),
+    ),
+  };
+}
+
+export interface BodyVariationSummary {
+  readonly label: typeof BODY_VARIATION_LABEL;
+  readonly requests: number;
+  readonly distinctSignatures: number;
+  readonly perState: Readonly<
+    Record<
+      string,
+      {
+        readonly requests: number;
+        readonly identities: number;
+        readonly distinctSignatures: number;
+        readonly recurringSignatures: number;
+        readonly requestsInRecurringSignatures: number;
+        readonly singletonSignatures: number;
+      }
+    >
+  >;
+  readonly overlap: readonly { readonly first: string; readonly second: string; readonly sharedSignatures: number }[];
+}
+
+/**
+ * The body variation summary (amendment §6.1): per-state counts, recurrence within each state and
+ * overlap between states. **Descriptive only.** It decides no state-associated finding and never
+ * changes the withholding decision (D-6).
+ */
+export function summarizeBodyVariation(
+  entries: readonly { readonly state: string; readonly signature: string; readonly identity: string }[],
+): BodyVariationSummary {
+  const states: string[] = [];
+  const byState = new Map<string, { counts: Map<string, number>; identities: Set<string>; requests: number }>();
+
+  for (const { state, signature, identity } of entries) {
+    let forState = byState.get(state);
+    if (forState === undefined) {
+      forState = { counts: new Map(), identities: new Set(), requests: 0 };
+      byState.set(state, forState);
+      states.push(state);
+    }
+    forState.counts.set(signature, (forState.counts.get(signature) ?? 0) + 1);
+    forState.identities.add(identity);
+    forState.requests += 1;
+  }
+
+  const perState: Record<string, BodyVariationSummary["perState"][string]> = {};
+
+  for (const state of states) {
+    const { counts, identities, requests } = byState.get(state) as NonNullable<ReturnType<typeof byState.get>>;
+    const recurring = [...counts.values()].filter((count) => count > 1);
+    perState[state] = {
+      requests,
+      identities: identities.size,
+      distinctSignatures: counts.size,
+      recurringSignatures: recurring.length,
+      requestsInRecurringSignatures: recurring.reduce((sum, count) => sum + count, 0),
+      singletonSignatures: counts.size - recurring.length,
+    };
+  }
+
+  const overlap: { first: string; second: string; sharedSignatures: number }[] = [];
+
+  for (let i = 0; i < states.length; i += 1) {
+    for (let j = i + 1; j < states.length; j += 1) {
+      const first = states[i] as string;
+      const second = states[j] as string;
+      const other = (byState.get(second) as NonNullable<ReturnType<typeof byState.get>>).counts;
+      const shared = [...(byState.get(first) as NonNullable<ReturnType<typeof byState.get>>).counts.keys()].filter((signature) => other.has(signature));
+      overlap.push({ first, second, sharedSignatures: shared.length });
+    }
+  }
+
+  return {
+    label: BODY_VARIATION_LABEL,
+    requests: entries.length,
+    distinctSignatures: new Set(entries.map((entry) => entry.signature)).size,
+    perState,
+    overlap,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// §11.2A The exploratory `next dev` request-ID mask (`H-D20`), E2 only.
+// ---------------------------------------------------------------------------------------------
+
+/** 32 bytes: the inline script's opening tag and the start of the assignment. */
+export const NEXT_R_PREFIX = '<script id="_R_">self.__next_r="';
+/** 69 bytes: the assignment's close and the fixed code that follows it. */
+export const NEXT_R_SUFFIX = `";if(document.cookie.indexOf('next-instant-navigation-testing=')>-1){`;
+export const NEXT_R_VALUE_LENGTH = 21;
+/** 21 × `*` (0x2A): outside the value alphabet. */
+export const NEXT_R_PLACEHOLDER = "*".repeat(NEXT_R_VALUE_LENGTH);
+
+const NEXT_R_NAME = Buffer.from("__next_r", "ascii");
+const NEXT_R_SCRIPT_OPEN = Buffer.from('<script id="_R_">', "ascii");
+const NEXT_R_PREFIX_BYTES = Buffer.from(NEXT_R_PREFIX, "ascii");
+const NEXT_R_SUFFIX_BYTES = Buffer.from(NEXT_R_SUFFIX, "ascii");
+const NEXT_R_NAME_IN_PREFIX = NEXT_R_PREFIX_BYTES.indexOf(NEXT_R_NAME);
+const SCRIPT_CLOSE = Buffer.from("</script>", "ascii");
+
+export type RequestIdMaskOutcome = "ok" | "missing" | "duplicate" | "unexpected" | "malformed";
+
+export type RequestIdMaskResult =
+  | { readonly outcome: "ok"; readonly masked: Buffer; readonly value: string; readonly offset: number }
+  | { readonly outcome: Exclude<RequestIdMaskOutcome, "ok"> };
+
+function occurrences(haystack: Buffer, needle: Buffer): number {
+  let count = 0;
+  for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) count += 1;
+  return count;
+}
+
+/** A–Z, a–z, 0–9, `_` and `-`. */
+function isValueByte(byte: number): boolean {
+  return (byte >= 0x41 && byte <= 0x5a) || (byte >= 0x61 && byte <= 0x7a) || (byte >= 0x30 && byte <= 0x39) || byte === 0x5f || byte === 0x2d;
+}
+
+/**
+ * The §11.2A mask (amendment §3.2–3.3), on bytes, case-sensitive, on a copy of a §11.2-masked body.
+ * The checks run in order and the first match decides; offsets are not part of the rule. The input
+ * is never modified.
+ */
+export function maskNextRequestId(body: Buffer): RequestIdMaskResult {
+  const names = occurrences(body, NEXT_R_NAME);
+
+  if (names === 0) return { outcome: "missing" };
+  if (names > 1 || occurrences(body, NEXT_R_SCRIPT_OPEN) > 1) return { outcome: "duplicate" };
+
+  const start = body.indexOf(NEXT_R_NAME) - NEXT_R_NAME_IN_PREFIX;
+
+  if (start < 0 || !body.subarray(start, start + NEXT_R_PREFIX_BYTES.length).equals(NEXT_R_PREFIX_BYTES)) {
+    return { outcome: "unexpected" };
+  }
+
+  const offset = start + NEXT_R_PREFIX_BYTES.length;
+  const suffixAt = offset + NEXT_R_VALUE_LENGTH;
+  const value = body.subarray(offset, suffixAt);
+
+  if (
+    value.length !== NEXT_R_VALUE_LENGTH ||
+    !value.every(isValueByte) ||
+    !body.subarray(suffixAt, suffixAt + NEXT_R_SUFFIX_BYTES.length).equals(NEXT_R_SUFFIX_BYTES) ||
+    body.indexOf(SCRIPT_CLOSE, suffixAt + NEXT_R_SUFFIX_BYTES.length) < 0
+  ) {
+    return { outcome: "malformed" };
+  }
+
+  const masked = Buffer.from(body);
+  masked.write(NEXT_R_PLACEHOLDER, offset, "ascii");
+
+  return { outcome: "ok", masked, value: value.toString("ascii"), offset };
+}
+
+/** One measured E2 response with its §11.2A outcome, computed on the stored UUID-masked body. */
+export interface E2Observation extends ResponseObservation {
+  readonly requestIdMask: RequestIdMaskResult;
+}
+
+/** The observation the §11.3 comparison sees: its post-mask hash when the mask succeeded. */
+export function postMaskObservation(observation: E2Observation): ResponseObservation {
+  const { requestIdMask, ...rest } = observation;
+  return requestIdMask.outcome === "ok" ? { ...rest, maskedBodyHash: sha256Hex(requestIdMask.masked) } : rest;
+}
+
+/** The Next.js version guard's outcome (amendment §4.4); computed in `next-evidence.ts`. */
+export type NextGuardOutcome = "ok" | "missing" | "disagreement" | "launch-mismatch" | "unreviewed-version";
+
+export type PostMaskScope = "replicate" | "subset" | "none";
+
+/** Reported whenever a gated response failed the mask: the replicate-wide result does not exist. */
+export const POST_MASK_NOT_ESTABLISHED = "replicate-wide post-mask agreement not established: a response in the agreement set failed the request-ID mask";
+/** The label of a comparison over only the successful responses. It never establishes agreement. */
+export const POST_MASK_SUBSET_LABEL = "subset comparison — successful masks only; does not establish replicate-wide agreement";
+
+export interface RequestIdOutcomeEntry {
+  readonly request: number;
+  readonly cls: ItemClass;
+  readonly outcome: RequestIdMaskOutcome;
+}
+
+export interface RepeatedValue {
+  readonly value: string;
+  readonly requests: readonly number[];
+  readonly classes: readonly ItemClass[];
+  readonly identities: number;
+}
+
+export interface E2GateResult {
+  readonly guard: NextGuardOutcome;
+  /** Every withholding label, all checks evaluated, in the fixed order of amendment §9. */
+  readonly reasons: readonly string[];
+  /** Gated responses whose mask outcome is not `ok`: these withhold. */
+  readonly maskFailures: readonly RequestIdOutcomeEntry[];
+  /** `MF` responses whose mask outcome is not `ok`: reported only. */
+  readonly maskReported: readonly RequestIdOutcomeEntry[];
+  /** Values seen in two or more gated responses: these withhold. */
+  readonly repeatedValues: readonly RepeatedValue[];
+  /** Repeats that involve an `MF` response: reported only. */
+  readonly repeatedReported: readonly RepeatedValue[];
+  /** Stage 1 (diagnostic): the UUID-only comparison. It never affects `reasons`. */
+  readonly uuidOnly: BodyGateResult;
+  /** Stage 2: exact agreement of post-mask bodies over `ok` gated responses; absent when none is `ok`. */
+  readonly postMask: BodyGateResult | undefined;
+  /**
+   * What `postMask` covers. `replicate`: every gated response, so it can establish agreement for the
+   * replicate. `subset`: some gated response failed the mask, so replicate-wide post-mask agreement
+   * is **not established** and `postMask` compares only the successful responses. `none`: no gated
+   * response was compared.
+   */
+  readonly postMaskScope: PostMaskScope;
+  /** The unchanged header gate on the original observations. */
+  readonly headers: HeaderGateResult;
+}
+
+function repeatsAmong(observations: readonly E2Observation[]): RepeatedValue[] {
+  const byValue = new Map<string, E2Observation[]>();
+
+  for (const observation of observations) {
+    if (observation.requestIdMask.outcome !== "ok") continue;
+    const list = byValue.get(observation.requestIdMask.value) ?? [];
+    list.push(observation);
+    byValue.set(observation.requestIdMask.value, list);
+  }
+
+  return [...byValue]
+    .filter(([, list]) => list.length > 1)
+    .map(([value, list]) => ({
+      value,
+      requests: list.map((observation) => observation.request),
+      classes: list.map((observation) => observation.cls),
+      identities: new Set(list.map((observation) => observation.identity)).size,
+    }));
+}
+
+/**
+ * The E2 withholding checks (amendment §9), all evaluated with no short-circuit: the version
+ * guard, the mask outcomes, repeated values, post-mask exact agreement and the unchanged header
+ * gate. The UUID-only comparison is reported as diagnostic stage 1 and is never an input.
+ */
+export function evaluateE2Gates(input: { readonly guard: NextGuardOutcome; readonly observations: readonly E2Observation[] }): E2GateResult {
+  const { guard, observations } = input;
+  const gated = observations.filter((observation) => listingStateOf(observation.cls) !== undefined);
+  const malformedClass = observations.filter((observation) => observation.cls === "MF");
+  const entry = (observation: E2Observation): RequestIdOutcomeEntry => ({
+    request: observation.request,
+    cls: observation.cls,
+    outcome: observation.requestIdMask.outcome,
+  });
+  const maskFailures = gated.filter((observation) => observation.requestIdMask.outcome !== "ok").map(entry);
+  const maskReported = malformedClass.filter((observation) => observation.requestIdMask.outcome !== "ok").map(entry);
+  const repeatedValues = repeatsAmong(gated);
+  const repeatedReported = repeatsAmong([...gated, ...malformedClass]).filter((repeat) => repeat.classes.includes("MF"));
+  const okGated = gated.filter((observation) => observation.requestIdMask.outcome === "ok");
+  const postMask = okGated.length > 0 ? evaluateBodyGate(okGated.map(postMaskObservation)) : undefined;
+  const headers = evaluateHeaderGate(observations);
+  const reasons: string[] = [];
+
+  if (guard !== "ok") reasons.push(NEXT_VERSION_WITHHELD);
+  if (maskFailures.length > 0) reasons.push(REQUEST_ID_MASK_WITHHELD);
+  if (repeatedValues.length > 0) reasons.push(REQUEST_ID_VALUE_REPEATED);
+  // With no gated response at all, agreement is not established and the body label applies.
+  if (postMask === undefined ? gated.length === 0 : !postMask.agreement) reasons.push(BODY_WITHHELD);
+  if (!headers.agreement) reasons.push(HEADER_WITHHELD);
+
+  return {
+    guard,
+    reasons,
+    maskFailures,
+    maskReported,
+    repeatedValues,
+    repeatedReported,
+    uuidOnly: evaluateBodyGate(observations),
+    postMask,
+    postMaskScope: postMask === undefined ? "none" : maskFailures.length > 0 ? "subset" : "replicate",
+    headers,
   };
 }
 

@@ -10,7 +10,7 @@
  * projections are a proposed deferral, and the exploratory control rules are listed.
  */
 
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -39,6 +39,10 @@ import {
   renderReport,
   weightedQuantile,
   writeAnalysis,
+  NEXT_R_MASK_NOTE,
+  NEXT_VERSION_GUARD_NOTE,
+  type AnalysisReport,
+  type BodySource,
   type ComparisonPlan,
   type Fitter,
   type MeasurementRecord,
@@ -46,6 +50,20 @@ import {
   type RunManifest,
   type Series,
 } from "./analyze";
+import {
+  BODY_WITHHELD,
+  DIAGNOSTIC_LABEL,
+  HEADER_WITHHELD,
+  maskOwnIdentity,
+  NEXT_R_PREFIX,
+  NEXT_R_SUFFIX,
+  NEXT_VERSION_WITHHELD,
+  POST_MASK_NOT_ESTABLISHED,
+  POST_MASK_SUBSET_LABEL,
+  REQUEST_ID_MASK_WITHHELD,
+  sha256Hex,
+} from "./body-compare";
+import type { NextVersionEvidence } from "./next-evidence";
 import { buildPlan, SeededRandom, type PlanIdentity } from "./schedule";
 
 const BLOCKS = Array.from({ length: 100 }, (_, index) => index + 1);
@@ -447,4 +465,261 @@ describe("held-out accuracy, the proposed deferral and the exploratory rules", (
     expect(rendered).toContain("## Exploratory control rules (not owner-ratified)");
     for (const rule of EXPLORATORY_CONTROL_RULES) expect(rendered).toContain(rule);
   });
+});
+
+// ---------------------------------------------------------------------------------------------
+// E2 wiring for the approved amendment revision 4 (§7.3, §11.2A, §11.3, §11.4, §11.4A), on a
+// synthetic full-mode E2 run. Timings are constant within a block, so controls and the null
+// behave exactly and the only conditions are the ones each test sets.
+// ---------------------------------------------------------------------------------------------
+
+const E2_COMMIT = "d3fed966f32c7f44be7de5e31eae297f4051f348";
+const E2_NOW = Date.UTC(2026, 10, 9, 12, 0, 0, 400);
+const E2_HEADERS = ["Vary", "RSC, Accept-Encoding", "Date", new Date(Math.floor(E2_NOW / 1_000) * 1_000).toUTCString(), "Content-Type", "text/html; charset=utf-8", "Connection", "keep-alive"];
+const E2_WORKTREE = String.raw`C:\t\cdp-bi4-http-a\worktree`;
+const E2_ENTRY = String.raw`${E2_WORKTREE}\node_modules\next\dist\bin\next`;
+const E2_COMMAND = String.raw`C:\node\node.exe ${E2_ENTRY} dev --hostname 127.0.0.1 --port 5000`;
+const E2_READ = { packageJsonRealPath: String.raw`${E2_WORKTREE}\node_modules\next\package.json`, entryRealPath: E2_ENTRY, name: "next", version: "16.3.3", packageJsonSha256: "p".repeat(64) };
+const E2_EVIDENCE: NextVersionEvidence = {
+  runCommit: E2_COMMIT,
+  worktreePath: E2_WORKTREE,
+  worktreeHead: E2_COMMIT,
+  lockfile: { gitBlobId: "b".repeat(40), commitBlobSha256: "l".repeat(64), worktreeCopySha256: "l".repeat(64), entries: [{ key: "node_modules/next", version: "16.3.3" }] },
+  launch: { nodeExecutable: String.raw`C:\node\node.exe`, entryPath: E2_ENTRY, port: 5000, pid: 7, creationTime: "1", commandLine: E2_COMMAND },
+  installedBeforeStart: E2_READ,
+  installedAfterMeasured: { ...E2_READ, liveIdentity: { pid: 7, creationTime: "1", commandLine: E2_COMMAND } },
+};
+/** Stops every statistic at its first check, so a gate-only test stays cheap. Gates run first. */
+const GATES_ONLY = { ...OPTIONS, deadline: 1, now: () => 2 };
+
+interface SyntheticE2Options {
+  /** The body's visible text per request; the same text everywhere means post-mask agreement. */
+  readonly text?: (sequence: number) => string;
+  readonly evidence?: NextVersionEvidence;
+  readonly invalid?: readonly string[];
+  readonly headers?: (identity: PlanIdentity) => readonly string[];
+  /** The first-chunk calibration delay is omitted, so its control fails. */
+  readonly brokenControl?: boolean;
+  /** NC-B is shifted, so the null comparison fires. */
+  readonly nullShift?: boolean;
+  /** This many measured `next` requests fail in transport. */
+  readonly transportFailures?: number;
+  /** Keep only measured blocks up to this one, so a test that writes every body to disk stays small. */
+  readonly lastBlock?: number;
+}
+
+/** A synthetic full E2 run, with the stored UUID-masked bodies its records name. */
+function syntheticE2(options: SyntheticE2Options = {}): { manifest: RunManifest; records: MeasurementRecord[]; stored: Map<string, Buffer> } {
+  const plan = buildPlan({ boundary: "e2", mode: "full", seed: "synthetic-e2", delaysNs: [5_000, 20_000, 80_000], background: 0 });
+  const stored = new Map<string, Buffer>();
+  let failures = 0;
+  const records = plan.requests
+    .filter((request) => request.phase === "measured" && request.block <= (options.lastBlock ?? Number.POSITIVE_INFINITY))
+    .map((request): MeasurementRecord => {
+      const identity = plan.identities[request.identity] as PlanIdentity;
+      const base = 1_000_000 + ((request.block * 37) % 101) * 10;
+      const delay = identity.delayIndex === undefined ? 0 : (plan.delaysNs[identity.delayIndex] as number);
+      const common = { sequence: request.sequence, phase: request.phase, block: request.block, identity: request.identity, cls: identity.cls, target: identity.target };
+
+      if (identity.target === "calibration") {
+        const ttfbShift = identity.placement === "first" && options.brokenControl !== true ? delay : 0;
+        const ttlbShift = identity.placement === "first" ? (options.brokenControl === true ? 0 : delay) : identity.placement === "final" ? delay : 0;
+        return { ...common, ttfbNs: String(base + ttfbShift), ttlbNs: String(base + 500_000 + ttlbShift), status: 200, reusedSocket: true };
+      }
+
+      if ((options.transportFailures ?? 0) > failures) {
+        failures += 1;
+        return { ...common, transportError: "ECONNRESET" };
+      }
+
+      const value = String(request.sequence).padStart(21, "A");
+      const text = options.text?.(request.sequence) ?? "Not available";
+      const raw = Buffer.from(
+        `<html><a href="/directory/${identity.key}">x</a>${NEXT_R_PREFIX}${value}${NEXT_R_SUFFIX}fetch('?_rsc=k')}</script><h1>${text}</h1></html>`,
+        "latin1",
+      );
+      const masked = maskOwnIdentity(raw, identity.key);
+      const maskedBodyHash = sha256Hex(masked.masked);
+      stored.set(maskedBodyHash, masked.masked);
+      const shift = options.nullShift === true && identity.cls === "NCB" ? 50_000 : 0;
+
+      return {
+        ...common,
+        ttfbNs: String(base + shift),
+        ttlbNs: String(base + 500_000 + shift),
+        status: 200,
+        reusedSocket: true,
+        rawBodyHash: sha256Hex(raw),
+        maskedBodyHash,
+        bodyReplacements: masked.count,
+        bodyOffsets: masked.offsets,
+        rawHeaders: options.headers?.(identity) ?? E2_HEADERS,
+        writeStartMs: E2_NOW - 5,
+        responseEndMs: E2_NOW + 5,
+      };
+    });
+
+  return {
+    manifest: {
+      mode: "full",
+      boundary: "e2",
+      replicate: 1,
+      seed: plan.seed,
+      delaysNs: plan.delaysNs,
+      backgroundCount: 0,
+      commit: E2_COMMIT,
+      identities: plan.identities,
+      startedAt: "2026-11-09T00:00:00.000Z",
+      invalid: [...(options.invalid ?? [])],
+      ...(options.evidence === undefined ? {} : { nextEvidence: options.evidence }),
+    },
+    records,
+    stored,
+  };
+}
+
+const sourceOf = (stored: ReadonlyMap<string, Buffer>): BodySource => (hash) => stored.get(hash);
+const textOf = (report: AnalysisReport): string => `${renderReport(report)}\n${JSON.stringify(report)}`;
+const firstMetric = (report: AnalysisReport) => report.comparisons[0]?.metrics[0];
+
+describe("E2 gates with the next dev request-ID mask (approved amendment revision 4)", () => {
+  it("T-A1 a run with no Next.js version evidence (the historical smoke's shape) is withheld by the guard", () => {
+    const { manifest, records, stored } = syntheticE2();
+    const report = analyzeRun(manifest, records, GATES_ONLY, sourceOf(stored));
+
+    expect(report.gates.nextRequestId?.guard).toBe("missing");
+    expect(report.withheld).toEqual([NEXT_VERSION_WITHHELD]);
+    expect(report.gates.body?.agreement).toBe(true);
+  });
+
+  it("T-A2 an absent or mismatched stored body is a missing mask outcome and withholds", () => {
+    const { manifest, records, stored } = syntheticE2({ evidence: E2_EVIDENCE });
+    const next = records.filter((record) => record.target === "next" && record.cls === "PE");
+    const absent = next[0]?.maskedBodyHash as string;
+    const altered = next[1]?.maskedBodyHash as string;
+    const source: BodySource = (hash) => (hash === absent ? undefined : hash === altered ? Buffer.from("tampered") : stored.get(hash));
+    const report = analyzeRun(manifest, records, GATES_ONLY, source);
+
+    expect(report.withheld).toEqual([REQUEST_ID_MASK_WITHHELD]);
+    expect(report.gates.nextRequestId?.maskFailures.map((failure) => failure.outcome)).toEqual(["missing", "missing"]);
+    expect(analyzeRun(manifest, records, GATES_ONLY).withheld).toEqual([REQUEST_ID_MASK_WITHHELD]);
+  });
+
+  it("T-A5 smoke-mode E2 data is still refused, so the historical smoke stays withheld", () => {
+    const { manifest, records, stored } = syntheticE2({ evidence: E2_EVIDENCE });
+
+    expect(() => analyzeRun({ ...manifest, mode: "smoke" }, records, OPTIONS, sourceOf(stored))).toThrow(/refuses smoke-mode data/);
+  });
+
+  it("T-A3 the existing header label line is unchanged on a header mismatch", () => {
+    const { manifest, records, stored } = syntheticE2({
+      evidence: E2_EVIDENCE,
+      headers: (identity) => (identity.cls === "RJ" ? [...E2_HEADERS, "Cache-Control", "private"] : E2_HEADERS),
+    });
+    const report = analyzeRun(manifest, records, GATES_ONLY, sourceOf(stored));
+
+    expect(report.withheld).toEqual([HEADER_WITHHELD]);
+    expect(renderReport(report)).toContain("- Header mismatch label: State-associated");
+  });
+
+  describe("T-A3 and T-A6: a disjoint, all-unique post-mask body mismatch, with nothing else", () => {
+    const { manifest, records, stored } = syntheticE2({ evidence: E2_EVIDENCE, text: (sequence) => `Not available ${sequence}` });
+    let report: AnalysisReport;
+
+    it("T-A6 withholds without being Invalid, with statistics still computed and stored", () => {
+      report = analyzeRun(manifest, records, OPTIONS, sourceOf(stored));
+
+      expect(report.status).toBe("complete");
+      expect(report.invalid).toEqual([]);
+      expect(report.withheld).toEqual([BODY_WITHHELD]);
+      expect(report.comparisons.length).toBeGreaterThan(0);
+      expect(interpretationOf(report, firstMetric(report) as NonNullable<ReturnType<typeof firstMetric>>)).toBe(BODY_WITHHELD);
+    }, HEAVY_ANALYSIS_TIMEOUT_MS);
+
+    it("T-A3 reports descriptively, with the exploratory wording and no state-based finding", () => {
+      const text = textOf(report);
+
+      expect(text).toContain(NEXT_R_MASK_NOTE);
+      expect(text).toContain(NEXT_VERSION_GUARD_NOTE);
+      expect(text).toContain("Body variation summary (descriptive only)");
+      expect(text).not.toMatch(/possible non-timing|BI-4 failure|state-associated/i);
+      expect(report.gates.body?.variationSummary.overlap.every((pair) => pair.sharedSignatures === 0)).toBe(true);
+    });
+  });
+
+  it("T-A7 independent Invalid conditions keep priority, and every reason is reported", () => {
+    const { manifest, records, stored } = syntheticE2({
+      evidence: E2_EVIDENCE,
+      text: (sequence) => `Not available ${sequence}`,
+      invalid: ["Invalid (file safety): restricted-file metadata changed for CLAUDE.md"],
+      brokenControl: true,
+      nullShift: true,
+      transportFailures: 200,
+    });
+    const report = analyzeRun(manifest, records, OPTIONS, sourceOf(stored));
+    const startsWith = (prefix: string): boolean => report.invalid.some((reason) => reason.startsWith(prefix));
+
+    expect(report.status).toBe("complete");
+    expect(startsWith("Invalid (file safety)")).toBe(true);
+    expect(startsWith("Invalid (transport)")).toBe(true);
+    expect(startsWith("Invalid (control)")).toBe(true);
+    expect(startsWith("Invalid (null fired)")).toBe(true);
+    expect(report.withheld).toEqual([BODY_WITHHELD]);
+    expect(interpretationOf(report, firstMetric(report) as NonNullable<ReturnType<typeof firstMetric>>)).toMatch(/^Invalid: /);
+    expect(renderReport(report)).toContain(BODY_WITHHELD);
+  }, HEAVY_ANALYSIS_TIMEOUT_MS);
+
+  it("T-A8 one failed mask with agreeing successful responses: replicate-wide agreement not established, a labelled subset comparison, and Invalid still first", () => {
+    const { manifest, records, stored } = syntheticE2({
+      evidence: E2_EVIDENCE,
+      invalid: ["Invalid (file safety): restricted-file metadata changed for CLAUDE.md"],
+    });
+    const absent = records.find((record) => record.target === "next" && record.cls === "RJ")?.maskedBodyHash as string;
+    const report = analyzeRun(manifest, records, OPTIONS, (hash) => (hash === absent ? undefined : stored.get(hash)));
+    const rendered = renderReport(report);
+
+    expect(report.status).toBe("complete");
+    expect(report.withheld).toEqual([REQUEST_ID_MASK_WITHHELD]);
+    expect(report.invalid).toEqual(["Invalid (file safety): restricted-file metadata changed for CLAUDE.md"]);
+    expect(report.gates.body).toBeUndefined();
+    expect(report.gates.nextRequestId?.postMaskScope).toBe("subset");
+    expect(report.gates.bodySubset?.scope).toBe(POST_MASK_SUBSET_LABEL);
+    expect(report.gates.bodySubset?.agreement).toBe(true);
+    expect(rendered).toContain(`- Post-mask body agreement: ${POST_MASK_NOT_ESTABLISHED}`);
+    expect(rendered).toContain(`- Post-mask ${POST_MASK_SUBSET_LABEL}:`);
+    expect(rendered).not.toContain("(replicate-wide): agreement");
+    expect(interpretationOf(report, firstMetric(report) as NonNullable<ReturnType<typeof firstMetric>>)).toMatch(/^Invalid: /);
+  }, HEAVY_ANALYSIS_TIMEOUT_MS);
+
+  it("T-A4 writes the stage 1 diagnostic from UUID-masked bodies even when post-mask agreement holds", () => {
+    // Ten measured blocks: every stored body is written to disk, which dominates this test's time.
+    const { manifest, records, stored } = syntheticE2({ evidence: E2_EVIDENCE, lastBlock: 10 });
+    const base = mkdtempSync(join(tmpdir(), "bi4-analyze-e2-test-"));
+    try {
+      const run = join(base, "run");
+      mkdirSync(join(run, "bodies"), { recursive: true });
+      writeFileSync(join(run, "manifest.json"), JSON.stringify(manifest));
+      writeFileSync(join(run, "requests.ndjson"), records.map((record) => JSON.stringify(record)).join("\n"));
+      for (const [hash, body] of stored) writeFileSync(join(run, "bodies", `${hash}.bin`), body);
+
+      const out = join(base, "out");
+      const report = writeAnalysis(run, out, OPTIONS);
+      const diagnosis = JSON.parse(readFileSync(join(out, "evidence", "diagnostic-variation.json"), "utf8")) as { label: string; perRequest: { edits: unknown[] | undefined }[] };
+
+      expect(report.status).toBe("complete");
+      expect(report.withheld).toEqual([]);
+      expect(report.gates.body?.agreement).toBe(true);
+      expect(report.gates.bodyUuidOnly?.agreement).toBe(false);
+      expect(readdirSync(out).sort()).toEqual(["evidence", "report.json", "report.md"]);
+      expect(readdirSync(join(out, "evidence"))).toEqual(["diagnostic-variation.json"]);
+      expect(diagnosis.label).toBe(DIAGNOSTIC_LABEL);
+      expect(diagnosis.perRequest.length).toBeGreaterThan(0);
+      // Every differing body shows the value as an edit, except one equal to the diagnostic's own reference.
+      expect(diagnosis.perRequest.filter((entry) => (entry.edits?.length ?? 0) === 0).length).toBeLessThanOrEqual(1);
+      expect(diagnosis.perRequest.filter((entry) => (entry.edits?.length ?? 0) > 0).length).toBeGreaterThan(0);
+      expect(existsSync(join(run, "bodies"))).toBe(true);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  }, HEAVY_ANALYSIS_TIMEOUT_MS);
 });
