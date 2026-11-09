@@ -30,6 +30,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { ListingDatabase } from "../../src/data/listing-table";
 
 import {
+  listenerLookupScript,
+  parseListenerLookup,
+  windowsListenerLookup,
   adminRecordOf,
   buildDatabaseUrl,
   checkPreconditions,
@@ -1844,5 +1847,83 @@ describe("unavailable executable or command line never verifies a live process (
     expect(result.reason).toMatch(/nothing was killed$/);
     expect(windows.commands).not.toContain("taskkill");
     expect(cleanups).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// The strict V-A listener lookup (issue #246, V-A listener fix). `listener(port)` is unchanged.
+// A fake runner only: no PowerShell runs.
+// ---------------------------------------------------------------------------------------------
+
+describe("the strict listener lookup", () => {
+  const ok = (entries: unknown[], port = 4000) => ({ code: 0, stdout: JSON.stringify({ ok: true, port, entries }), stderr: "" });
+
+  it("sends exactly the CIM query, with terminating errors and nothing suppressed", async () => {
+    const calls: { command: string; args: readonly string[] }[] = [];
+    const lookup = windowsListenerLookup(async (command, args) => (calls.push({ command, args }), ok([])));
+
+    expect(await lookup(4000)).toEqual([]);
+    expect(calls).toEqual([{ command: "powershell.exe", args: ["-NoProfile", "-NonInteractive", "-Command", listenerLookupScript(4000)] }]);
+    expect(listenerLookupScript(4000)).toBe(
+      "$ErrorActionPreference = 'Stop'; " +
+        "$found = @(Get-CimInstance -Namespace ROOT/StandardCimv2 -ClassName MSFT_NetTCPConnection -Filter 'LocalPort = 4000 AND State = 2' | " +
+        "ForEach-Object { [pscustomobject]@{ localAddress = [string]$_.LocalAddress; localPort = [int]$_.LocalPort; owningProcess = [int]$_.OwningProcess } }); " +
+        "ConvertTo-Json -InputObject @{ ok = $true; port = 4000; entries = $found } -Compress -Depth 3",
+    );
+    expect(listenerLookupScript(4000)).not.toMatch(/SilentlyContinue|Select-Object -First/);
+    expect(() => listenerLookupScript(0)).toThrow(/not a TCP port/);
+    expect(() => listenerLookupScript(70_000)).toThrow(/not a TCP port/);
+  });
+
+  it("returns every listening entry, and a successful empty result as unbound", () => {
+    expect(parseListenerLookup(4000, ok([]))).toEqual([]);
+    expect(parseListenerLookup(4000, ok([{ localAddress: "127.0.0.1", localPort: 4000, owningProcess: 7 }]))).toEqual([{ localAddress: "127.0.0.1", owningProcess: 7 }]);
+    expect(
+      parseListenerLookup(
+        4000,
+        ok([
+          { localAddress: "127.0.0.1", localPort: 4000, owningProcess: 7 },
+          { localAddress: "::", localPort: 4000, owningProcess: 9 },
+        ]),
+      ),
+    ).toEqual([
+      { localAddress: "127.0.0.1", owningProcess: 7 },
+      { localAddress: "::", owningProcess: 9 },
+    ]);
+  });
+
+  it.each([
+    ["a nonzero exit", { code: 1, stdout: "", stderr: "Get-CimInstance : Invalid namespace" }],
+    ["stderr output", { code: 0, stdout: JSON.stringify({ ok: true, port: 4000, entries: [] }), stderr: "WARNING: x" }],
+    ["empty output", { code: 0, stdout: "", stderr: "" }],
+    ["output that is not JSON", { code: 0, stdout: "4000 7", stderr: "" }],
+    ["no success envelope", { code: 0, stdout: JSON.stringify({ entries: [] }), stderr: "" }],
+    ["ok false", { code: 0, stdout: JSON.stringify({ ok: false, port: 4000, entries: [] }), stderr: "" }],
+    ["another port's envelope", { code: 0, stdout: JSON.stringify({ ok: true, port: 4001, entries: [] }), stderr: "" }],
+    ["entries not an array", { code: 0, stdout: JSON.stringify({ ok: true, port: 4000, entries: { localAddress: "127.0.0.1" } }), stderr: "" }],
+    ["an entry for another port", ok([{ localAddress: "127.0.0.1", localPort: 4001, owningProcess: 7 }])],
+    ["an entry without an address", ok([{ localAddress: "", localPort: 4000, owningProcess: 7 }])],
+    ["an entry with a non-integer PID", ok([{ localAddress: "127.0.0.1", localPort: 4000, owningProcess: "7" }])],
+    ["an entry with PID 0", ok([{ localAddress: "127.0.0.1", localPort: 4000, owningProcess: 0 }])],
+    ["a null entry", ok([null])],
+  ])("throws an inspection error, never 'unbound', for %s", (_name, result) => {
+    expect(() => parseListenerLookup(4000, result)).toThrow(ProcessInspectionError);
+  });
+
+  it("treats a runner that cannot start PowerShell as a failed lookup", async () => {
+    const lookup = windowsListenerLookup(async () => {
+      throw new Error("spawn powershell.exe ENOENT");
+    });
+
+    await expect(lookup(4000)).rejects.toThrow(ProcessInspectionError);
+    await expect(lookup(4000)).rejects.toThrow(/PowerShell could not be run for the listener lookup: spawn powershell.exe ENOENT/);
+  });
+
+  it("leaves the existing listener(port) lookup unchanged", async () => {
+    const calls: string[] = [];
+    const ops = windowsProcessOps(async (_command, args) => (calls.push(args.at(-1) as string), { code: 0, stdout: "7\r\n", stderr: "" }));
+
+    expect(await ops.listener(4000)).toBe(7);
+    expect(calls).toEqual(["@(Get-NetTCPConnection -State Listen -LocalPort 4000 -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess)"]);
   });
 });

@@ -56,8 +56,8 @@
  * before the request-ID mask, whenever they differ, and never lifts withholding.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
 import {
   compareMalformed,
@@ -76,7 +76,7 @@ import {
   type HeaderGateResult,
   type RequestIdMaskResult,
 } from "./body-compare";
-import { evaluateNextVersionGuard, type NextVersionEvidence } from "./next-evidence";
+import { explainNextVersionGuard, type LockfileByteMatch, type NextVersionEvidence } from "./next-evidence";
 import {
   COMPARED_CLASS,
   COMPARISONS,
@@ -147,7 +147,12 @@ export interface RunManifest {
   readonly invalid: readonly string[];
   /** E2: the Next.js version evidence (amendment §4). Absent in runs made before it existed. */
   readonly nextEvidence?: NextVersionEvidence;
+  /** Present only on a V-A validation pass (amendment r5 A5-3). Such a run is also `mode: "smoke"`, so `analyze` refuses it. */
+  readonly validation?: typeof VALIDATION_MARKER;
 }
+
+/** The marker a V-A validation pass carries in its manifest. */
+export const VALIDATION_MARKER = "e2-evidence";
 
 /**
  * The stored UUID-masked body for a hash, already verified against that hash, or `undefined`
@@ -1030,8 +1035,13 @@ export interface GateSummary {
   /** E2 stage 1: the UUID-only comparison. **Diagnostic only**; it never affects withholding. */
   readonly bodyUuidOnly?: BodyGateResult;
   readonly headers?: HeaderGateResult;
-  /** E2: the version guard, mask outcomes and repeated values (§7.3, §11.2A). */
-  readonly nextRequestId?: Omit<E2GateResult, "uuidOnly" | "postMask" | "headers"> & { readonly outcomes: Readonly<Record<string, number>> };
+  /** E2: the version guard (with its failed check and reason, r5 A5-2), mask outcomes and repeated values (§7.3, §11.2A). */
+  readonly nextRequestId?: Omit<E2GateResult, "uuidOnly" | "postMask" | "headers"> & {
+    readonly outcomes: Readonly<Record<string, number>>;
+    readonly guardCheck: string;
+    readonly guardReason: string;
+    readonly lockfileByteMatch?: LockfileByteMatch;
+  };
   readonly e1Values?: { readonly agreement: boolean; readonly distinct: number };
 }
 
@@ -1129,6 +1139,51 @@ export const NEXT_VERSION_GUARD_NOTE =
 export const E2_BODY_REPORTING_NOTE =
   "An E2 body mismatch withholds timing interpretation for this replicate and is described, not classified. Disjoint or all-unique signatures alone do not justify a state-based conclusion. Diagnostic explanations cannot lift the withholding.";
 
+/** The E2 gates of one run: what `analyzeRun` and the V-A validation both report. */
+export interface E2Evidence {
+  readonly gates: Pick<GateSummary, "body" | "bodySubset" | "bodyUuidOnly" | "headers" | "nextRequestId">;
+  readonly withheld: readonly string[];
+  readonly malformed: ReturnType<typeof compareMalformed>;
+}
+
+/**
+ * The shared E2 gate evaluator (amendment r5 A5-3): the §7.3 guard, the §11.2A mask and
+ * repeated-value checks, the §11.3 comparison and the §11.6 header gate, on the run's stored
+ * bodies. `analyzeRun` and `evaluateE2Validation` both call this one function. It refuses nothing
+ * and computes no statistic; the callers decide what data they accept.
+ */
+export function evaluateE2Evidence(manifest: RunManifest, records: readonly MeasurementRecord[], bodies: BodySource | undefined): E2Evidence {
+  const observations = observationsOf(records, manifest.identities, bodies);
+  const guard = explainNextVersionGuard(manifest.nextEvidence, manifest.commit);
+  const e2 = evaluateE2Gates({ guard: guard.outcome, observations });
+  const outcomes: Record<string, number> = {};
+  for (const observation of observations) outcomes[observation.requestIdMask.outcome] = (outcomes[observation.requestIdMask.outcome] ?? 0) + 1;
+
+  return {
+    gates: {
+      ...(e2.postMask !== undefined && e2.postMaskScope === "replicate" ? { body: e2.postMask } : {}),
+      ...(e2.postMask !== undefined && e2.postMaskScope === "subset" ? { bodySubset: { ...e2.postMask, scope: POST_MASK_SUBSET_LABEL } } : {}),
+      bodyUuidOnly: e2.uuidOnly,
+      headers: e2.headers,
+      nextRequestId: {
+        guard: e2.guard,
+        guardCheck: guard.check,
+        guardReason: guard.reason,
+        ...(guard.lockfileByteMatch === undefined ? {} : { lockfileByteMatch: guard.lockfileByteMatch }),
+        postMaskScope: e2.postMaskScope,
+        reasons: e2.reasons,
+        maskFailures: e2.maskFailures,
+        maskReported: e2.maskReported,
+        repeatedValues: e2.repeatedValues,
+        repeatedReported: e2.repeatedReported,
+        outcomes,
+      },
+    },
+    withheld: e2.reasons,
+    malformed: compareMalformed(observations.map(postMaskObservation), e2.postMask ?? e2.uuidOnly, e2.headers),
+  };
+}
+
 /**
  * Analyse one full-pilot boundary replicate. Pure: inputs are passed in. At E2, `bodies` supplies
  * the stored UUID-masked bodies; without it, every body is `missing` and interpretation is withheld.
@@ -1163,26 +1218,10 @@ export function analyzeRun(
 
   if (manifest.boundary === "e2") {
     invalid.push(...e2Validity(records));
-    const observations = observationsOf(records, manifest.identities, bodies);
-    const e2 = evaluateE2Gates({ guard: evaluateNextVersionGuard(manifest.nextEvidence, manifest.commit), observations });
-    const outcomes: Record<string, number> = {};
-    for (const observation of observations) outcomes[observation.requestIdMask.outcome] = (outcomes[observation.requestIdMask.outcome] ?? 0) + 1;
-    if (e2.postMask !== undefined && e2.postMaskScope === "replicate") gates.body = e2.postMask;
-    if (e2.postMask !== undefined && e2.postMaskScope === "subset") gates.bodySubset = { ...e2.postMask, scope: POST_MASK_SUBSET_LABEL };
-    gates.bodyUuidOnly = e2.uuidOnly;
-    gates.headers = e2.headers;
-    gates.nextRequestId = {
-      guard: e2.guard,
-      postMaskScope: e2.postMaskScope,
-      reasons: e2.reasons,
-      maskFailures: e2.maskFailures,
-      maskReported: e2.maskReported,
-      repeatedValues: e2.repeatedValues,
-      repeatedReported: e2.repeatedReported,
-      outcomes,
-    };
-    malformed = compareMalformed(observations.map(postMaskObservation), e2.postMask ?? e2.uuidOnly, e2.headers);
-    withheld.push(...e2.reasons);
+    const e2 = evaluateE2Evidence(manifest, records, bodies);
+    Object.assign(gates, e2.gates);
+    malformed = e2.malformed;
+    withheld.push(...e2.withheld);
   } else {
     const gated = records.filter(
       (record) => record.phase === "measured" && listingStateOf((manifest.identities[record.identity] as PlanIdentity).cls) !== undefined,
@@ -1308,7 +1347,7 @@ function renderE2BodyLines(gates: GateSummary): string[] {
   if (next === undefined) return [];
 
   const lines = [
-    `- Next.js version guard: ${next.guard}`,
+    `- Next.js version guard: ${next.guard}${next.guard === "ok" ? "" : ` (${next.guardReason})`}`,
     `- next dev request-ID mask outcomes (exploratory local rule): ${Object.entries(next.outcomes)
       .map(([outcome, count]) => `${outcome} ${count}`)
       .join(", ") || "none"}`,
@@ -1425,6 +1464,18 @@ export function renderReport(report: AnalysisReport): string {
 // Reading a run and preserving evidence.
 // ---------------------------------------------------------------------------------------------
 
+/** Stored bodies, read on demand and returned only when their hash matches the file name's. */
+export function verifiedBodySource(runDirectory: string): BodySource {
+  return (hash) => {
+    try {
+      const body = readFileSync(join(runDirectory, "bodies", `${hash}.bin`));
+      return sha256Hex(body) === hash ? body : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+}
+
 export function readRun(runDirectory: string): { manifest: RunManifest; records: MeasurementRecord[] } {
   const manifest = JSON.parse(readFileSync(join(runDirectory, "manifest.json"), "utf8")) as RunManifest;
   assertFullPilot(manifest);
@@ -1446,15 +1497,7 @@ export function writeAnalysis(runDirectory: string, outDirectory: string, option
   }
 
   const { manifest, records } = readRun(runDirectory);
-  // Stored bodies are read on demand and returned only when their hash matches the file name's.
-  const bodies: BodySource = (hash) => {
-    try {
-      const body = readFileSync(join(runDirectory, "bodies", `${hash}.bin`));
-      return sha256Hex(body) === hash ? body : undefined;
-    } catch {
-      return undefined;
-    }
-  };
+  const bodies = verifiedBodySource(runDirectory);
   let report = analyzeRun(manifest, records, options, bodies);
   // An incomplete analysis is never written where a completed report would be.
   const target = (): string => (report.status === "complete" ? outDirectory : join(outDirectory, "incomplete"));
@@ -1554,5 +1597,315 @@ export function writeAnalysis(runDirectory: string, outDirectory: string, option
     });
     writeFileSync(join(evidence, "diagnostic-variation.json"), `${JSON.stringify(diagnosis, null, 2)}\n`);
   }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The V-A validation evaluation (amendment r5 A5-3): gates only, through the shared evaluator.
+// ---------------------------------------------------------------------------------------------
+
+/** The cooperative evaluation limit (amendment r5 A5-3): checked between body reads and steps; nothing kills the process. */
+export const VALIDATION_EVALUATION_MINUTES = 5;
+
+export const VALIDATION_LABEL = "Validation only — no timing statistic was computed." as const;
+
+export const VALIDATION_STATEMENTS: readonly string[] = [
+  "Validation only. No timing statistic was computed.",
+  "Not a smoke run; no smoke verdict or S-C criterion changes.",
+  "Exploratory E2 evidence about the harness. BI-4 remains pending.",
+];
+
+export const INCOMPLETE_VALIDATION_HEADLINE = "INCOMPLETE — gate result not established";
+
+export type GateResult = "withheld" | "agreement" | "not established";
+
+export interface ValidationOptions {
+  /** Absolute time (ms) of the cooperative evaluation limit. */
+  readonly deadline?: number;
+  readonly now?: () => number;
+  /** Invalid reasons found after the pass, such as residue. Listed with the manifest's. */
+  readonly extraInvalid?: readonly string[];
+  /** The checkout preflight's findings, reported as evidence. */
+  readonly preflight?: unknown;
+  /** Resolves links and junctions for the output overlap checks; defaults to `realpathSync.native`. */
+  readonly realpath?: (path: string) => string;
+  /**
+   * The caller's full destination policy (repository, system temp, resolution, separation), rerun
+   * at the start and immediately before any report is written. Any problem means nothing is written.
+   */
+  readonly destinationCheck?: () => readonly string[];
+}
+
+export interface ValidationReport {
+  readonly status: "complete" | "incomplete";
+  /** The first line of every rendering, and the line printed on exit. */
+  readonly headline: string;
+  readonly gateResult: GateResult;
+  readonly label: typeof VALIDATION_LABEL;
+  /** Invalid first, then the withheld labels, then agreement. */
+  readonly interpretation: string;
+  /** Independent Invalid conditions: the manifest's, any found after the pass, and E2 validity. */
+  readonly invalid: readonly string[];
+  readonly withheld: readonly string[];
+  readonly incomplete?: { readonly reason: string; readonly finished: readonly string[]; readonly notStarted: readonly string[] };
+  readonly gates?: E2Evidence["gates"];
+  readonly malformed?: E2Evidence["malformed"];
+  /** The recorded Next.js version evidence, unchanged. */
+  readonly guardEvidence?: NextVersionEvidence;
+  readonly preflight?: unknown;
+  readonly operational: {
+    readonly requests: number;
+    readonly byPhase: Readonly<Record<string, number>>;
+    readonly byClass: Readonly<Record<string, number>>;
+    /** The V-A HTTP attempt budget: limit, attempts used, and attempts by phase and server (readiness included). */
+    readonly httpAttempts?: { readonly limit: number; readonly used: number; readonly byPhase: Readonly<Record<string, number>> };
+  };
+  readonly statements: readonly string[];
+}
+
+/** Only a V-A validation pass is accepted: E2, `mode: "smoke"` and the validation marker. */
+export function assertValidationRun(manifest: Pick<RunManifest, "mode" | "boundary" | "validation">): void {
+  if (manifest.boundary !== "e2" || manifest.mode !== "smoke" || manifest.validation !== VALIDATION_MARKER) {
+    throw new Error("the validation evaluation accepts only an E2 V-A validation pass (mode \"smoke\" with the validation marker)");
+  }
+}
+
+const EVALUATION_STEPS = ["E2 validity", "body reads and gates", "report"] as const;
+
+function headlineOf(gateResult: GateResult, withheld: readonly string[]): string {
+  if (gateResult === "withheld") return `Gate result: WITHHELD — ${withheld.join("; ")}`;
+  return gateResult === "agreement" ? "Gate result: agreement" : "Gate result: not established";
+}
+
+/**
+ * Evaluate a V-A validation pass with the **same** `evaluateE2Evidence` that `analyzeRun` uses.
+ * Gates only: no statistic, comparison, classifier, projection or interpretation of timing. The
+ * evaluation limit is cooperative; when it is reached the report is `incomplete` and has no gate
+ * result.
+ */
+export function evaluateE2Validation(
+  manifest: RunManifest,
+  records: readonly MeasurementRecord[],
+  bodies: BodySource | undefined,
+  options: ValidationOptions = {},
+): ValidationReport {
+  assertValidationRun(manifest);
+
+  const checkpoint = ceilingCheckpoint(options.deadline, options.now);
+  const invalid = [...manifest.invalid, ...(options.extraInvalid ?? [])];
+  const finished: string[] = [];
+  const count = (key: (record: MeasurementRecord) => string): Record<string, number> => {
+    const counts: Record<string, number> = {};
+    for (const record of records) counts[key(record)] = (counts[key(record)] ?? 0) + 1;
+    return counts;
+  };
+  const common = {
+    label: VALIDATION_LABEL,
+    ...(manifest.nextEvidence === undefined ? {} : { guardEvidence: manifest.nextEvidence }),
+    ...(options.preflight === undefined ? {} : { preflight: options.preflight }),
+    operational: { requests: records.length, byPhase: count((record) => record.phase), byClass: count((record) => record.cls) },
+    statements: VALIDATION_STATEMENTS,
+  };
+
+  try {
+    checkpoint();
+    invalid.push(...e2Validity(records));
+    finished.push(EVALUATION_STEPS[0]);
+
+    const checked: BodySource = (hash) => {
+      checkpoint();
+      return bodies?.(hash);
+    };
+    const e2 = evaluateE2Evidence(manifest, records, checked);
+    finished.push(EVALUATION_STEPS[1]);
+    checkpoint();
+
+    const withheld = [...e2.withheld];
+    const gateResult: GateResult =
+      withheld.length > 0 ? "withheld" : e2.gates.body?.agreement === true && e2.gates.headers?.agreement === true ? "agreement" : "not established";
+
+    return {
+      status: "complete",
+      headline: headlineOf(gateResult, withheld),
+      gateResult,
+      interpretation:
+        invalid.length > 0
+          ? `Invalid: ${invalid.join("; ")}`
+          : withheld.length > 0
+            ? withheld.join("; ")
+            : gateResult === "agreement"
+              ? "Gate agreement (validation only; no timing interpretation)"
+              : "Gate result not established",
+      invalid,
+      withheld,
+      gates: e2.gates,
+      malformed: e2.malformed,
+      ...common,
+    };
+  } catch (error) {
+    if (!(error instanceof AnalysisCeilingReached)) throw error;
+    return {
+      status: "incomplete",
+      headline: INCOMPLETE_VALIDATION_HEADLINE,
+      gateResult: "not established",
+      interpretation: invalid.length > 0 ? `Invalid: ${invalid.join("; ")}` : "Incomplete evaluation: gate result not established",
+      invalid,
+      withheld: [],
+      incomplete: {
+        reason: `Incomplete (timeout): the cooperative ${VALIDATION_EVALUATION_MINUTES}-minute evaluation limit was reached`,
+        finished,
+        notStarted: EVALUATION_STEPS.filter((step) => !finished.includes(step)),
+      },
+      ...common,
+    };
+  }
+}
+
+/** Render a validation report. The first line is always the headline. */
+export function renderE2Validation(report: ValidationReport): string {
+  const lines: string[] = [report.headline, "", `**${report.label}**`, "", `Interpretation: ${report.interpretation}`, ""];
+
+  if (report.incomplete !== undefined) {
+    lines.push(
+      `**This evaluation is incomplete and is not a completed report.** ${report.incomplete.reason}.`,
+      "",
+      `- Finished: ${report.incomplete.finished.length === 0 ? "none" : report.incomplete.finished.join("; ")}`,
+      `- Not started: ${report.incomplete.notStarted.join("; ")}`,
+      "",
+    );
+  }
+
+  lines.push("## 1. Independent Invalid conditions", "", ...(report.invalid.length === 0 ? ["- None recorded."] : report.invalid.map((reason) => `- ${reason}`)), "");
+
+  const next = report.gates?.nextRequestId;
+  lines.push("## 2. Next.js version guard", "");
+  if (next === undefined) {
+    lines.push("- Not evaluated.");
+  } else {
+    lines.push(`- Outcome: ${next.guard}`, `- First failed check: ${next.guardCheck}`, `- Reason: ${next.guardReason}`);
+    if (next.lockfileByteMatch !== undefined) lines.push(`- Lockfile byte match: ${next.lockfileByteMatch}`);
+    lines.push(next.guard === "ok" ? "- No version-guard withholding." : "- Withheld — Next.js version guard, pending review");
+  }
+  lines.push("");
+
+  lines.push("## 3. Request-ID mask", "");
+  if (next === undefined) {
+    lines.push("- Not evaluated.");
+  } else {
+    lines.push(`- Outcomes: ${Object.entries(next.outcomes).map(([outcome, total]) => `${outcome} ${total}`).join(", ") || "none"}`);
+    for (const failure of next.maskFailures) lines.push(`- Mask refusal, request ${failure.request} (${failure.cls}): ${failure.outcome}`);
+    for (const failure of next.maskReported) lines.push(`- Reported only, request ${failure.request} (${failure.cls}): ${failure.outcome}`);
+    for (const repeat of next.repeatedValues) lines.push(`- Repeated value ${repeat.value}: requests ${repeat.requests.join(", ")} (${repeat.classes.join(", ")}), ${repeat.identities} identities`);
+    if (next.maskFailures.length === 0 && next.repeatedValues.length === 0) lines.push("- No mask refusal.");
+  }
+  lines.push("");
+
+  lines.push("## 4. Residual body mismatch", "");
+  if (report.gates === undefined) {
+    lines.push("- Not evaluated.");
+  } else {
+    lines.push(...renderE2BodyLines(report.gates).filter((line) => !line.startsWith("- Next.js version guard") && !line.startsWith("- next dev request-ID")));
+  }
+  lines.push("");
+
+  lines.push("## 5. Response headers", "");
+  const headers = report.gates?.headers;
+  lines.push(headers === undefined ? "- Not evaluated." : headers.agreement ? "- Agreement." : `- ${headers.label}${headers.association === undefined ? "" : ` (label: ${headers.association})`}`);
+  lines.push("");
+
+  lines.push(
+    "## 6. Operational",
+    "",
+    `- Requests: ${report.operational.requests}`,
+    `- By phase: ${Object.entries(report.operational.byPhase).map(([phase, total]) => `${phase} ${total}`).join(", ")}`,
+    `- By class: ${Object.entries(report.operational.byClass).map(([cls, total]) => `${cls} ${total}`).join(", ")}`,
+    ...(report.operational.httpAttempts === undefined
+      ? []
+      : [
+          `- HTTP attempts (readiness included): ${report.operational.httpAttempts.used} of ${report.operational.httpAttempts.limit}; ${Object.entries(report.operational.httpAttempts.byPhase).map(([phase, total]) => `${phase} ${total}`).join(", ")}`,
+        ]),
+    "",
+    ...report.statements.map((statement) => `- ${statement}`),
+  );
+
+  return `${lines.join("\n")}\n`;
+}
+
+/** Read a V-A validation pass. Refuses anything without the marker, including every smoke and full run. */
+export function readValidationRun(runDirectory: string): { manifest: RunManifest; records: MeasurementRecord[] } {
+  const manifest = JSON.parse(readFileSync(join(runDirectory, "manifest.json"), "utf8")) as RunManifest;
+  assertValidationRun(manifest);
+  const records = readFileSync(join(runDirectory, "requests.ndjson"), "utf8")
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line) as MeasurementRecord);
+  return { manifest, records };
+}
+
+/** Whether `inner` is `outer` or lies inside it. Case-insensitive on Windows. */
+function within(inner: string, outer: string, real: (path: string) => string): boolean {
+  const fold = (path: string): string => {
+    let resolved: string;
+    try {
+      resolved = resolve(real(path));
+    } catch {
+      resolved = resolve(path);
+    }
+    return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+  };
+  const rel = relative(fold(outer), fold(inner));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/** Resolves symbolic links and Windows junctions to the final path. */
+const nativeRealpath = (path: string): string => realpathSync.native(path);
+
+/** Problems with a validation output directory, on resolved paths (junctions included); empty when it may be used. */
+export function validationOutputProblems(runDirectory: string, outDirectory: string, real: (path: string) => string = nativeRealpath): string[] {
+  const problems: string[] = [];
+  if (within(outDirectory, runDirectory, real)) problems.push("the validation output directory must not be the run directory or inside it");
+  if (within(runDirectory, outDirectory, real)) problems.push("the validation output directory must not contain the run directory");
+  if (existsSync(outDirectory) && readdirSync(outDirectory).length > 0) problems.push("the validation output directory must be empty");
+  return problems;
+}
+
+/**
+ * Evaluate a V-A pass and write only `validation.json` and `validation.md` to a separate, empty
+ * directory — or, when the evaluation limit is reached, only
+ * `incomplete/partial-validation.json` and `.md`. Nothing is written to the run directory.
+ */
+export function writeE2Validation(runDirectory: string, outDirectory: string, options: ValidationOptions = {}): ValidationReport {
+  const real = options.realpath ?? nativeRealpath;
+  const check = (): void => {
+    const problems = [...validationOutputProblems(runDirectory, outDirectory, real), ...(options.destinationCheck?.() ?? [])];
+    if (problems.length > 0) throw new Error(problems.join("; "));
+  };
+
+  check();
+  const { manifest, records } = readValidationRun(runDirectory);
+  const report = evaluateE2Validation(manifest, records, verifiedBodySource(runDirectory), options);
+  const attempts = readAttemptSummary(runDirectory);
+  const written = attempts === undefined ? report : { ...report, operational: { ...report.operational, httpAttempts: attempts } };
+
+  // Rechecked immediately before writing: the destination may have changed during evaluation.
+  check();
+  const target = report.status === "complete" ? outDirectory : join(outDirectory, "incomplete");
+  const base = report.status === "complete" ? "validation" : "partial-validation";
+
+  mkdirSync(target, { recursive: true });
+  writeFileSync(join(target, `${base}.json`), `${JSON.stringify(written, null, 2)}\n`);
+  writeFileSync(join(target, `${base}.md`), renderE2Validation(written));
+
+  return written;
+}
+
+/** The V-A HTTP attempt trace's summary, when the pass wrote one (`http-attempts.json`). */
+function readAttemptSummary(runDirectory: string): ValidationReport["operational"]["httpAttempts"] {
+  try {
+    const parsed = JSON.parse(readFileSync(join(runDirectory, "http-attempts.json"), "utf8")) as { limit?: unknown; used?: unknown; byPhase?: unknown };
+    if (typeof parsed.limit !== "number" || typeof parsed.used !== "number" || typeof parsed.byPhase !== "object" || parsed.byPhase === null) return undefined;
+    return { limit: parsed.limit, used: parsed.used, byPhase: parsed.byPhase as Record<string, number> };
+  } catch {
+    return undefined;
   }
 }

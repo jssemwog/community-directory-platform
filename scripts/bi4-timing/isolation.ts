@@ -558,6 +558,85 @@ export function parseInspection(result: { readonly code: number | null; readonly
   });
 }
 
+/** One listening TCP endpoint on a port: its local address and owning process. */
+export interface ListeningEntry {
+  readonly localAddress: string;
+  readonly owningProcess: number;
+}
+
+/** `MSFT_NetTCPConnection.State` for a listening socket. */
+const TCP_STATE_LISTEN = 2;
+
+/**
+ * The strict listener lookup's query (V-A only; `listener(port)` is unchanged). Every listening
+ * TCP endpoint on the port, from CIM, which returns an empty set for no match rather than an
+ * error. Errors are terminating (`$ErrorActionPreference = 'Stop'`) and nothing is suppressed, so a
+ * failed query exits nonzero. The `ok: true` envelope separates a genuinely empty result from a
+ * failure.
+ */
+export function listenerLookupScript(port: number): string {
+  if (!Number.isSafeInteger(port) || port <= 0 || port > 65_535) throw new Error(`not a TCP port: ${port}`);
+  return (
+    `$ErrorActionPreference = 'Stop'; ` +
+    `$found = @(Get-CimInstance -Namespace ROOT/StandardCimv2 -ClassName MSFT_NetTCPConnection -Filter 'LocalPort = ${port} AND State = ${TCP_STATE_LISTEN}' | ` +
+    `ForEach-Object { [pscustomobject]@{ localAddress = [string]$_.LocalAddress; localPort = [int]$_.LocalPort; owningProcess = [int]$_.OwningProcess } }); ` +
+    `ConvertTo-Json -InputObject @{ ok = $true; port = ${port}; entries = $found } -Compress -Depth 3`
+  );
+}
+
+/**
+ * Parse the strict lookup's result, or throw `ProcessInspectionError`. Success needs exit code 0,
+ * empty stderr, the `ok: true` envelope for the requested port, and every entry a non-empty local
+ * address, the requested port and a positive integer PID. Only then does an empty array mean the
+ * port is unbound. Several entries are returned as they are; the caller decides.
+ */
+export function parseListenerLookup(port: number, result: { readonly code: number | null; readonly stdout: string; readonly stderr: string }): readonly ListeningEntry[] {
+  if (result.code !== 0) throw new ProcessInspectionError(`the listener lookup for port ${port}: PowerShell exited ${result.code}${result.stderr.trim() === "" ? "" : `: ${result.stderr.trim()}`}`);
+  if (result.stderr.trim() !== "") throw new ProcessInspectionError(`the listener lookup for port ${port}: PowerShell wrote to stderr: ${result.stderr.trim()}`);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result.stdout.trim());
+  } catch {
+    throw new ProcessInspectionError(`the listener lookup for port ${port} is not JSON: ${JSON.stringify(result.stdout.trim().slice(0, 80))}`);
+  }
+
+  const envelope = parsed as { ok?: unknown; port?: unknown; entries?: unknown } | null;
+  if (envelope === null || typeof envelope !== "object" || envelope.ok !== true || envelope.port !== port || !Array.isArray(envelope.entries)) {
+    throw new ProcessInspectionError(`the listener lookup for port ${port} lacks the success envelope`);
+  }
+
+  return envelope.entries.map((entry: unknown) => {
+    const candidate = entry as { localAddress?: unknown; localPort?: unknown; owningProcess?: unknown } | null;
+    if (
+      candidate === null ||
+      typeof candidate !== "object" ||
+      typeof candidate.localAddress !== "string" ||
+      candidate.localAddress === "" ||
+      candidate.localPort !== port ||
+      !Number.isSafeInteger(candidate.owningProcess) ||
+      (candidate.owningProcess as number) <= 0
+    ) {
+      throw new ProcessInspectionError(`the listener lookup for port ${port} returned a malformed entry: ${JSON.stringify(entry)}`);
+    }
+    return { localAddress: candidate.localAddress, owningProcess: candidate.owningProcess as number };
+  });
+}
+
+/** The strict listener lookup for V-A. A failure to run PowerShell is an inspection failure, never "unbound". */
+export function windowsListenerLookup(run: Runner = runFile): (port: number) => Promise<readonly ListeningEntry[]> {
+  return async (port) => {
+    const script = listenerLookupScript(port);
+    let result: Awaited<ReturnType<Runner>>;
+    try {
+      result = await run(POWERSHELL, ["-NoProfile", "-NonInteractive", "-Command", script]);
+    } catch (error) {
+      throw new ProcessInspectionError(`PowerShell could not be run for the listener lookup: ${(error as Error).message}`);
+    }
+    return parseListenerLookup(port, result);
+  };
+}
+
 /** Windows process operations: CIM queries for identity, `taskkill /PID <pid> /F` to stop one. */
 export function windowsProcessOps(run: Runner = runFile): ProcessOps {
   const integer = (value: number): number => {

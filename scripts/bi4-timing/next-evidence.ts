@@ -9,7 +9,9 @@
  * It ties together:
  *
  * - the lockfile read from the **run commit's object** (`git show <commit>:package-lock.json`),
- *   with the worktree's copy read before `npm ci` and required to be byte-identical;
+ *   and the checkout's copy, read **once** before `npm ci`: Git's filtered blob ID of that buffer
+ *   (`hash-object --stdin --path=package-lock.json`) must equal the commit's blob ID, and the same
+ *   bytes must equal the commit's exactly or after CR LF → LF of the copy only (amendment r5 A5-1);
  * - the worktree's `node_modules/next/package.json`, read before `next dev` starts and again after
  *   measuring: the same name, version and manifest bytes (SHA-256) at both reads, and the same
  *   canonical resolved paths for the manifest and the entry script at both reads, each inside the
@@ -42,13 +44,35 @@ export interface LockfileEntry {
   readonly version: string;
 }
 
+/** One `git config --show-origin --get-all` line: where a value comes from, and the value. */
+export interface ConfigValue {
+  readonly origin: string;
+  readonly value: string;
+}
+
+/** The checkout's effective Git settings and attributes for `package-lock.json` (amendment r5 §2.3). Recorded, not interpreted. */
+export interface GitSettingsRecord {
+  readonly autocrlf: readonly ConfigValue[];
+  readonly eol: readonly ConfigValue[];
+  readonly safecrlf: readonly ConfigValue[];
+  /** `git check-attr -a -- package-lock.json`, one line per attribute. */
+  readonly attributes: readonly string[];
+  /** `git ls-files --eol -- package-lock.json`. */
+  readonly lsFilesEol: string;
+}
+
 export interface LockfileEvidence {
   /** `git rev-parse <commit>:package-lock.json`. */
   readonly gitBlobId: string;
   /** SHA-256 of the blob from the run commit's object. */
   readonly commitBlobSha256: string;
-  /** SHA-256 of the worktree's `package-lock.json`, read before `npm ci`. */
+  /** SHA-256 of the checkout's `package-lock.json`, from the one captured read (before `npm ci` in a worktree). */
   readonly worktreeCopySha256: string;
+  /** SHA-256 of the same buffer with every CR LF pair replaced by LF; a standalone CR is unchanged. */
+  readonly worktreeCopyCrlfToLfSha256?: string;
+  /** `git -C <checkout> hash-object --stdin --path=package-lock.json`, fed the same buffer. */
+  readonly worktreeFilteredBlobId?: string;
+  readonly gitSettings?: GitSettingsRecord;
   /** Every `node_modules/next` and `*\/node_modules/next` entry in the commit's blob. */
   readonly entries: readonly LockfileEntry[];
 }
@@ -188,47 +212,115 @@ export function commandLineMatchesLaunch(commandLine: string, launch: Pick<Launc
   );
 }
 
+/** The guard's verdict with the first failed check and a concise reason (amendment r5 A5-2). */
+export interface GuardExplanation {
+  readonly outcome: NextGuardOutcome;
+  /** The first failed check, in the fixed order; `none` when the outcome is `ok`. */
+  readonly check: string;
+  readonly reason: string;
+  /** Which byte match the lockfile passed with, once the lockfile checks have passed. */
+  readonly lockfileByteMatch?: LockfileByteMatch;
+}
+
+export type LockfileByteMatch = "exact" | "crlf-only";
+
+export type CheckoutLockfileResult =
+  | { readonly ok: true; readonly byteMatch: LockfileByteMatch }
+  | { readonly ok: false; readonly outcome: "missing" | "disagreement"; readonly check: string; readonly reason: string };
+
+function settingsComplete(settings: GitSettingsRecord | undefined): settings is GitSettingsRecord {
+  const values = (list: unknown): boolean =>
+    Array.isArray(list) && list.every((entry) => typeof entry?.origin === "string" && typeof entry?.value === "string");
+  return (
+    settings !== undefined &&
+    values(settings.autocrlf) &&
+    values(settings.eol) &&
+    values(settings.safecrlf) &&
+    Array.isArray(settings.attributes) &&
+    settings.attributes.every((line) => typeof line === "string") &&
+    typeof settings.lsFilesEol === "string"
+  );
+}
+
+/** The lockfile fields A5-1 needs, in the fixed order their absence is reported. */
+const LOCKFILE_FIELDS = [
+  "gitBlobId",
+  "commitBlobSha256",
+  "worktreeFilteredBlobId",
+  "worktreeCopySha256",
+  "worktreeCopyCrlfToLfSha256",
+  "gitSettings",
+] as const;
+
+function absentLockfileField(lockfile: LockfileEvidence): string | undefined {
+  for (const field of LOCKFILE_FIELDS) {
+    const present = field === "gitSettings" ? settingsComplete(lockfile.gitSettings) : isString(lockfile[field]);
+    if (!present) return `lockfile.${field}`;
+  }
+  return undefined;
+}
+
 /**
- * The guard (amendment §4.2–4.4). Outcomes are decided in order: `missing`, `disagreement`,
- * `launch-mismatch`, `unreviewed-version`, then `ok`. Any outcome but `ok` withholds.
+ * A5-1 checks 1 and 2 on one checkout's captured lockfile evidence: Git's filtered blob ID must
+ * equal the commit's blob ID, and the captured bytes must equal the commit's bytes exactly or after
+ * CR LF → LF of the captured copy only. Used by the guard, by the checkout preflight and by the
+ * V-A stop before `npm ci`.
  */
-export function evaluateNextVersionGuard(evidence: NextVersionEvidence | undefined, manifestCommit: string): NextGuardOutcome {
-  if (evidence === undefined) return "missing";
+export function checkCheckoutLockfile(lockfile: LockfileEvidence | undefined): CheckoutLockfileResult {
+  if (lockfile === undefined) return { ok: false, outcome: "missing", check: "field-absent:lockfile", reason: "field-absent:lockfile: no lockfile evidence was recorded" };
+
+  const absent = absentLockfileField(lockfile);
+  if (absent !== undefined) return { ok: false, outcome: "missing", check: `field-absent:${absent}`, reason: `field-absent:${absent}: the evidence has no usable ${absent}` };
+
+  if (lockfile.worktreeFilteredBlobId !== lockfile.gitBlobId) {
+    return { ok: false, outcome: "disagreement", check: "lockfile-git-blob", reason: "lockfile-git-blob: Git's filtered blob ID of the captured copy differs from the commit's blob ID" };
+  }
+
+  if (lockfile.worktreeCopySha256 === lockfile.commitBlobSha256) return { ok: true, byteMatch: "exact" };
+  if (lockfile.worktreeCopyCrlfToLfSha256 === lockfile.commitBlobSha256) return { ok: true, byteMatch: "crlf-only" };
+
+  return { ok: false, outcome: "disagreement", check: "lockfile-bytes", reason: "lockfile-bytes: the captured copy matches the commit blob neither exactly nor after CR LF → LF" };
+}
+
+const fail = (outcome: NextGuardOutcome, check: string, detail: string): GuardExplanation => ({ outcome, check, reason: `${check}: ${detail}` });
+
+/**
+ * The guard (amendment r4 §4.2–4.4 as amended by r5) with its first failed check. Checks run in
+ * the fixed A5-2 order; the outcome categories are unchanged and any outcome but `ok` withholds.
+ */
+export function explainNextVersionGuard(evidence: NextVersionEvidence | undefined, manifestCommit: string): GuardExplanation {
+  if (evidence === undefined) return fail("missing", "evidence-absent", "no Next.js version evidence was recorded");
 
   const { runCommit, worktreePath, worktreeHead, lockfile, launch, installedBeforeStart: before, installedAfterMeasured: after } = evidence;
+  const absent = (field: string): GuardExplanation => fail("missing", `field-absent:${field}`, `the evidence has no usable ${field}`);
 
-  if (
-    !isString(runCommit) ||
-    !isString(worktreePath) ||
-    !isString(worktreeHead) ||
-    lockfile === undefined ||
-    !isString(lockfile.gitBlobId) ||
-    !isString(lockfile.commitBlobSha256) ||
-    !isString(lockfile.worktreeCopySha256) ||
-    !Array.isArray(lockfile.entries) ||
-    lockfile.entries.length === 0 ||
-    !launchComplete(launch) ||
-    !readComplete(before) ||
-    !readComplete(after)
-  ) {
-    return "missing";
-  }
+  if (!isString(runCommit)) return absent("runCommit");
+  if (!isString(worktreePath)) return absent("worktreePath");
+  if (!isString(worktreeHead)) return absent("worktreeHead");
+  if (lockfile === undefined) return absent("lockfile");
+  const lockfileAbsent = absentLockfileField(lockfile);
+  if (lockfileAbsent !== undefined) return absent(lockfileAbsent);
+  if (!Array.isArray(lockfile.entries) || lockfile.entries.length === 0) return absent("lockfile.entries");
+  if (!launchComplete(launch)) return absent("launch");
+  if (!readComplete(before)) return absent("installedBeforeStart");
+  if (!readComplete(after)) return absent("installedAfterMeasured");
+
+  if (!COMMIT.test(runCommit) || runCommit !== manifestCommit) return fail("disagreement", "run-commit", "the evidence's run commit is not the manifest's authorized commit");
+  if (worktreeHead !== runCommit) return fail("disagreement", "worktree-head", "the worktree's HEAD is not the run commit");
 
   const entry = lockfile.entries[0] as LockfileEntry;
-
-  if (
-    !COMMIT.test(runCommit) ||
-    runCommit !== worktreeHead ||
-    runCommit !== manifestCommit ||
-    lockfile.commitBlobSha256 !== lockfile.worktreeCopySha256 ||
-    lockfile.entries.length !== 1 ||
-    entry.key !== "node_modules/next" ||
-    entry.version !== before.version ||
-    before.version !== after.version ||
-    before.packageJsonSha256 !== after.packageJsonSha256
-  ) {
-    return "disagreement";
+  if (lockfile.entries.length !== 1 || entry.key !== "node_modules/next") {
+    return fail("disagreement", "lockfile-entries", "the commit's lockfile does not have exactly one node_modules/next entry");
   }
+
+  const lockfileCheck = checkCheckoutLockfile(lockfile);
+  if (!lockfileCheck.ok) return { outcome: lockfileCheck.outcome, check: lockfileCheck.check, reason: lockfileCheck.reason };
+  const byteMatch = lockfileCheck.byteMatch;
+  const withMatch = (explanation: GuardExplanation): GuardExplanation => ({ ...explanation, lockfileByteMatch: byteMatch });
+
+  if (entry.version !== before.version) return withMatch(fail("disagreement", "lockfile-version", "the installed version differs from the commit's lockfile"));
+  if (before.version !== after.version) return withMatch(fail("disagreement", "installed-version-changed", "the installed version changed between the pre-start and post-measurement reads"));
+  if (before.packageJsonSha256 !== after.packageJsonSha256) return withMatch(fail("disagreement", "manifest-hash-changed", "the package manifest's bytes changed between reads"));
 
   const expectedEntry = win32.join(worktreePath, "node_modules", "next", "dist", "bin", "next");
   const pathsInside = (read: InstalledNextRead): boolean => {
@@ -237,27 +329,30 @@ export function evaluateNextVersionGuard(evidence: NextVersionEvidence | undefin
   };
   const live = after.liveIdentity;
 
+  if (canonicalPath(launch.entryPath) !== canonicalPath(expectedEntry)) return withMatch(fail("launch-mismatch", "entry-path", "the launched entry script is not the worktree's next binary"));
+  if (!commandLineMatchesLaunch(launch.commandLine, launch)) return withMatch(fail("launch-mismatch", "command-line", "the observed command line is not exactly the expected next dev arguments"));
+  if (!pathsInside(before) || !pathsInside(after)) return withMatch(fail("launch-mismatch", "paths-contained", "a resolved path lies outside the package or the worktree"));
   if (
-    canonicalPath(launch.entryPath) !== canonicalPath(expectedEntry) ||
-    !commandLineMatchesLaunch(launch.commandLine, launch) ||
-    !pathsInside(before) ||
-    !pathsInside(after) ||
-    // The same resolved manifest and entry script before start and after measuring.
     canonicalPath(before.packageJsonRealPath) !== canonicalPath(after.packageJsonRealPath) ||
-    canonicalPath(before.entryRealPath) !== canonicalPath(after.entryRealPath) ||
-    before.name !== "next" ||
-    after.name !== "next" ||
-    live === undefined ||
-    live.pid !== launch.pid ||
-    live.creationTime !== launch.creationTime ||
-    live.commandLine !== launch.commandLine
+    canonicalPath(before.entryRealPath) !== canonicalPath(after.entryRealPath)
   ) {
-    return "launch-mismatch";
+    return withMatch(fail("launch-mismatch", "paths-stable", "the resolved manifest or entry path changed between reads"));
+  }
+  if (before.name !== "next" || after.name !== "next") return withMatch(fail("launch-mismatch", "package-name", "the package manifest does not name next"));
+  if (live === undefined || live.pid !== launch.pid || live.creationTime !== launch.creationTime || live.commandLine !== launch.commandLine) {
+    return withMatch(fail("launch-mismatch", "live-identity", "the live process after measuring is not the launched process"));
   }
 
-  if (before.version !== REVIEWED_NEXT_VERSION) return "unreviewed-version";
+  if (before.version !== REVIEWED_NEXT_VERSION) {
+    return withMatch(fail("unreviewed-version", "unreviewed-version", `version ${before.version} has not been reviewed; the reviewed version is ${REVIEWED_NEXT_VERSION}`));
+  }
 
-  return "ok";
+  return { outcome: "ok", check: "none", reason: "every guard check passed", lockfileByteMatch: byteMatch };
+}
+
+/** The guard's outcome alone. Any outcome but `ok` withholds. */
+export function evaluateNextVersionGuard(evidence: NextVersionEvidence | undefined, manifestCommit: string): NextGuardOutcome {
+  return explainNextVersionGuard(evidence, manifestCommit).outcome;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -324,6 +419,124 @@ export function readLockfileEvidence(
   } catch {
     return undefined;
   }
+}
+
+/** A Git invocation: arguments, optional standard input, and the exit code with standard output's bytes. */
+export type GitRunner = (args: readonly string[], input?: Buffer) => { readonly code: number; readonly stdout: Buffer };
+
+/** Replace every CR LF pair with LF. A standalone CR, and every other byte, is left unchanged. */
+export function crlfToLf(bytes: Buffer): Buffer {
+  const out = Buffer.alloc(bytes.length);
+  let length = 0;
+
+  for (let i = 0; i < bytes.length; i += 1) {
+    if (bytes[i] === 0x0d && bytes[i + 1] === 0x0a) continue;
+    out[length] = bytes[i] as number;
+    length += 1;
+  }
+
+  return out.subarray(0, length);
+}
+
+function configValues(git: GitRunner, checkout: string, key: string): ConfigValue[] | undefined {
+  const { code, stdout } = git(["-C", checkout, "config", "--show-origin", "--get-all", key]);
+  if (code === 1 && stdout.length === 0) return []; // unset at every scope
+  if (code !== 0) return undefined;
+  return stdout
+    .toString("utf8")
+    .split(/\r?\n/)
+    .filter((line) => line !== "")
+    .map((line) => {
+      const tab = line.indexOf("\t");
+      return tab < 0 ? { origin: "", value: line } : { origin: line.slice(0, tab), value: line.slice(tab + 1) };
+    });
+}
+
+function gitSettingsOf(git: GitRunner, checkout: string): GitSettingsRecord | undefined {
+  const autocrlf = configValues(git, checkout, "core.autocrlf");
+  const eol = configValues(git, checkout, "core.eol");
+  const safecrlf = configValues(git, checkout, "core.safecrlf");
+  const attributes = git(["-C", checkout, "check-attr", "-a", "--", "package-lock.json"]);
+  const lsFiles = git(["-C", checkout, "ls-files", "--eol", "--", "package-lock.json"]);
+
+  if (autocrlf === undefined || eol === undefined || safecrlf === undefined || attributes.code !== 0 || lsFiles.code !== 0) return undefined;
+
+  return {
+    autocrlf,
+    eol,
+    safecrlf,
+    attributes: attributes.stdout.toString("utf8").split(/\r?\n/).filter((line) => line !== ""),
+    lsFilesEol: lsFiles.stdout.toString("utf8").trim(),
+  };
+}
+
+/**
+ * Capture one checkout's lockfile evidence from **one** buffer (amendment r5 §2.3): its raw hash,
+ * its CR LF → LF hash, and Git's filtered blob ID of that same buffer, fed on standard input to
+ * `git -C <checkout> hash-object --stdin --path=package-lock.json`. Also records the checkout's
+ * settings and attributes. A failed Git call leaves its field absent; nothing throws.
+ */
+export function captureLockfile(
+  checkout: string,
+  buffer: Buffer,
+  git: GitRunner,
+): Pick<LockfileEvidence, "worktreeCopySha256" | "worktreeCopyCrlfToLfSha256" | "worktreeFilteredBlobId" | "gitSettings"> {
+  const safe = <T>(read: () => T | undefined): T | undefined => {
+    try {
+      return read();
+    } catch {
+      return undefined;
+    }
+  };
+  const filtered = safe(() => {
+    const result = git(["-C", checkout, "hash-object", "--stdin", "--path=package-lock.json"], buffer);
+    const id = result.stdout.toString("utf8").trim();
+    return result.code === 0 && /^[0-9a-f]{40,64}$/.test(id) ? id : undefined;
+  });
+  const settings = safe(() => gitSettingsOf(git, checkout));
+
+  return {
+    worktreeCopySha256: sha256Hex(buffer),
+    worktreeCopyCrlfToLfSha256: sha256Hex(crlfToLf(buffer)),
+    ...(filtered === undefined ? {} : { worktreeFilteredBlobId: filtered }),
+    ...(settings === undefined ? {} : { gitSettings: settings }),
+  };
+}
+
+/**
+ * The full lockfile evidence for one checkout: the commit side from the run commit's object, and
+ * the checkout side captured from **one** read of `<checkout>\package-lock.json`. `undefined`
+ * when the commit side or the read fails; absent fields otherwise.
+ */
+export function collectLockfileEvidence(input: {
+  readonly commit: string;
+  readonly repositoryRoot: string;
+  readonly checkout: string;
+  readonly readFile: (path: string) => Buffer;
+  readonly git: GitRunner;
+}): LockfileEvidence | undefined {
+  let buffer: Buffer;
+  try {
+    buffer = input.readFile(win32.join(input.checkout, "package-lock.json"));
+  } catch {
+    return undefined;
+  }
+
+  const ok = (args: readonly string[]): Buffer => {
+    const result = input.git(args);
+    if (result.code !== 0) throw new Error(`git ${args.join(" ")} exited ${result.code}`);
+    return result.stdout;
+  };
+  const commitSide = readLockfileEvidence(
+    input.commit,
+    {
+      show: (spec) => ok(["-C", input.repositoryRoot, "show", spec]),
+      blobId: (spec) => ok(["-C", input.repositoryRoot, "rev-parse", spec]).toString("utf8"),
+    },
+    () => buffer,
+  );
+
+  return commitSide === undefined ? undefined : { ...commitSide, ...captureLockfile(input.checkout, buffer, input.git) };
 }
 
 /** The live identity's comparable fields, or `undefined` when absent or unverifiable. */
