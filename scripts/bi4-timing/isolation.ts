@@ -886,7 +886,16 @@ export interface TeardownSeams {
   /** Lists a recorded cluster parent; used only to confirm it is empty before removing it. */
   readonly listDirectory?: (path: string) => readonly string[] | undefined;
   readonly removeEmptyDirectory?: (path: string) => boolean;
+  /** Waits between process-exit polls and between worktree removal attempts. */
+  readonly sleep?: (ms: number) => Promise<void>;
 }
+
+/** Process-exit confirmation before a worktree is removed: polls, and the pause between them. */
+export const PROCESS_EXIT_POLLS = 60;
+export const PROCESS_EXIT_POLL_MS = 500;
+/** `git worktree remove` attempts per worktree, and the pause before each retry. */
+export const WORKTREE_REMOVE_ATTEMPTS = 5;
+export const WORKTREE_RETRY_DELAY_MS = 3_000;
 
 export interface TeardownReport {
   readonly stopped: readonly number[];
@@ -989,6 +998,7 @@ export async function teardown(seams: TeardownSeams): Promise<TeardownReport> {
   const removeDirectory = seams.removeDirectory ?? (async (path: string) => (await removeOwnedRoot(path)).removed);
   const listDirectory = seams.listDirectory ?? directoryEntries;
   const removeEmpty = seams.removeEmptyDirectory ?? removeEmptyDirectory;
+  const sleep = seams.sleep ?? ((ms: number) => new Promise<void>((resume) => setTimeout(resume, ms)));
   /** Remove the run's cluster parent once nothing is left in it; never search or recurse inside it. */
   const settleClusterParent = (entry: ResourceEntry, settledRoot: "removed" | "absent", rootReason?: string): void => {
     const parent = entry.parent as string;
@@ -1022,7 +1032,131 @@ export async function teardown(seams: TeardownSeams): Promise<TeardownReport> {
     ...open.filter((entry) => entry.kind === "harness-root").sort((a, b) => b.id - a.id),
     ...(seams.includeClusters ? open.filter((entry) => entry.kind === "cluster").sort((a, b) => b.id - a.id) : []),
   ];
-  const leftWorktreeRoots = new Set<string>();
+  /**
+   * Confirm every recorded process has exited, polling within the allowance. Returns `undefined`
+   * when every one is confirmed gone, or the reason it could not be confirmed. A process that is
+   * unresolved, has no recorded identity, or cannot be inspected is never taken as exited.
+   */
+  const ownedProcessesExited = async (): Promise<string | undefined> => {
+    for (let poll = 1; ; poll += 1) {
+      const pending: string[] = [];
+
+      for (const owned of log.entries().filter((candidate) => candidate.kind === "process")) {
+        if (owned.identity === undefined) {
+          if (owned.pid !== undefined) return `process entry ${owned.id} (${owned.label}) has no recorded identity, so its exit cannot be confirmed`;
+          continue;
+        }
+        if (owned.state === "left") return `process entry ${owned.id} (${owned.label}) is unresolved`;
+
+        let live: ProcessIdentity | undefined;
+        try {
+          live = await seams.processes.inspect(owned.identity.pid);
+        } catch (error) {
+          if (error instanceof ProcessInspectionError) return `the exit of process entry ${owned.id} (${owned.label}) could not be confirmed: ${error.message}`;
+          throw error;
+        }
+        if (checkProcessIdentity(owned.identity, live).status !== "absent") pending.push(`${owned.id} (${owned.label}, pid ${owned.identity.pid})`);
+      }
+
+      if (pending.length === 0) return undefined;
+      if (poll >= PROCESS_EXIT_POLLS || now() + PROCESS_EXIT_POLL_MS > seams.deadline) {
+        return `owned processes not confirmed exited: ${pending.join(", ")}`;
+      }
+      await sleep(PROCESS_EXIT_POLL_MS);
+    }
+  };
+
+  /** §9.2 for the recorded worktree: path, commit and Git registration. A failed inspection is a result, never absence. */
+  const inspectWorktree = async (entry: ResourceEntry): Promise<WorktreeCheck | { readonly status: "inspection-failed"; readonly reason: string }> => {
+    try {
+      return checkWorktree(entry, await seams.git.worktreeList(), {
+        directoryExists: exists,
+        readGitFile,
+        adminRecordExists: (name) => exists(join(seams.repositoryGitDirectory, "worktrees", name)),
+        ...(seams.realpath === undefined ? {} : { realpath: seams.realpath }),
+      });
+    } catch (error) {
+      return { status: "inspection-failed", reason: `the worktree could not be inspected: ${(error as Error).message}` };
+    }
+  };
+
+  /**
+   * Remove the recorded worktree with `git worktree remove --force` only — never a recursive
+   * delete, never `prune`. Owned processes must be confirmed exited first. A failed removal is
+   * retried, a bounded number of times within the allowance, and the path, commit and Git
+   * registration are rechecked before each retry. Only when both the directory and the Git
+   * registration are confirmed gone is it settled, with the original error kept. Anything else
+   * (one of them gone, a mismatch, a failed inspection) is left unresolved, with what remains
+   * preserved.
+   */
+  const tearDownWorktree = async (entry: ResourceEntry): Promise<void> => {
+    const blocked = await ownedProcessesExited();
+    if (blocked !== undefined) {
+      leave(entry, `worktree not removed: ${blocked}`);
+      return;
+    }
+
+    const errors: string[] = [];
+    const failures = (): string =>
+      errors.length === 0 ? "" : `git worktree remove failed ${errors.length} time(s) (first: ${errors[0]}${errors.length > 1 ? `; last: ${errors.at(-1)}` : ""})`;
+    const settleGone = (wasRemovedHere: boolean, reason: string): void => {
+      if (errors.length === 0 && !wasRemovedHere) settle(entry, "absent", reason);
+      else settle(entry, "removed", errors.length === 0 ? undefined : `${failures()}; the directory and its Git registration were then both confirmed gone`);
+    };
+    const leaveUnresolved = (reason: string): void => leave(entry, errors.length === 0 ? reason : `${failures()}; ${reason}; what remains is preserved`);
+
+    for (let attempt = 1; ; attempt += 1) {
+      const before = await inspectWorktree(entry);
+      if (before.status === "absent") {
+        settleGone(false, before.reason);
+        return;
+      }
+      if (before.status !== "verified") {
+        leaveUnresolved(before.reason);
+        return;
+      }
+
+      // The deadline is rechecked immediately before every removal command, including the first:
+      // process-exit polling and inspection take time, and no new command starts once the
+      // allowance has expired. A command already started may still finish after the deadline.
+      if (now() > seams.deadline) {
+        allowanceExhausted = true;
+        leaveUnresolved(`teardown allowance exhausted before git worktree remove attempt ${attempt}; no removal command was started`);
+        return;
+      }
+
+      try {
+        await seams.git.removeWorktree(entry.path as string);
+      } catch (error) {
+        errors.push((error as Error).message);
+        log.note(`worktree entry ${entry.id}: git worktree remove attempt ${attempt} failed: ${(error as Error).message}`);
+        if (attempt >= WORKTREE_REMOVE_ATTEMPTS || now() + WORKTREE_RETRY_DELAY_MS > seams.deadline) {
+          const after = await inspectWorktree(entry);
+          if (after.status === "absent") settleGone(true, after.reason);
+          else leaveUnresolved(after.status === "verified" ? "the worktree is still in place" : after.reason);
+          return;
+        }
+        await sleep(WORKTREE_RETRY_DELAY_MS);
+        continue;
+      }
+
+      const after = await inspectWorktree(entry);
+      if (after.status === "absent") settleGone(true, after.reason);
+      else leaveUnresolved(`git worktree remove returned, but ${after.status === "verified" ? "the worktree is still in place" : after.reason}`);
+      return;
+    }
+  };
+
+  /** Recorded resources inside a harness root that are not settled; the root is kept while any exist. */
+  const unresolvedInside = (root: ResourceEntry): readonly ResourceEntry[] =>
+    log
+      .entries()
+      .filter(
+        (other) =>
+          other.id !== root.id &&
+          !SETTLED.includes(other.state) &&
+          [other.path, other.clusterDirectory, other.parent].some((path) => path !== undefined && isWithin(path, root.path as string, seams.realpath)),
+      );
 
   for (const entry of ordered) {
     if (now() > seams.deadline) {
@@ -1055,26 +1189,13 @@ export async function teardown(seams: TeardownSeams): Promise<TeardownReport> {
           settle(entry, "stopped");
         }
       } else if (entry.kind === "worktree") {
-        const check = checkWorktree(entry, await seams.git.worktreeList(), {
-          directoryExists: exists,
-          readGitFile,
-          adminRecordExists: (name) => exists(join(seams.repositoryGitDirectory, "worktrees", name)),
-          ...(seams.realpath === undefined ? {} : { realpath: seams.realpath }),
-        });
-
-        if (check.status === "verified") {
-          await seams.git.removeWorktree(entry.path as string);
-          settle(entry, "removed");
-        } else if (check.status === "absent") settle(entry, "absent", check.reason);
-        else {
-          leave(entry, check.reason);
-          if (entry.path !== undefined) leftWorktreeRoots.add(canonical(dirname(entry.path), seams.realpath));
-        }
+        await tearDownWorktree(entry);
       } else if (entry.kind === "harness-root") {
+        const inside = entry.path === undefined ? [] : unresolvedInside(entry);
         if (entry.path === undefined || !isHarnessRoot(entry.path, seams.tempDirectory, seams.realpath)) {
           leave(entry, "not a harness-owned root inside the temp directory");
-        } else if (leftWorktreeRoots.has(canonical(entry.path, seams.realpath))) {
-          leave(entry, "its worktree was left in place, so the root is kept with it");
+        } else if (inside.length > 0) {
+          leave(entry, `root preserved: it holds unresolved recorded resource(s) ${inside.map((other) => `${other.id} (${other.kind} ${other.label})`).join(", ")}`);
         } else if (!exists(entry.path)) settle(entry, "absent", "already gone");
         else if (await removeDirectory(entry.path)) settle(entry, "removed");
         else leave(entry, "the root could not be removed within the removal bound");

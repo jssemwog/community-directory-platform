@@ -84,6 +84,23 @@ rules (`H-D16`).
   unrecorded process is reported, never stopped. Only the recorded worktree is removed, with
   `git worktree remove --force <recorded path>`. **`git worktree prune` is never run**; a stale
   worktree record is reported for an owner ruling.
+- **Worktree removal is gated, retried and never forced by deletion.** The worktree is removed
+  only after every recorded process is confirmed exited. That check polls within the teardown
+  allowance; a process that is unresolved, lacks an identity or cannot be inspected blocks
+  removal. A failed `git worktree remove` is retried up to 5 times within the allowance, and
+  the recorded path, commit and Git registration are rechecked before each retry. The worktree
+  is settled only when the directory **and** its Git registration are both confirmed gone; the
+  original error is kept in the log and the entry's reason. If only one is gone, or the
+  inspection fails, the worktree is reported unresolved and what remains is preserved. A failed
+  removal never falls back to a recursive delete. The teardown deadline is rechecked immediately
+  before every `git worktree remove`, including the first. Once the allowance has expired, no new
+  command starts: the worktree is reported unresolved and its root is preserved. The deadline is
+  not a hard stop for a command already running. One started just before it may finish after it,
+  and its result is still recorded.
+- **A harness root is kept while anything recorded inside it is unresolved.** The root is
+  removed only when no recorded resource inside it is left or still open. (The first E2 smoke on
+  `c15d228` showed the old gap: the worktree removal failed with "Permission denied" and was
+  left, but its root was then recursively removed.)
 - **Timeouts:** a phase that reaches its ceiling is aborted; teardown then has its own 3-minute
   allowance. If teardown is still running when that ends, the harness stops trying, records what
   was left, marks the run Invalid (timeout, cleanup incomplete) and prints the exact `cleanup`
