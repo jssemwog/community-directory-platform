@@ -48,6 +48,7 @@ node --experimental-transform-types --import ./scripts/local-demo/register.mjs s
 | `smoke --boundary e1\|e2 …` | Three operational passes (§5): S-A normal, S-B simulated SIGINT after the 10th measured request, S-C forced termination of the harness alone, while it is held at its post-10th-request checkpoint, followed by recovery `cleanup` and a second, no-op `cleanup`. Caps: 200 requests / 10 min (E1), 250 / 30 min (E2). Each pass is checked against its expected outcome; a later pass starts only if the earlier one passed and no cap was reached. Writes `smoke-report.json` after every pass and on failure, with the §5.5 runtime projection from a passed S-A. Exits 0 only if all three passed |
 | `e1 --replicate 1\|2 …` / `e2 --replicate 1\|2 …` | One full replicate: 29,040 (E1) or 38,730 (E2) requests, under a 20- or 75-minute ceiling |
 | `analyze --run <run> --out <dir>` | Statistics, gates and report for one full replicate. Refuses smoke data. 45-minute **cooperative** deadline, checked inside each comparison's loops (not a hard ceiling; see Known limits). When a check finds it passed, `analyze` exits 1 and writes only `incomplete/partial-report.{json,md}`, never `report.json`/`report.md` |
+| `validate-e2 --out <dir> --validation-out <dir> …` | One validation-only E2 pass (V-A), not a smoke run, evaluated by the shared E2 gates; see "Validation pass V-A" below |
 | `cleanup --run <run>` | Replays `run-state.json` and applies the ownership checks to every resource left behind |
 
 Smoke results are **operational checks only**: no timing statistic, comparison, lead or finding.
@@ -133,8 +134,14 @@ exactly. **This is an exploratory local rule.** It does not establish independen
 state, stream-chunk equivalence or anything about production timing, and all-unique values do not
 establish independence from listing state. No other field is masked.
 
-**The Next.js version guard.** The run records the lockfile from the run commit's object (with the
-worktree's copy, read before `npm ci`, required to match), the worktree's
+**The Next.js version guard.** The run records the lockfile from the run commit's object, and the
+worktree's copy, read **once** before `npm ci` (amendment revision 5, A5-1). That one buffer feeds
+both checks: Git's filtered blob ID of it (`git -C <worktree> hash-object --stdin
+--path=package-lock.json`) must equal the commit's blob ID, and its bytes must equal the commit's
+exactly or after CR LF → LF of the copy only (a standalone CR is never removed, and the commit's
+bytes are never changed). The raw hashes, both blob IDs and the worktree's `core.autocrlf`,
+`core.eol`, `core.safecrlf`, `check-attr` and `ls-files --eol` for `package-lock.json` are
+recorded. It also records the worktree's
 `node_modules/next/package.json` before `next dev` starts and again after measuring, and the
 launched process's entry script, observed command line and live identity. Both reads must give
 the same name, version and manifest SHA-256, and the same canonical resolved paths for the
@@ -143,7 +150,9 @@ command line must parse into exactly the expected arguments: the Node executable
 script, `dev`, `--hostname`, `127.0.0.1`, `--port` and the port. Normal Windows quoting of the two
 paths is accepted, including paths with spaces; malformed quoting, changed, extra or reordered
 arguments, and ambiguous paths withhold. Missing or mismatched evidence, or any version other than
-the reviewed `16.3.3`, withholds ("Withheld — Next.js version guard, pending review"). The
+the reviewed `16.3.3`, withholds ("Withheld — Next.js version guard, pending review"). Each
+outcome carries the first failed check, in a fixed order, and a one-line reason that names it
+(A5-2); the reason never changes the outcome. The
 Next.js version guard is evidence of the pinned version, the package manifest and that
 manifest's link to the launched executable. It does not verify every installed file: the entry
 script's bytes and every installed file other than the manifest are not hashed, so a content
@@ -161,6 +170,83 @@ bodies, before the request-ID mask, whenever they differ, and never establishes 
 withholding. Raw headers are kept for every request; raw bodies are rebuilt exactly from the
 stored masked bodies and recorded offsets and checked against their raw hashes. A stored body that
 is absent or does not match its hash counts as a failed mask.
+
+## Validation pass V-A (`validate-e2`)
+
+Amendment revision 5, A5-3 and A5-4. **Validation only, not a smoke run.** It needs its own
+authorization (`H-D10`), like every run.
+
+- **One pass** of the E2 smoke schedule (73 requests; measured `next` responses are 5 each of NE,
+  NC-A, NC-B, PE, RJ, UP and MF), with its own cluster, worktree and `npm ci`. It never starts S-B
+  or S-C, produces no smoke verdict and no §5.5 projection, and changes no recorded verdict or the
+  S-C criteria.
+- **Marked, not relabelled.** Its manifest has `mode: "smoke"`, `validation: "e2-evidence"` and no
+  pass label, so `analyze` still refuses it.
+- **Order.** Output separation and preflight (the main tree's lockfile through the same
+  one-buffer checks, real-path forms of `%TEMP%` and Node, no `cdp-bi4-*` entry, only the main
+  worktree, the usual refusals) → cluster, fixtures, stored states → worktree and **its** lockfile
+  check, stopping before `npm ci` and `next dev` on failure with owned-resource teardown
+  (`Invalid (validation stop): worktree lockfile <check>`) → `npm ci` and the pre-start manifest
+  read → `next dev` and the launch identity → the schedule → the post-measurement read, only if
+  every measured request completed → **stored states verified while the database is still up** →
+  teardown → restricted-file metadata and zero residue → evaluation. Smoke and full runs keep their
+  existing order (teardown, then stored-state verification).
+- **Output directories.** `--out` and `--validation-out` both follow the existing rules (absolute,
+  existing, empty, outside the repository and outside the system temp directory), and neither may
+  equal, contain or sit inside the other on resolved paths, Windows junctions and links included.
+  This is checked before anything is created or written; a bad directory refuses with exit 2 and
+  writes nothing, not even `preflight-stop.*`. Immediately before **every** report write
+  (`preflight-stop.*`, `validation.*` or `incomplete/partial-validation.*`), the full destination
+  policy runs again: both paths must resolve, and the destination must still be empty, outside
+  the repository and the system temp directory, and separate from `--out`, all on resolved paths.
+  Any failure means no report is written.
+- **Limits.** The **80-attempt HTTP budget is hard and shared**: every HTTP attempt counts —
+  readiness polling of both servers (failures included) and every planned request (failures
+  included) — and the budget is checked before each send. When it is spent, nothing more is sent
+  (`Invalid (validation cap)`). Every attempt is traced in `<out>\http-attempts.json`, and the
+  report gives the count by phase and server. The plan itself is 73 requests, so readiness probes
+  for both servers share 7 attempts.
+- **Listener checked before every probe.** V-A uses a strict listener lookup
+  (`windowsListenerLookup`: a CIM query on `MSFT_NetTCPConnection` with terminating errors and a
+  success envelope), which returns every listening entry on the port with its local address and
+  owning PID. A successful empty result means unbound; a failed or malformed lookup is an
+  inspection error and can never read as unbound. (The existing `listener(port)` used by teardown
+  and recovery is unchanged.) Before **every** readiness HTTP attempt, retries included, and again
+  for **both** servers immediately before the scheduled traffic, the port must have exactly one
+  listening entry, bound to `127.0.0.1`, owned by the recorded server process or one of its
+  descendants, and the recorded process must still have its recorded creation time. An unbound
+  port is waited for, with no HTTP, only within that server's readiness bound (at handoff, unbound
+  is refused). A failed lookup, several entries, a wrong address, a foreign owner or a gone or
+  replaced server stops the pass before anything is sent (`Invalid (validation stop): <server>
+  listener …`), and owned-resource teardown runs. Probes that fail, and their retries, are charged
+  to the budget. The **20-minute**
+  pass limit, the existing **3-minute** teardown allowance and the **5-minute** evaluation limit
+  are **cooperative**: checked between steps and in loops, never enforced from outside, and no
+  limit kills the process. A step in progress runs to its end, so the pass limit can be overrun by
+  `git worktree add`, synchronous `git` calls, `npm ci`, cluster start-up, migrations and fixture
+  loading, or an in-flight request up to its timeout; the teardown allowance by one stop, CIM
+  inspection, `git worktree remove` or directory removal; the evaluation limit by one body read or
+  report write.
+- **Evaluation** uses the same `evaluateE2Evidence` as `analyze`, plus the E2 validity checks and
+  the run's Invalid reasons, and writes only to `--validation-out` (which must not be, contain or
+  sit inside `--out`). It computes no timing statistic. The report keeps independent Invalid
+  conditions (listed first, and first in the interpretation line), the version-guard refusal, the
+  mask refusal and any residual body mismatch in separate sections, then headers and operational
+  counts.
+- **The gate result is the first line** of `validation.md` and is printed on exit: "Gate result:
+  WITHHELD — <labels>", "Gate result: agreement" or "Gate result: not established". A clean exit
+  can carry WITHHELD. Exit 0 needs a clean pass, zero residue and a complete report with **no
+  Invalid reason**, including one only the evaluation finds (the gate result and the Invalid
+  interpretation are both printed); a refusal is exit 2, anything else exit 1.
+- **Incomplete evaluation** writes only `incomplete/partial-validation.{json,md}`, headed
+  "INCOMPLETE — gate result not established", and exits 1.
+- **Historical residue (A5-4) is a separate prerequisite.** Before an authorized V-A, a fresh
+  read-only check against the second smoke's three intent logs must find none of their recorded
+  paths, processes or worktree registrations still present. `validate-e2` does not perform that
+  check: its own preflight looks only at the current temp directory and worktree list, and its
+  residue check covers only the new pass's intent log, so neither can stand in for the historical
+  one. The second smoke's S-C stays Not exercised, and recovery of a surviving postmaster remains
+  a separate decision.
 
 ## Known limits
 

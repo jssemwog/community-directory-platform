@@ -13,9 +13,10 @@
  */
 
 import { execFileSync, spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, writeFileSync, writeSync } from "node:fs";
 import { cpus, platform, release, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import * as http from "node:http";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { randomBytes } from "node:crypto";
 
@@ -28,7 +29,18 @@ import {
   type EmbeddedCluster,
 } from "../../src/data/testing/embedded-cluster";
 import { createListingPersistence } from "../../src/data/connection";
-import { DEFAULT_ANALYSIS, medianOf, writeAnalysis, type MeasurementRecord, type RunManifest } from "./analyze";
+import {
+  DEFAULT_ANALYSIS,
+  medianOf,
+  VALIDATION_EVALUATION_MINUTES,
+  VALIDATION_MARKER,
+  writeAnalysis,
+  writeE2Validation,
+  type MeasurementRecord,
+  type RunManifest,
+  type ValidationOptions,
+  type ValidationReport,
+} from "./analyze";
 import { loadFixtures, prepareStorage, storageSizes, verifyStoredStates } from "./fixtures";
 import {
   adminRecordOf,
@@ -44,11 +56,14 @@ import {
   directoryEntries,
   driveSmoke,
   forcedPass,
+  HARNESS_ROOT_PREFIX,
+  windowsListenerLookup,
   holdAtCheckpoint,
   helperClusterOps,
   installAbortOnSignals,
   IntentLog,
   isHarnessRoot,
+  isWithin,
   locateClusterRoot,
   measuredCheckpoint,
   outputDirectoryProblems,
@@ -73,11 +88,21 @@ import {
   type InProcessPassReport,
   type ReadyMarker,
   type RestrictedMetadata,
+  type ListeningEntry,
+  type ProcessOps,
   type TeardownReport,
 } from "./isolation";
-import { liveIdentityOf, readInstalledNext, readLockfileEvidence, type NextVersionEvidence } from "./next-evidence";
+import {
+  checkCheckoutLockfile,
+  collectLockfileEvidence,
+  liveIdentityOf,
+  readInstalledNext,
+  type GitRunner,
+  type LockfileEvidence,
+  type NextVersionEvidence,
+} from "./next-evidence";
 import { runOperation } from "./run-operation";
-import { runHttp, waitReady } from "./run-http";
+import { pathFor, runHttp, sendOne, waitReady, type Exchange } from "./run-http";
 import {
   buildPlan,
   countsOf,
@@ -102,18 +127,25 @@ export const USAGE = `BI-4 timing pilot harness (issue #246). Every run needs it
   smoke   --boundary e1|e2 --out <abs dir> --seed <s> --delays-ns <a,b,c> --background <n> --commit <sha>
   e1      --replicate 1|2  --out <abs dir> --seed <s> --delays-ns <a,b,c> --background <n> --commit <sha>
   e2      --replicate 1|2  --out <abs dir> --seed <s> --delays-ns <a,b,c> --background <n> --commit <sha>
+  validate-e2 --out <abs dir> --validation-out <abs dir> --seed <s> --delays-ns <a,b,c> --background <n> --commit <sha>
   analyze --run <run dir> --out <abs dir>
   cleanup --run <run dir>
   --help
 
 No input has a default. The output directory must be absolute, existing, empty, outside the
 repository and outside the system temp directory. Exactly three distinct calibration delays, in
-nanoseconds. Results are exploratory or diagnostic; no threshold or verdict is applied.`;
+nanoseconds. Results are exploratory or diagnostic; no threshold or verdict is applied.
+
+validate-e2 is validation only, not a smoke run: one E2 pass of the smoke schedule (80-request
+cap; cooperative limits of 20 min for the pass, 3 for teardown, 5 for evaluation), evaluated by the
+shared E2 gates into --validation-out. It computes no timing statistic, starts no S-B or S-C, and
+changes no smoke verdict. analyze refuses its output.`;
 
 const FLAGS: Readonly<Record<string, readonly string[]>> = {
   smoke: ["--boundary", "--out", "--seed", "--delays-ns", "--background", "--commit"],
   e1: ["--replicate", "--out", "--seed", "--delays-ns", "--background", "--commit", "--smoke-pass", "--request-cap", "--deadline"],
   e2: ["--replicate", "--out", "--seed", "--delays-ns", "--background", "--commit", "--smoke-pass", "--request-cap", "--deadline"],
+  "validate-e2": ["--out", "--validation-out", "--seed", "--delays-ns", "--background", "--commit"],
   analyze: ["--run", "--out"],
   cleanup: ["--run"],
 };
@@ -193,10 +225,12 @@ async function environmentManifest(): Promise<Record<string, unknown>> {
   };
 }
 
-interface BoundaryOptions {
+export interface BoundaryOptions {
   readonly boundary: Boundary;
   readonly mode: Mode;
   readonly pass?: "S-A" | "S-B" | "S-C";
+  /** Only on a V-A validation pass (amendment r5 A5-3); such a pass has no smoke pass label. */
+  readonly validation?: typeof VALIDATION_MARKER;
   readonly replicate?: number;
   readonly out: string;
   readonly seed: string;
@@ -206,6 +240,346 @@ interface BoundaryOptions {
   readonly requestCap: number;
   /** Absolute time (ms) at which the phase ceiling or smoke cap aborts the run. */
   readonly deadline: number;
+}
+
+/** V-A limits (amendment r5 A5-3). The request cap is hard; the pass time limit is cooperative. */
+export const VALIDATION_REQUEST_CAP = 80;
+export const VALIDATION_PASS_MINUTES = 20;
+
+/** The options of a V-A validation pass: the E2 smoke schedule, no pass label, the marker and the V-A limits. */
+export function validationOptions(flags: Readonly<Record<string, string>>, now: number): BoundaryOptions {
+  return {
+    boundary: "e2",
+    mode: "smoke",
+    validation: VALIDATION_MARKER,
+    out: flags["--out"] as string,
+    seed: flags["--seed"] as string,
+    delaysNs: delaysOf(flags["--delays-ns"] as string),
+    background: backgroundOf(flags["--background"] as string),
+    commit: flags["--commit"] as string,
+    requestCap: VALIDATION_REQUEST_CAP,
+    deadline: now + VALIDATION_PASS_MINUTES * MINUTE,
+  };
+}
+
+/** The run manifest as first written. `invalid` is the run's own array, which later steps extend. */
+export function initialManifest(
+  options: BoundaryOptions,
+  plan: Pick<ReturnType<typeof buildPlan>, "delaysNs" | "background" | "identities">,
+  startedAt: Date,
+  environment: Readonly<Record<string, unknown>>,
+  invalid: readonly string[],
+): RunManifest {
+  return {
+    mode: options.mode,
+    boundary: options.boundary,
+    ...(options.pass === undefined ? {} : { pass: options.pass }),
+    ...(options.replicate === undefined ? {} : { replicate: options.replicate }),
+    seed: options.seed,
+    delaysNs: plan.delaysNs,
+    backgroundCount: plan.background.length,
+    commit: options.commit,
+    identities: plan.identities,
+    startedAt: startedAt.toISOString(),
+    environment,
+    invalid,
+    ...(options.validation === undefined ? {} : { validation: options.validation }),
+  };
+}
+
+/** A V-A stop inside the run: owned-resource teardown still runs, and the message is recorded as given. */
+export class ValidationStop extends Error {}
+
+/** Where a V-A pass writes its HTTP attempt trace, inside `--out`. */
+export const VALIDATION_ATTEMPTS_FILE = "http-attempts.json";
+
+/** V-A readiness polling interval, as `waitReady` uses for every other run. */
+export const VALIDATION_READINESS_POLL_MS = 500;
+
+export interface HttpAttempt {
+  readonly attempt: number;
+  readonly phase: "readiness" | "plan";
+  readonly target: "next" | "calibration";
+  readonly path: string;
+  /** `status <code>`, or the transport error's message. */
+  readonly outcome: string;
+}
+
+/**
+ * One shared V-A HTTP attempt budget (amendment r5 A5-3): readiness attempts for both servers,
+ * failed ones included, and every planned request all count. Callers check `remaining()` before
+ * each send; `trace` records each attempt once it has an outcome.
+ */
+export interface AttemptBudget {
+  readonly limit: number;
+  remaining(): number;
+  trace(phase: HttpAttempt["phase"], target: HttpAttempt["target"], path: string, outcome: string): void;
+  summary(): { readonly limit: number; readonly used: number; readonly byPhase: Readonly<Record<string, number>>; readonly attempts: readonly HttpAttempt[] };
+}
+
+export function createAttemptBudget(limit: number): AttemptBudget {
+  const attempts: HttpAttempt[] = [];
+  return {
+    limit,
+    remaining: () => Math.max(0, limit - attempts.length),
+    trace: (phase, target, path, outcome) => {
+      attempts.push({ attempt: attempts.length + 1, phase, target, path, outcome });
+    },
+    summary: () => {
+      const byPhase: Record<string, number> = {};
+      for (const attempt of attempts) byPhase[`${attempt.phase}:${attempt.target}`] = (byPhase[`${attempt.phase}:${attempt.target}`] ?? 0) + 1;
+      return { limit, used: attempts.length, byPhase, attempts: [...attempts] };
+    },
+  };
+}
+
+/** The recorded server process a V-A listener must belong to. */
+export interface OwnedServer {
+  readonly pid: number;
+  readonly creationTime: string;
+}
+
+/** The only address a V-A listener may be bound to. */
+export const VALIDATION_LOOPBACK = "127.0.0.1";
+
+/** The inspections a V-A listener check uses: the strict listener lookup, and process identity. */
+export interface ListenerInspections {
+  /** Every listening entry on the port (`windowsListenerLookup`); throws on a failed or malformed lookup. */
+  readonly lookup: (port: number) => Promise<readonly ListeningEntry[]>;
+  readonly processes: Pick<ProcessOps, "children" | "inspect">;
+}
+
+export interface ListenerCheck {
+  readonly target: HttpAttempt["target"];
+  readonly port: number;
+  readonly server: OwnedServer;
+  readonly inspections: ListenerInspections;
+}
+
+/**
+ * One V-A listener check, with no HTTP. A successful empty lookup is `"unbound"`. Otherwise the
+ * port must have exactly one listening entry, bound to `127.0.0.1`, owned by the recorded server
+ * process or a descendant found by walking its children, and the recorded process must still have
+ * its recorded creation time. A failed lookup, several entries, a wrong address, a foreign owner, a
+ * replaced server or a failed ownership inspection throws a `ValidationStop` before anything is sent.
+ */
+export async function checkOwnedListener(input: ListenerCheck): Promise<"unbound" | number> {
+  const stop = (detail: string): ValidationStop => new ValidationStop(`Invalid (validation stop): ${input.target} listener ${detail}`);
+  const attempt = async <T>(what: string, read: () => Promise<T>): Promise<T> => {
+    try {
+      return await read();
+    } catch (error) {
+      throw stop(`${what} failed: ${(error as Error).message}`);
+    }
+  };
+
+  const entries = await attempt("lookup", () => input.inspections.lookup(input.port));
+  if (entries.length === 0) return "unbound";
+  if (entries.length > 1) {
+    throw stop(`on port ${input.port} is ambiguous: ${entries.length} listening entries (${entries.map((entry) => `${entry.localAddress} pid ${entry.owningProcess}`).join(", ")})`);
+  }
+
+  const [entry] = entries as [ListeningEntry];
+  if (entry.localAddress !== VALIDATION_LOOPBACK) throw stop(`on port ${input.port} is bound to ${entry.localAddress}, not ${VALIDATION_LOOPBACK}`);
+
+  const root = await attempt("ownership inspection", () => input.inspections.processes.inspect(input.server.pid));
+  if (root === undefined || root.creationTime !== input.server.creationTime) {
+    throw stop(`could not be verified: the recorded server process ${input.server.pid} is gone or was replaced`);
+  }
+  if (entry.owningProcess === input.server.pid) return entry.owningProcess;
+
+  // Walk the recorded server's descendants; the owner must be one of them.
+  const queue = [input.server.pid];
+  const seen = new Set<number>(queue);
+  while (queue.length > 0) {
+    const parent = queue.shift() as number;
+    for (const child of await attempt("ownership inspection", () => input.inspections.processes.children(parent))) {
+      if (child.pid === entry.owningProcess) return entry.owningProcess;
+      if (!seen.has(child.pid)) {
+        seen.add(child.pid);
+        queue.push(child.pid);
+      }
+    }
+  }
+
+  throw stop(`on port ${input.port} is owned by process ${entry.owningProcess}, which is not the recorded server or one of its descendants`);
+}
+
+/** Wait, with no HTTP, until the owned listener is confirmed; an unbound port is polled only until the readiness deadline. */
+export async function waitForOwnedListener(
+  input: ListenerCheck & { readonly deadline: number; readonly signal: AbortSignal; readonly sleep: (ms: number) => Promise<void>; readonly now: () => number },
+): Promise<number> {
+  while (input.now() < input.deadline) {
+    if (input.signal.aborted) throw new Error("aborted while waiting for readiness");
+    const result = await checkOwnedListener(input);
+    if (result !== "unbound") return result;
+    await input.sleep(VALIDATION_READINESS_POLL_MS);
+  }
+
+  throw new Error(`port ${input.port} had no listener within the readiness bound`);
+}
+
+/** Immediately before scheduled traffic: one check, in which an unbound port is refused too. */
+export async function verifyOwnedListenerNow(input: ListenerCheck): Promise<number> {
+  const result = await checkOwnedListener(input);
+  if (result === "unbound") throw new ValidationStop(`Invalid (validation stop): ${input.target} listener on port ${input.port} is no longer bound before scheduled traffic`);
+  return result;
+}
+
+/**
+ * V-A readiness for one server, within one readiness deadline. **Before every HTTP attempt** —
+ * the first and every retry — the owned listener is checked again (no HTTP, waiting only while the
+ * port is unbound), then the shared budget, and only then is the probe sent and charged. When the
+ * budget is spent, it stops with no further request.
+ */
+export async function waitReadyWithinBudget(input: {
+  readonly budget: AttemptBudget;
+  readonly target: HttpAttempt["target"];
+  readonly port: number;
+  readonly path: string;
+  readonly ready: (exchange: Exchange) => boolean;
+  readonly boundMs: number;
+  readonly signal: AbortSignal;
+  readonly send: (port: number, path: string) => Promise<Exchange>;
+  readonly sleep: (ms: number) => Promise<void>;
+  readonly now: () => number;
+  /** The recorded server and the inspections that confirm it owns the listener. */
+  readonly listener: { readonly server: OwnedServer; readonly inspections: ListenerInspections };
+}): Promise<void> {
+  const deadline = input.now() + input.boundMs;
+  const check: ListenerCheck = { target: input.target, port: input.port, server: input.listener.server, inspections: input.listener.inspections };
+
+  while (input.now() < deadline) {
+    if (input.signal.aborted) throw new Error("aborted while waiting for readiness");
+    await waitForOwnedListener({ ...check, deadline, signal: input.signal, sleep: input.sleep, now: input.now });
+    // The ownership check is awaited, so the pass may have been aborted, or the readiness deadline
+    // passed, meanwhile. Either stops here: nothing is sent and no attempt is charged.
+    if (input.signal.aborted) throw new Error("aborted while waiting for readiness");
+    if (input.now() >= deadline) throw new Error(`port ${input.port} was not ready within ${input.boundMs}ms`);
+    if (input.budget.remaining() <= 0) {
+      throw new ValidationStop(`Invalid (validation cap): the ${input.budget.limit}-attempt HTTP budget was exhausted during ${input.target} readiness`);
+    }
+
+    let outcome: string;
+    let isReady = false;
+    try {
+      const exchange = await input.send(input.port, input.path);
+      outcome = `status ${exchange.status}`;
+      isReady = input.ready(exchange);
+    } catch (error) {
+      outcome = (error as Error).message;
+    }
+    input.budget.trace("readiness", input.target, input.path, outcome);
+    if (isReady) return;
+    await input.sleep(VALIDATION_READINESS_POLL_MS);
+  }
+
+  throw new Error(`port ${input.port} was not ready within ${input.boundMs}ms`);
+}
+
+/**
+ * V-A order for HTTP: readiness for each server in turn, then the post-readiness bookkeeping, then
+ * the listener checks for **both** servers immediately before handing off, then the plan with only
+ * the budget that remains as its cap. If any step throws — a spent budget, or a listener refused
+ * at handoff — the plan never starts.
+ */
+export async function readinessThenMeasure<T>(input: {
+  readonly budget: AttemptBudget;
+  readonly readiness: readonly (() => Promise<void>)[];
+  readonly afterReadiness: () => Promise<void>;
+  readonly handoff: readonly (() => Promise<unknown>)[];
+  readonly measure: (cap: number) => Promise<T>;
+}): Promise<T> {
+  for (const wait of input.readiness) await wait();
+  await input.afterReadiness();
+  for (const check of input.handoff) await check();
+  return input.measure(input.budget.remaining());
+}
+
+export interface OutputSafetySeams {
+  readonly repositoryRoot: string;
+  readonly tempDirectory: string;
+  readonly directoryEntries: (path: string) => readonly string[] | undefined;
+  /** Resolves links and Windows junctions; the real binding is `realpathSync.native`. */
+  readonly realpath: (path: string) => string;
+}
+
+function overlapProblems(out: string, validationOut: string, seams: OutputSafetySeams): string[] {
+  if (!isAbsolute(out) || !isAbsolute(validationOut)) return [];
+  if (isWithin(validationOut, out, seams.realpath)) return ["--validation-out must not be --out or lie inside it, including through a junction or link"];
+  if (isWithin(out, validationOut, seams.realpath)) return ["--validation-out must not contain --out, including through a junction or link"];
+  return [];
+}
+
+/**
+ * Before anything is created or written: the existing output-directory rules for **both**
+ * directories (absolute, existing, empty, outside the repository and the temp directory), and no
+ * overlap between them on resolved paths, junction aliases included.
+ */
+export function validationOutputDirectoryProblems(out: string, validationOut: string, seams: OutputSafetySeams): string[] {
+  return [
+    ...outputDirectoryProblems(out, seams).map((problem) => `--out: ${problem}`),
+    ...outputDirectoryProblems(validationOut, seams).map((problem) => `--validation-out: ${problem}`),
+    ...overlapProblems(out, validationOut, seams),
+  ];
+}
+
+/**
+ * Immediately before **every** report write (preflight-stop, completed or incomplete): the full
+ * destination policy. Both directories must resolve; the destination must still pass every
+ * output-directory rule (absolute, existing, empty, outside the repository and the system temp
+ * directory, on resolved paths) and must still be separate from the capture directory.
+ */
+export function reportDestinationProblems(out: string, validationOut: string, seams: OutputSafetySeams): string[] {
+  const unresolved = (label: string, path: string): string[] => {
+    try {
+      seams.realpath(path);
+      return [];
+    } catch (error) {
+      return [`${label}: the path could not be resolved (${(error as Error).message})`];
+    }
+  };
+  const resolution = [...unresolved("--validation-out", validationOut), ...unresolved("--out", out)];
+  if (resolution.length > 0) return resolution;
+  return [...outputDirectoryProblems(validationOut, seams).map((problem) => `--validation-out: ${problem}`), ...overlapProblems(out, validationOut, seams)];
+}
+
+/**
+ * The V-A stop before `npm ci` (amendment r5 A5-1): the disposable worktree's lockfile must pass
+ * checks 1 and 2. Never stops a smoke or full run, which keep revision 4's "collection failures
+ * never abort a run".
+ */
+export function lockfileStopFor(options: Pick<BoundaryOptions, "validation">, lockfile: LockfileEvidence | undefined): string | undefined {
+  if (options.validation === undefined) return undefined;
+  const result = checkCheckoutLockfile(lockfile);
+  return result.ok ? undefined : `Invalid (validation stop): worktree lockfile ${result.check}`;
+}
+
+/**
+ * The tail of a boundary run inside the cluster body. **V-A only** (ruling D-V7): stored fixture
+ * states are verified while the database is available, then owned resources are torn down. Smoke
+ * and full runs keep the existing order: teardown, then verification. Teardown always runs.
+ */
+export async function finishBoundary(steps: {
+  readonly validation: boolean;
+  readonly run: () => Promise<void>;
+  readonly verifyStoredStates: () => Promise<readonly string[]>;
+  readonly teardown: () => Promise<void>;
+  readonly recordInvalid: (reason: string) => void;
+}): Promise<void> {
+  const verify = async (): Promise<void> => {
+    const after = await steps.verifyStoredStates();
+    if (after.length > 0) steps.recordInvalid(`Invalid (stored state): ${after.join("; ")}`);
+  };
+
+  try {
+    await steps.run();
+    if (steps.validation) await verify();
+  } finally {
+    await steps.teardown();
+  }
+
+  if (!steps.validation) await verify();
 }
 
 interface BoundaryResult {
@@ -258,20 +632,7 @@ async function runBoundary(options: BoundaryOptions): Promise<BoundaryResult> {
   const requestsFd = openSync(join(options.out, "requests.ndjson"), "a");
   const ceiling = setTimeout(() => controller.abort(new Error("timeout")), Math.max(0, options.deadline - Date.now()));
   const startedAt = new Date();
-  let manifest: RunManifest = {
-    mode: options.mode,
-    boundary: options.boundary,
-    ...(options.pass === undefined ? {} : { pass: options.pass }),
-    ...(options.replicate === undefined ? {} : { replicate: options.replicate }),
-    seed: options.seed,
-    delaysNs: plan.delaysNs,
-    backgroundCount: plan.background.length,
-    commit: options.commit,
-    identities: plan.identities,
-    startedAt: startedAt.toISOString(),
-    environment: { ...(await environmentManifest()), counts: countsOf(plan) },
-    invalid,
-  };
+  let manifest: RunManifest = initialManifest(options, plan, startedAt, { ...(await environmentManifest()), counts: countsOf(plan) }, invalid);
   const writeManifest = (): void => writeFileSync(join(options.out, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   let stoppedBy: string | undefined;
   let teardownReport: TeardownReport | undefined;
@@ -348,7 +709,7 @@ async function runBoundary(options: BoundaryOptions): Promise<BoundaryResult> {
     else if (removeEmptyDirectory(clusterParent)) log.update(clusterEntry, { state: "removed" });
     else log.update(clusterEntry, { state: "left", reason: "the cluster parent was not empty or could not be removed" });
   } catch (error) {
-    invalid.push(`Invalid (setup or run): ${(error as Error).message}`);
+    invalid.push(error instanceof ValidationStop ? error.message : `Invalid (setup or run): ${(error as Error).message}`);
     log.note(`run failed: ${(error as Error).message}`);
 
     // Unless cleanup also failed (an AggregateError), the helper has already removed its own root,
@@ -393,35 +754,38 @@ async function runBoundary(options: BoundaryOptions): Promise<BoundaryResult> {
 
     const control = { signal: controller.signal, requestCap: options.requestCap, onRecord, onMeasured };
 
-    try {
-      if (options.boundary === "e1") {
-        setupMs = Date.now() - setupStart;
-        const outcome = await runOperation(plan, persistence.db, control);
-        stoppedBy = outcome.stoppedBy;
-      } else {
-        const recordNextEvidence = (evidence: NextVersionEvidence): void => {
-          manifest = { ...manifest, nextEvidence: evidence };
-          writeManifest();
-        };
-        const outcome = await runE2(plan, url, options, log, processes, git, control, (ms) => (setupMs = ms), setupStart, recordNextEvidence);
-        stoppedBy = outcome.stoppedBy;
-      }
-    } finally {
-      teardownStartedAt = Date.now();
-      teardownReport = await teardown({
-        log,
-        processes,
-        git,
-        clusters: helperClusterOps,
-        tempDirectory,
-        repositoryGitDirectory: join(REPOSITORY_ROOT, ".git"),
-        includeClusters: false,
-        deadline: Date.now() + TEARDOWN_ALLOWANCE_MINUTES * MINUTE,
-      });
-    }
-
-    const after = await verifyStoredStates(persistence.db, plan);
-    if (after.length > 0) invalid.push(`Invalid (stored state): ${after.join("; ")}`);
+    await finishBoundary({
+      validation: options.validation !== undefined,
+      run: async () => {
+        if (options.boundary === "e1") {
+          setupMs = Date.now() - setupStart;
+          const outcome = await runOperation(plan, persistence.db, control);
+          stoppedBy = outcome.stoppedBy;
+        } else {
+          const recordNextEvidence = (evidence: NextVersionEvidence): void => {
+            manifest = { ...manifest, nextEvidence: evidence };
+            writeManifest();
+          };
+          const outcome = await runE2(plan, url, options, log, processes, git, control, (ms) => (setupMs = ms), setupStart, recordNextEvidence);
+          stoppedBy = outcome.stoppedBy;
+        }
+      },
+      verifyStoredStates: () => verifyStoredStates(persistence.db, plan),
+      teardown: async () => {
+        teardownStartedAt = Date.now();
+        teardownReport = await teardown({
+          log,
+          processes,
+          git,
+          clusters: helperClusterOps,
+          tempDirectory,
+          repositoryGitDirectory: join(REPOSITORY_ROOT, ".git"),
+          includeClusters: false,
+          deadline: Date.now() + TEARDOWN_ALLOWANCE_MINUTES * MINUTE,
+        });
+      },
+      recordInvalid: (reason) => invalid.push(reason),
+    });
   }
 
   const changed = restrictedChanges(restrictedBaseline, restrictedMetadataOf(REPOSITORY_ROOT));
@@ -429,9 +793,19 @@ async function runBoundary(options: BoundaryOptions): Promise<BoundaryResult> {
   if (controller.signal.aborted) {
     const reason = (controller.signal.reason as Error | undefined)?.message ?? "abort";
     stoppedBy = reason === "timeout" ? "timeout" : stoppedBy ?? "abort";
-    invalid.push(reason === "timeout" ? (options.mode === "smoke" ? "Failed (cap): smoke time cap reached" : "Invalid (timeout)") : `Aborted: ${reason}`);
+    invalid.push(
+      reason === "timeout"
+        ? options.validation !== undefined
+          ? `Invalid (validation timeout): the ${VALIDATION_PASS_MINUTES}-minute pass limit was reached`
+          : options.mode === "smoke"
+            ? "Failed (cap): smoke time cap reached"
+            : "Invalid (timeout)"
+        : `Aborted: ${reason}`,
+    );
   }
-  if (stoppedBy === "cap") invalid.push("Failed (cap): smoke request cap reached");
+  if (stoppedBy === "cap") {
+    invalid.push(options.validation !== undefined ? `Invalid (validation cap): the ${VALIDATION_REQUEST_CAP}-attempt HTTP budget was reached` : "Failed (cap): smoke request cap reached");
+  }
 
   const leftover = teardownReport?.left ?? [];
   if (leftover.length > 0 || log.entries().some((entry) => entry.state === "left" || entry.state === "created" || entry.state === "intended")) {
@@ -463,6 +837,16 @@ function collected<T>(read: () => T | undefined): T | undefined {
     return undefined;
   }
 }
+
+/** Git through an argument array, with optional standard input, returning the exit code and stdout bytes. */
+const runGit: GitRunner = (args, input) => {
+  try {
+    return { code: 0, stdout: execFileSync("git", [...args], { ...(input === undefined ? {} : { input }), maxBuffer: 256 * 1024 * 1024, stdio: ["pipe", "pipe", "pipe"], windowsHide: true }) };
+  } catch (error) {
+    const failed = error as { status?: number | null; stdout?: Buffer };
+    return { code: typeof failed.status === "number" ? failed.status : -1, stdout: Buffer.isBuffer(failed.stdout) ? failed.stdout : Buffer.alloc(0) };
+  }
+};
 
 /** File reads for the Next.js evidence: exact bytes, and real paths that follow links. */
 const NEXT_EVIDENCE_FILES = { readFile: (path: string) => readFileSync(path), realpath: (path: string) => realpathSync.native(path) };
@@ -498,24 +882,27 @@ async function runE2(
   const listed = (await git.worktreeList()).find((entry) => resolve(entry.path).toLowerCase() === resolve(worktree).toLowerCase());
   if (listed?.head !== options.commit || !listed.detached) throw new Error("the disposable worktree is not detached at the authorized commit");
 
-  // The lockfile comes from the run commit's object; the worktree's copy is hashed before `npm ci`.
+  // The lockfile comes from the run commit's object; the worktree's copy is read once, before
+  // `npm ci`, and that buffer feeds the raw, CR LF → LF and Git-filtered checks (amendment r5 A5-1).
+  const lockfile = collectLockfileEvidence({
+    commit: options.commit,
+    repositoryRoot: REPOSITORY_ROOT,
+    checkout: worktree,
+    readFile: (path) => readFileSync(path),
+    git: runGit,
+  });
   let evidence: NextVersionEvidence = {
     runCommit: options.commit,
     ...optional("worktreePath", collected(() => realpathSync.native(worktree))),
     ...optional("worktreeHead", collected(() => execFileSync("git", ["-C", worktree, "rev-parse", "HEAD"], { encoding: "utf8" }).trim())),
-    ...optional(
-      "lockfile",
-      readLockfileEvidence(
-        options.commit,
-        {
-          show: (spec) => execFileSync("git", ["-C", REPOSITORY_ROOT, "show", spec], { maxBuffer: 256 * 1024 * 1024 }),
-          blobId: (spec) => execFileSync("git", ["-C", REPOSITORY_ROOT, "rev-parse", spec], { encoding: "utf8" }),
-        },
-        () => readFileSync(join(worktree, "package-lock.json")),
-      ),
-    ),
+    ...optional("lockfile", lockfile),
   };
   recordNextEvidence(evidence);
+
+  // V-A only: a worktree lockfile failure stops here, before `npm ci` and `next dev`. The error
+  // reaches the cluster body's teardown, which still removes every recorded resource.
+  const stop = lockfileStopFor(options, lockfile);
+  if (stop !== undefined) throw new ValidationStop(stop);
 
   const npmCli = join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
   if (!existsSync(npmCli)) throw new Error("Invalid (setup): npm-cli.js was not found beside the running node");
@@ -583,13 +970,92 @@ async function runE2(
   });
 
   const compile = plan.identities.find((identity) => identity.cls === "CMP") as PlanIdentity;
-  await waitReady(nextPort, `/directory/${compile.key}`, (exchange) => exchange.status === 200 && exchange.body.includes("<h1>Not available</h1>"), 5 * MINUTE, control.signal);
-  await waitReady(calibrationPort, HEALTH_PATH, (exchange) => exchange.status === 200, 30_000, control.signal);
-  await recordDescendants(log, processes, next.entry, nextPort);
-  await recordDescendants(log, processes, calibration.entry, calibrationPort);
-  setSetupMs(Date.now() - setupStart);
+  const nextReady = (exchange: Exchange): boolean => exchange.status === 200 && exchange.body.includes("<h1>Not available</h1>");
+  const calibrationReady = (exchange: Exchange): boolean => exchange.status === 200;
+  const targets = { nextPort, calibrationPort, bodiesDirectory: join(options.out, "bodies") };
+  let outcome: Awaited<ReturnType<typeof runHttp>>;
 
-  const outcome = await runHttp(plan, { nextPort, calibrationPort, bodiesDirectory: join(options.out, "bodies") }, control);
+  if (options.validation === undefined) {
+    await waitReady(nextPort, `/directory/${compile.key}`, nextReady, 5 * MINUTE, control.signal);
+    await waitReady(calibrationPort, HEALTH_PATH, calibrationReady, 30_000, control.signal);
+    await recordDescendants(log, processes, next.entry, nextPort);
+    await recordDescendants(log, processes, calibration.entry, calibrationPort);
+    setSetupMs(Date.now() - setupStart);
+    outcome = await runHttp(plan, targets, control);
+  } else {
+    // V-A: every HTTP attempt — readiness for both servers, failures included, and every planned
+    // request — is traced and charged to one shared budget, checked before each send.
+    const budget = createAttemptBudget(options.requestCap);
+    const agent = new http.Agent({ keepAlive: false });
+    const send = (port: number, path: string): Promise<Exchange> => sendOne(agent, port, path, 60_000);
+    const sleep = (ms: number): Promise<void> => new Promise((resume) => setTimeout(resume, ms));
+    // The recorded identity of each server process, as logged when it was started.
+    const ownedServer = (entry: number, label: string): OwnedServer => {
+      const identity = log.entries()[entry]?.identity;
+      if (identity === undefined) throw new ValidationStop(`Invalid (validation stop): ${label} has no recorded process identity`);
+      return { pid: identity.pid, creationTime: identity.creationTime };
+    };
+    // The strict listener lookup (every entry, address and owner); `listener(port)` stays for teardown.
+    const inspections: ListenerInspections = { lookup: windowsListenerLookup(), processes };
+    const nextCheck = (): ListenerCheck => ({ target: "next", port: nextPort, server: ownedServer(next.entry, "next dev"), inspections });
+    const calibrationCheck = (): ListenerCheck => ({ target: "calibration", port: calibrationPort, server: ownedServer(calibration.entry, "calibration server"), inspections });
+
+    try {
+      outcome = await readinessThenMeasure({
+        budget,
+        readiness: [
+          () =>
+            waitReadyWithinBudget({
+              budget,
+              target: "next",
+              port: nextPort,
+              path: `/directory/${compile.key}`,
+              ready: nextReady,
+              boundMs: 5 * MINUTE,
+              signal: control.signal,
+              send,
+              sleep,
+              now: Date.now,
+              listener: { server: nextCheck().server, inspections },
+            }),
+          () =>
+            waitReadyWithinBudget({
+              budget,
+              target: "calibration",
+              port: calibrationPort,
+              path: HEALTH_PATH,
+              ready: calibrationReady,
+              boundMs: 30_000,
+              signal: control.signal,
+              send,
+              sleep,
+              now: Date.now,
+              listener: { server: calibrationCheck().server, inspections },
+            }),
+        ],
+        afterReadiness: async () => {
+          await recordDescendants(log, processes, next.entry, nextPort);
+          await recordDescendants(log, processes, calibration.entry, calibrationPort);
+          setSetupMs(Date.now() - setupStart);
+        },
+        // Both listeners again, immediately before the scheduled traffic.
+        handoff: [() => verifyOwnedListenerNow(nextCheck()), () => verifyOwnedListenerNow(calibrationCheck())],
+        measure: (cap) =>
+          runHttp(plan, targets, {
+            ...control,
+            requestCap: cap,
+            onRecord: (record) => {
+              const identity = plan.identities[record.identity] as PlanIdentity;
+              budget.trace("plan", identity.target === "calibration" ? "calibration" : "next", pathFor(identity), record.transportError ?? `status ${record.status}`);
+              control.onRecord(record);
+            },
+          }),
+      });
+    } finally {
+      agent.destroy();
+      writeFileSync(join(options.out, VALIDATION_ATTEMPTS_FILE), `${JSON.stringify(budget.summary(), null, 2)}\n`);
+    }
+  }
 
   // Post-measurement, before teardown: only when every measured request completed.
   if (outcome.stoppedBy === undefined) {
@@ -826,6 +1292,198 @@ async function smoke(flags: Readonly<Record<string, string>>): Promise<number> {
   return outcome.exitCode;
 }
 
+// ---------------------------------------------------------------------------------------------
+// validate-e2: one V-A validation pass (amendment r5 A5-3), never a smoke run.
+// ---------------------------------------------------------------------------------------------
+
+export interface PreflightResult {
+  /** Reasons to stop before anything is created. Empty when V-A may start. */
+  readonly stops: readonly string[];
+  /** What the preflight recorded, reported as evidence. */
+  readonly findings: Readonly<Record<string, unknown>>;
+}
+
+/** Everything `runValidateE2` reaches outside itself. It has no smoke driver and no forced pass. */
+export interface ValidateE2Seams {
+  readonly now: () => number;
+  /** The output-directory rules for both directories and their overlap (`validationOutputDirectoryProblems`). */
+  readonly outputProblems: (out: string, validationOut: string) => readonly string[];
+  /** The report destination's rules and overlap, rechecked immediately before any report write (`reportDestinationProblems`). */
+  readonly destinationProblems: (out: string, validationOut: string) => readonly string[];
+  /** The checkout lockfile preflight and the other read-only checks. Creates nothing. */
+  readonly preflight: (options: BoundaryOptions) => Promise<PreflightResult>;
+  /** Exactly one pass. */
+  readonly runPass: (options: BoundaryOptions) => Promise<{ readonly exitCode: number; readonly invalid: readonly string[] }>;
+  /** The zero-residue check after the pass; each entry is one remaining resource. */
+  readonly residue: (runDirectory: string) => Promise<readonly string[]>;
+  readonly evaluate: (runDirectory: string, outDirectory: string, options: ValidationOptions) => ValidationReport;
+  /** Write the preflight findings when V-A does not start. */
+  readonly writePreflightStop: (outDirectory: string, result: PreflightResult) => void;
+  readonly say: (line: string) => void;
+}
+
+/**
+ * `validate-e2`: output rules for both directories → preflight → one pass → residue → evaluation.
+ * A bad directory refuses with exit 2 before anything is created or written. A preflight stop or
+ * a refused pass ends it with exit 2 and no evaluation. The report destination is rechecked before
+ * every write; if it fails, nothing is written. An Invalid pass, or residue, is still evaluated,
+ * and Invalid is listed first. Exit 0 only when the pass exited 0, there is no residue, and the
+ * complete report has **no Invalid reason**; a withheld gate alone is a reported result, printed as
+ * the headline, not a failure. An incomplete evaluation exits 1.
+ */
+export async function runValidateE2(flags: Readonly<Record<string, string>>, seams: ValidateE2Seams): Promise<number> {
+  const out = flags["--out"] as string;
+  const validationOut = flags["--validation-out"] as string;
+  const refuse = (problems: readonly string[]): void => {
+    for (const problem of problems) seams.say(`refused: ${problem}`);
+  };
+  const directories = seams.outputProblems(out, validationOut);
+
+  if (directories.length > 0) {
+    refuse(directories);
+    return 2;
+  }
+
+  const options = validationOptions(flags, seams.now());
+  const preflight = await seams.preflight(options);
+
+  if (preflight.stops.length > 0) {
+    refuse(preflight.stops);
+    const destination = seams.destinationProblems(out, validationOut);
+    if (destination.length > 0) refuse(destination);
+    else seams.writePreflightStop(validationOut, preflight);
+    return 2;
+  }
+
+  const pass = await seams.runPass(options);
+
+  if (pass.exitCode === 2) {
+    refuse(pass.invalid);
+    return 2;
+  }
+
+  const residue = await seams.residue(out);
+  const destination = seams.destinationProblems(out, validationOut);
+
+  if (destination.length > 0) {
+    refuse(destination);
+    seams.say("no validation report was written; the pass's own output is unchanged");
+    return 1;
+  }
+
+  const report = seams.evaluate(out, validationOut, {
+    deadline: seams.now() + VALIDATION_EVALUATION_MINUTES * MINUTE,
+    now: seams.now,
+    extraInvalid: residue.length === 0 ? [] : [`Invalid (residue): ${residue.join("; ")}`],
+    preflight: preflight.findings,
+  });
+
+  seams.say(report.headline);
+
+  if (report.status === "incomplete") {
+    seams.say(`evaluation INCOMPLETE: partial output only, in ${join(validationOut, "incomplete")}; no completed report was written.`);
+    return 1;
+  }
+
+  seams.say(`Interpretation: ${report.interpretation}`);
+  return pass.exitCode === 0 && residue.length === 0 && report.invalid.length === 0 ? 0 : 1;
+}
+
+/** The real seams of `validate-e2`. Windows only, like every run. */
+function realValidateSeams(): ValidateE2Seams {
+  const git = createGitOps(REPOSITORY_ROOT);
+  const processes = windowsProcessOps();
+  let baselines: { restricted: RestrictedMetadata; status: string } | undefined;
+  const safety: OutputSafetySeams = {
+    repositoryRoot: REPOSITORY_ROOT,
+    tempDirectory: tmpdir(),
+    directoryEntries,
+    // Resolves symbolic links and Windows junctions to the final path.
+    realpath: (path) => realpathSync.native(path),
+  };
+
+  return {
+    now: Date.now,
+    outputProblems: (out, validationOut) => validationOutputDirectoryProblems(out, validationOut, safety),
+    destinationProblems: (out, validationOut) => reportDestinationProblems(out, validationOut, safety),
+    say,
+    preflight: async (options) => {
+      const stops: string[] = [];
+      const top = await checkPreconditions({
+        repositoryRoot: REPOSITORY_ROOT,
+        tempDirectory: tmpdir(),
+        authorizedCommit: options.commit,
+        outputDirectory: options.out,
+        environment: process.env,
+        portIsFree,
+        gitHead: () => git.head(),
+        gitStatusPorcelain: () => git.statusPorcelain(),
+        directoryEntries,
+        restrictedMetadata: () => restrictedMetadataOf(REPOSITORY_ROOT),
+      });
+      stops.push(...top.refusals);
+      if (top.restrictedBaseline !== undefined && top.statusBaseline !== undefined) {
+        baselines = { restricted: top.restrictedBaseline as RestrictedMetadata, status: top.statusBaseline as string };
+      }
+
+      // P-1 to P-4: the current checkout's lockfile, one read feeding every check.
+      const lockfile = collectLockfileEvidence({ commit: options.commit, repositoryRoot: REPOSITORY_ROOT, checkout: REPOSITORY_ROOT, readFile: (path) => readFileSync(path), git: runGit });
+      const lockfileCheck = checkCheckoutLockfile(lockfile);
+      if (!lockfileCheck.ok) stops.push(`checkout lockfile ${lockfileCheck.check}`);
+
+      // P-5: real-path forms.
+      const temp = collected(() => realpathSync.native(tmpdir()));
+      const node = collected(() => realpathSync.native(process.execPath));
+      if (temp !== tmpdir()) stops.push(`the temp directory's real path differs from ${tmpdir()}`);
+      if (node !== process.execPath) stops.push(`the Node executable's real path differs from ${process.execPath}`);
+
+      // P-6: nothing harness-shaped is present.
+      const leftovers = collected(() => readdirSync(tmpdir()).filter((name) => name.startsWith(HARNESS_ROOT_PREFIX)));
+      if (leftovers === undefined) stops.push("the temp directory could not be listed");
+      else if (leftovers.length > 0) stops.push(`harness-shaped entries are present in the temp directory: ${leftovers.join(", ")}`);
+      const worktrees = await git.worktreeList().catch(() => undefined);
+      if (worktrees === undefined) stops.push("git worktree list failed");
+      else if (worktrees.length !== 1 || worktrees.some((entry) => entry.prunable)) stops.push("git worktree list shows more than the main tree, or a prunable entry");
+
+      if (baselines === undefined && top.refusals.length === 0) stops.push("the residue baselines could not be taken");
+
+      return {
+        stops,
+        findings: { lockfile, lockfileCheck, tempDirectory: tmpdir(), tempRealPath: temp, nodeExecutable: process.execPath, nodeRealPath: node, leftovers, worktrees },
+      };
+    },
+    runPass: async (options) => {
+      const result = await runBoundary(options);
+      return { exitCode: result.exitCode, invalid: result.invalid };
+    },
+    residue: async (runDirectory) => {
+      if (baselines === undefined) return ["the residue baselines were not taken"];
+      return residueOf(new IntentLog(join(runDirectory, "run-state.json")).entries(), {
+        processes,
+        git,
+        repositoryRoot: REPOSITORY_ROOT,
+        repositoryGitDirectory: join(REPOSITORY_ROOT, ".git"),
+        restrictedBaseline: baselines.restricted,
+        statusBaseline: baselines.status,
+        portIsFree,
+      });
+    },
+    evaluate: (runDirectory, outDirectory, options) =>
+      writeE2Validation(runDirectory, outDirectory, {
+        ...options,
+        realpath: safety.realpath,
+        // The full destination policy, rerun by the writer immediately before it writes anything.
+        destinationCheck: () => reportDestinationProblems(runDirectory, outDirectory, safety),
+      }),
+    writePreflightStop: (outDirectory, result) => {
+      // The caller has just rerun the full destination policy (`destinationProblems`) for this write.
+      const headline = "Gate result: not established — the validation pass did not start";
+      writeFileSync(join(outDirectory, "preflight-stop.json"), `${JSON.stringify({ headline, ...result }, null, 2)}\n`);
+      writeFileSync(join(outDirectory, "preflight-stop.md"), `${[headline, "", "Validation only. Nothing was created.", "", ...result.stops.map((stop) => `- ${stop}`)].join("\n")}\n`);
+    },
+  };
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const { command, flags } = parseArguments(argv);
 
@@ -859,6 +1517,11 @@ async function main(argv: readonly string[]): Promise<number> {
   }
 
   if (command === "smoke") return smoke(flags);
+
+  if (command === "validate-e2") {
+    if (platform() !== "win32") throw new Error("the harness's process and cleanup operations are Windows-only");
+    return runValidateE2(flags, realValidateSeams());
+  }
 
   const boundary = command as Boundary;
   const pass = flags["--smoke-pass"];
