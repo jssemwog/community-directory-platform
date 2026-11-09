@@ -42,8 +42,18 @@
  *
  * It applies no threshold and issues no verdict. A result is "difference detected" (a lead; at E1
  * diagnostic only), "not detected" with the interval width, "Invalid" with the reason, or one of
- * the two "Withheld" labels from the body and header gates. It refuses smoke-mode data. `BI-4`
- * stays pending whatever it reports.
+ * the "Withheld" labels from the gates. It refuses smoke-mode data. `BI-4` stays pending whatever
+ * it reports.
+ *
+ * ## E2 bodies (approved amendment revision 4: §7.3, §11.2A, §11.3, §11.4, §11.4A)
+ *
+ * The stored UUID-masked bodies are read and verified against their recorded hashes; an absent or
+ * mismatched body is a `missing` mask outcome. The Next.js version guard, the request-ID mask, the
+ * repeated-value check, post-mask exact agreement and the unchanged header gate all withhold. An
+ * E2 body mismatch is **withheld, not Invalid** (§11.4A): it is described, never called
+ * state-associated or a possible non-timing `BI-4` finding, and any independent Invalid condition
+ * is still reported and takes priority. The diagnostic model runs on the UUID-masked bodies,
+ * before the request-ID mask, whenever they differ, and never lifts withholding.
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -52,15 +62,21 @@ import { join } from "node:path";
 import {
   compareMalformed,
   diagnoseVariation,
-  evaluateBodyGate,
-  evaluateHeaderGate,
+  evaluateE2Gates,
   listingStateOf,
+  maskNextRequestId,
+  POST_MASK_NOT_ESTABLISHED,
+  POST_MASK_SUBSET_LABEL,
+  postMaskObservation,
   sha256Hex,
   unmaskAt,
   type BodyGateResult,
+  type E2GateResult,
+  type E2Observation,
   type HeaderGateResult,
-  type ResponseObservation,
+  type RequestIdMaskResult,
 } from "./body-compare";
+import { evaluateNextVersionGuard, type NextVersionEvidence } from "./next-evidence";
 import {
   COMPARED_CLASS,
   COMPARISONS,
@@ -129,7 +145,15 @@ export interface RunManifest {
   readonly environment?: Readonly<Record<string, unknown>>;
   /** Reasons recorded by the runner that make the run Invalid (file safety, stored state, …). */
   readonly invalid: readonly string[];
+  /** E2: the Next.js version evidence (amendment §4). Absent in runs made before it existed. */
+  readonly nextEvidence?: NextVersionEvidence;
 }
+
+/**
+ * The stored UUID-masked body for a hash, already verified against that hash, or `undefined`
+ * when it is absent, unreadable or mismatched.
+ */
+export type BodySource = (maskedBodyHash: string) => Buffer | undefined;
 
 /** Refuse anything but full-pilot data (§5.4). */
 export function assertFullPilot(manifest: Pick<RunManifest, "mode">): void {
@@ -993,8 +1017,21 @@ export function analyzeMetric(
 }
 
 export interface GateSummary {
+  /**
+   * E2: replicate-wide post-mask exact agreement (§11.3 as amended). Present only when every gated
+   * response's mask is `ok`; otherwise replicate-wide agreement is not established.
+   */
   readonly body?: BodyGateResult;
+  /**
+   * E2: when some gated response failed the mask, the comparison of the successful responses only,
+   * labelled as a subset comparison. It never establishes replicate-wide agreement.
+   */
+  readonly bodySubset?: BodyGateResult & { readonly scope: typeof POST_MASK_SUBSET_LABEL };
+  /** E2 stage 1: the UUID-only comparison. **Diagnostic only**; it never affects withholding. */
+  readonly bodyUuidOnly?: BodyGateResult;
   readonly headers?: HeaderGateResult;
+  /** E2: the version guard, mask outcomes and repeated values (§7.3, §11.2A). */
+  readonly nextRequestId?: Omit<E2GateResult, "uuidOnly" | "postMask" | "headers"> & { readonly outcomes: Readonly<Record<string, number>> };
   readonly e1Values?: { readonly agreement: boolean; readonly distinct: number };
 }
 
@@ -1053,7 +1090,14 @@ export function e2Validity(records: readonly MeasurementRecord[]): string[] {
   return reasons;
 }
 
-function observationsOf(records: readonly MeasurementRecord[], identities: readonly PlanIdentity[]): ResponseObservation[] {
+/** The §11.2A outcome of a record's stored body; absent or unverified bodies are `missing`. */
+function requestIdMaskOf(record: MeasurementRecord, bodies: BodySource | undefined): RequestIdMaskResult {
+  const body = record.maskedBodyHash === undefined ? undefined : bodies?.(record.maskedBodyHash);
+  if (body === undefined || sha256Hex(body) !== record.maskedBodyHash) return { outcome: "missing" };
+  return maskNextRequestId(body);
+}
+
+function observationsOf(records: readonly MeasurementRecord[], identities: readonly PlanIdentity[], bodies: BodySource | undefined): E2Observation[] {
   return records.flatMap((record) => {
     if (record.phase !== "measured" || record.target !== "next" || record.transportError !== undefined) return [];
     const identity = identities[record.identity] as PlanIdentity;
@@ -1067,22 +1111,46 @@ function observationsOf(records: readonly MeasurementRecord[], identities: reado
         bodyReplacements: record.bodyReplacements ?? -1,
         rawHeaders: record.rawHeaders ?? [],
         clock: { writeStartMs: record.writeStartMs ?? Number.NaN, responseEndMs: record.responseEndMs ?? Number.NaN },
+        requestIdMask: requestIdMaskOf(record, bodies),
       },
     ];
   });
 }
 
-/** Analyse one full-pilot boundary replicate. Pure apart from reading nothing: inputs are passed in. */
+/** The exploratory wording the amended gate requires for the request-ID mask (§11.2A). */
+export const NEXT_R_MASK_NOTE =
+  "The next dev request-ID mask (H-D20) is an exploratory local rule. It does not establish independence from listing state, stream-chunk equivalence or anything about production timing. All-unique values do not establish independence from listing state.";
+
+/** The guard's documented scope (amendment §4.6). */
+export const NEXT_VERSION_GUARD_NOTE =
+  "The Next.js version guard is evidence of the pinned version, the package manifest and that manifest's link to the launched executable. It does not verify every installed file.";
+
+/** The E2 body reporting rule (§11.4 as amended). */
+export const E2_BODY_REPORTING_NOTE =
+  "An E2 body mismatch withholds timing interpretation for this replicate and is described, not classified. Disjoint or all-unique signatures alone do not justify a state-based conclusion. Diagnostic explanations cannot lift the withholding.";
+
+/**
+ * Analyse one full-pilot boundary replicate. Pure: inputs are passed in. At E2, `bodies` supplies
+ * the stored UUID-masked bodies; without it, every body is `missing` and interpretation is withheld.
+ */
 export function analyzeRun(
   manifest: RunManifest,
   records: readonly MeasurementRecord[],
   options: AnalysisOptions,
+  bodies?: BodySource,
 ): AnalysisReport {
   assertFullPilot(manifest);
 
   const invalid = [...manifest.invalid];
   const withheld: string[] = [];
-  const gates: { body?: BodyGateResult; headers?: HeaderGateResult; e1Values?: { agreement: boolean; distinct: number } } = {};
+  const gates: {
+    body?: BodyGateResult;
+    bodySubset?: GateSummary["bodySubset"];
+    bodyUuidOnly?: BodyGateResult;
+    headers?: HeaderGateResult;
+    nextRequestId?: GateSummary["nextRequestId"];
+    e1Values?: { agreement: boolean; distinct: number };
+  } = {};
   let malformed: ReturnType<typeof compareMalformed> | undefined;
   const notes: string[] = [
     "Exploratory output only. No bound is applied and BI-4 remains pending.",
@@ -1090,16 +1158,31 @@ export function analyzeRun(
       ? "E1 is diagnostic: in-process timing says nothing about HTTP, TTFB, TTLB or production."
       : "E2 is exploratory: loopback HTTP through next dev. Calibration validates the client pipeline and analysis only; nothing in this pilot demonstrates resolution through the dev-server stack.",
     "MF versus never-existed has unknown size and direction; it validates nothing and is not a BI-4 finding.",
+    ...(manifest.boundary === "e2" ? [NEXT_R_MASK_NOTE, NEXT_VERSION_GUARD_NOTE, E2_BODY_REPORTING_NOTE] : []),
   ];
 
   if (manifest.boundary === "e2") {
     invalid.push(...e2Validity(records));
-    const observations = observationsOf(records, manifest.identities);
-    gates.body = evaluateBodyGate(observations);
-    gates.headers = evaluateHeaderGate(observations);
-    malformed = compareMalformed(observations, gates.body, gates.headers);
-    if (!gates.body.agreement) withheld.push(gates.body.label);
-    if (!gates.headers.agreement) withheld.push(gates.headers.label);
+    const observations = observationsOf(records, manifest.identities, bodies);
+    const e2 = evaluateE2Gates({ guard: evaluateNextVersionGuard(manifest.nextEvidence, manifest.commit), observations });
+    const outcomes: Record<string, number> = {};
+    for (const observation of observations) outcomes[observation.requestIdMask.outcome] = (outcomes[observation.requestIdMask.outcome] ?? 0) + 1;
+    if (e2.postMask !== undefined && e2.postMaskScope === "replicate") gates.body = e2.postMask;
+    if (e2.postMask !== undefined && e2.postMaskScope === "subset") gates.bodySubset = { ...e2.postMask, scope: POST_MASK_SUBSET_LABEL };
+    gates.bodyUuidOnly = e2.uuidOnly;
+    gates.headers = e2.headers;
+    gates.nextRequestId = {
+      guard: e2.guard,
+      postMaskScope: e2.postMaskScope,
+      reasons: e2.reasons,
+      maskFailures: e2.maskFailures,
+      maskReported: e2.maskReported,
+      repeatedValues: e2.repeatedValues,
+      repeatedReported: e2.repeatedReported,
+      outcomes,
+    };
+    malformed = compareMalformed(observations.map(postMaskObservation), e2.postMask ?? e2.uuidOnly, e2.headers);
+    withheld.push(...e2.reasons);
   } else {
     const gated = records.filter(
       (record) => record.phase === "measured" && listingStateOf((manifest.identities[record.identity] as PlanIdentity).cls) !== undefined,
@@ -1219,6 +1302,61 @@ export function interpretationOf(report: AnalysisReport, result: MetricResult): 
   return report.role === "diagnostic" ? `${result.description} (diagnostic)` : `${result.description} (exploratory lead only)`;
 }
 
+/** The E2 body lines: guard, mask outcomes, repeats, post-mask result and the descriptive summary. */
+function renderE2BodyLines(gates: GateSummary): string[] {
+  const next = gates.nextRequestId;
+  if (next === undefined) return [];
+
+  const lines = [
+    `- Next.js version guard: ${next.guard}`,
+    `- next dev request-ID mask outcomes (exploratory local rule): ${Object.entries(next.outcomes)
+      .map(([outcome, count]) => `${outcome} ${count}`)
+      .join(", ") || "none"}`,
+  ];
+
+  for (const failure of next.maskFailures) lines.push(`  - request ${failure.request} (${failure.cls}): ${failure.outcome}`);
+  for (const failure of next.maskReported) lines.push(`  - reported only, request ${failure.request} (${failure.cls}): ${failure.outcome}`);
+  for (const repeat of next.repeatedValues) {
+    lines.push(`- Repeated request-ID value ${repeat.value}: requests ${repeat.requests.join(", ")} (${repeat.classes.join(", ")}), ${repeat.identities} identities`);
+  }
+  for (const repeat of next.repeatedReported) lines.push(`- Repeat involving MF, reported only: ${repeat.value}, requests ${repeat.requests.join(", ")}`);
+
+  if (next.postMaskScope === "replicate" && gates.body !== undefined) {
+    lines.push(`- Post-mask body agreement (replicate-wide): ${gates.body.agreement ? "agreement" : gates.body.label}`);
+  } else if (next.maskFailures.length > 0) {
+    lines.push(`- Post-mask body agreement: ${POST_MASK_NOT_ESTABLISHED}`);
+  } else {
+    lines.push("- Post-mask body agreement: not established: no response in the agreement set was compared");
+  }
+
+  if (gates.bodySubset !== undefined) {
+    lines.push(
+      `- Post-mask ${gates.bodySubset.scope}: ${gates.bodySubset.variationSummary.requests} successful responses, ${gates.bodySubset.agreement ? "identical" : `${gates.bodySubset.label} among them`}`,
+    );
+  }
+
+  if (gates.bodyUuidOnly !== undefined) {
+    lines.push(
+      `- UUID-only body comparison (diagnostic stage 1; never affects withholding): ${gates.bodyUuidOnly.agreement ? "identical" : `${gates.bodyUuidOnly.variationSummary.distinctSignatures} distinct signatures`}`,
+    );
+  }
+
+  const summary = (gates.body ?? gates.bodySubset)?.variationSummary;
+  if (summary !== undefined) {
+    lines.push(
+      `- Body variation summary (descriptive only${gates.bodySubset === undefined ? "" : "; successful masks only"}): ${summary.requests} responses, ${summary.distinctSignatures} distinct signatures. Unique, recurring or overlapping signatures are described, not classified, and do not change the withholding decision.`,
+    );
+    for (const [state, counts] of Object.entries(summary.perState)) {
+      lines.push(
+        `  - ${state}: ${counts.requests} responses, ${counts.identities} identities, ${counts.distinctSignatures} distinct, ${counts.recurringSignatures} recurring (${counts.requestsInRecurringSignatures} responses), ${counts.singletonSignatures} singletons`,
+      );
+    }
+    for (const pair of summary.overlap) lines.push(`  - ${pair.first} and ${pair.second}: ${pair.sharedSignatures} shared signatures`);
+  }
+
+  return lines;
+}
+
 /** Render the report as Markdown. Fixed vocabulary only. */
 export function renderReport(report: AnalysisReport): string {
   const lines: string[] = [
@@ -1246,6 +1384,8 @@ export function renderReport(report: AnalysisReport): string {
   if (report.gates.headers?.association !== undefined) {
     lines.push(`- Header mismatch label: ${report.gates.headers.association}`);
   }
+
+  lines.push(...renderE2BodyLines(report.gates));
 
   lines.push("", "## Comparisons", "");
 
@@ -1306,7 +1446,16 @@ export function writeAnalysis(runDirectory: string, outDirectory: string, option
   }
 
   const { manifest, records } = readRun(runDirectory);
-  let report = analyzeRun(manifest, records, options);
+  // Stored bodies are read on demand and returned only when their hash matches the file name's.
+  const bodies: BodySource = (hash) => {
+    try {
+      const body = readFileSync(join(runDirectory, "bodies", `${hash}.bin`));
+      return sha256Hex(body) === hash ? body : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  let report = analyzeRun(manifest, records, options, bodies);
   // An incomplete analysis is never written where a completed report would be.
   const target = (): string => (report.status === "complete" ? outDirectory : join(outDirectory, "incomplete"));
   const checkpoint = ceilingCheckpoint(options.deadline, options.now);
@@ -1344,43 +1493,66 @@ export function writeAnalysis(runDirectory: string, outDirectory: string, option
   return report;
 
   function preserveEvidence(): void {
-  if (report.gates.body !== undefined && report.gates.headers !== undefined && report.withheld.length > 0) {
-    const evidence = join(target(), "evidence");
+  const { headers, bodyUuidOnly, nextRequestId } = report.gates;
+  if (headers === undefined || bodyUuidOnly === undefined || nextRequestId === undefined) return;
+
+  const evidence = join(target(), "evidence");
+  const bySequence = new Map(records.map((record) => [record.sequence, record]));
+  const verifiedBody = (record: MeasurementRecord | undefined): Buffer | undefined =>
+    record?.maskedBodyHash === undefined ? undefined : bodies(record.maskedBodyHash);
+
+  if (report.withheld.length > 0) {
     mkdirSync(evidence, { recursive: true });
-    const bySequence = new Map(records.map((record) => [record.sequence, record]));
-    const maskedBody = (hash: string): Buffer => readFileSync(join(runDirectory, "bodies", `${hash}.bin`));
-    const rawBodyOf = (record: MeasurementRecord): Buffer => {
+    const rawBodyOf = (record: MeasurementRecord, masked: Buffer): Buffer => {
       const identity = manifest.identities[record.identity] as PlanIdentity;
-      const raw = unmaskAt(maskedBody(record.maskedBodyHash as string), identity.key, record.bodyOffsets ?? []);
+      const raw = unmaskAt(masked, identity.key, record.bodyOffsets ?? []);
       if (sha256Hex(raw) !== record.rawBodyHash) {
         throw new Error(`the rebuilt raw body of request ${record.sequence} does not match its recorded raw hash`);
       }
       return raw;
     };
-    const differing = [...new Set([...report.gates.body.differing, ...report.gates.headers.differing])];
+    // §11.4 as amended: every request whose post-mask hash differs, or whose mask outcome is not
+    // `ok`, plus every header difference.
+    const differing = [
+      ...new Set([
+        ...(report.gates.body?.differing ?? []),
+        ...(report.gates.bodySubset?.differing ?? []),
+        ...nextRequestId.maskFailures.map((failure) => failure.request),
+        ...nextRequestId.repeatedValues.flatMap((repeat) => repeat.requests),
+        ...headers.differing,
+      ]),
+    ];
 
     for (const sequence of differing) {
       checkpoint();
       const record = bySequence.get(sequence) as MeasurementRecord;
-      writeFileSync(join(evidence, `${sequence}.body.bin`), rawBodyOf(record));
+      const masked = verifiedBody(record);
+      // An absent or unverified stored body cannot be rebuilt; its record is still preserved.
+      if (masked !== undefined) writeFileSync(join(evidence, `${sequence}.body.bin`), rawBodyOf(record, masked));
       writeFileSync(join(evidence, `${sequence}.json`), `${JSON.stringify(record, null, 2)}\n`);
     }
+  }
 
-    if (!report.gates.body.agreement) {
-      const ofClass = (record: MeasurementRecord): ItemClass => (manifest.identities[record.identity] as PlanIdentity).cls;
-      const nextRecords = records.filter((record) => record.target === "next" && record.maskedBodyHash !== undefined);
-      const diagnosis = diagnoseVariation({
-        learning: nextRecords
+  // §11.5 as amended: diagnostic stage 1 runs on the UUID-masked bodies, before the request-ID
+  // mask, whenever they differ — even when post-mask agreement holds. It never lifts withholding.
+  if (!bodyUuidOnly.agreement) {
+    mkdirSync(evidence, { recursive: true });
+    const ofClass = (record: MeasurementRecord): ItemClass => (manifest.identities[record.identity] as PlanIdentity).cls;
+    const nextRecords = records.filter((record) => record.target === "next" && record.maskedBodyHash !== undefined);
+    const present = (list: readonly (Buffer | undefined)[]): Buffer[] => list.filter((body): body is Buffer => body !== undefined);
+    const diagnosis = diagnoseVariation({
+      learning: present(
+        nextRecords
           .filter((record) => (record.phase === "warmup" && ofClass(record) === "NE") || (record.phase === "measured" && ofClass(record) === "NCA"))
-          .map((record) => maskedBody(record.maskedBodyHash as string)),
-        differing: report.gates.body.differing.map((sequence) => ({
-          request: sequence,
-          body: maskedBody((bySequence.get(sequence) as MeasurementRecord).maskedBodyHash as string),
-        })),
-        ncb: nextRecords.filter((record) => record.phase === "measured" && ofClass(record) === "NCB").map((record) => maskedBody(record.maskedBodyHash as string)),
-      });
-      writeFileSync(join(evidence, "diagnostic-variation.json"), `${JSON.stringify(diagnosis, null, 2)}\n`);
-    }
+          .map(verifiedBody),
+      ),
+      differing: bodyUuidOnly.differing.flatMap((sequence) => {
+        const body = verifiedBody(bySequence.get(sequence));
+        return body === undefined ? [] : [{ request: sequence, body }];
+      }),
+      ncb: present(nextRecords.filter((record) => record.phase === "measured" && ofClass(record) === "NCB").map(verifiedBody)),
+    });
+    writeFileSync(join(evidence, "diagnostic-variation.json"), `${JSON.stringify(diagnosis, null, 2)}\n`);
   }
   }
 }

@@ -12,7 +12,19 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BODY_VARIATION_LABEL,
   BODY_WITHHELD,
+  evaluateE2Gates,
+  maskNextRequestId,
+  NEXT_R_PREFIX,
+  NEXT_R_SUFFIX,
+  NEXT_VERSION_WITHHELD,
+  REQUEST_ID_MASK_WITHHELD,
+  REQUEST_ID_VALUE_REPEATED,
+  separatesStates,
+  summarizeBodyVariation,
+  type E2Observation,
+  type NextGuardOutcome,
   checkDate,
   compareMalformed,
   comparisonListOf,
@@ -355,5 +367,347 @@ describe("the header gate (§11.6, H-D19)", () => {
 
     expect(gate.agreement).toBe(true);
     expect(compareMalformed(set, evaluateBodyGate(set), gate).headersDifferFromReference).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Approved amendment revision 4 (§11.2A, §7.3, §11.3, §11.4): the E2 `next dev` request-ID mask.
+// ---------------------------------------------------------------------------------------------
+
+const value = (n: number): string => String(n).padStart(21, "A");
+const NO_SCRIPT = (): Buffer => Buffer.from("<html>no script</html>", "latin1");
+const OK_GUARD = "ok" as const;
+
+function nextBody(identity: string, v: string, options: { before?: string; after?: string; text?: string } = {}): Buffer {
+  return Buffer.from(
+    `<html><a href="/directory/${identity}">x</a>${options.before ?? ""}${NEXT_R_PREFIX}${v}${NEXT_R_SUFFIX}${options.after ?? "fetch('?_rsc=k')}"}</script><h1>${options.text ?? "Not available"}</h1></html>`,
+    "latin1",
+  );
+}
+
+function observeNext(
+  cls: ItemClass,
+  options: { raw?: (identity: string) => Buffer; v?: string; text?: string; after?: string; before?: string; status?: number; rawHeaders?: string[]; identity?: string } = {},
+): E2Observation {
+  const identity = options.identity ?? `${String(nextRequest).padStart(8, "0")}-0000-4000-8000-000000000000`;
+  const raw = options.raw?.(identity) ?? nextBody(identity, options.v ?? value(nextRequest), options);
+  const uuid = maskOwnIdentity(raw, identity);
+
+  nextRequest += 1;
+
+  return {
+    request: nextRequest,
+    cls,
+    identity,
+    status: options.status ?? 200,
+    maskedBodyHash: sha256Hex(uuid.masked),
+    bodyReplacements: uuid.count,
+    requestIdMask: maskNextRequestId(uuid.masked),
+    rawHeaders: options.rawHeaders ?? headers(),
+    clock: { writeStartMs: NOW - 5, responseEndMs: NOW + 5 },
+  };
+}
+
+const STATES = ["NE", "NCA", "NCB", "PE", "RJ", "UP", "NE", "PE", "RJ", "UP"] as const;
+const validSet = (): E2Observation[] => STATES.map((cls) => observeNext(cls));
+const gates = (observations: E2Observation[], guard: NextGuardOutcome = OK_GUARD) => evaluateE2Gates({ guard, observations });
+
+describe("narrow match (H-D20)", () => {
+  it("T-M1 masks exactly the one value at the same length and leaves its input untouched", () => {
+    const body = nextBody(PLACEHOLDER, value(1));
+    const copy = Buffer.from(body);
+    const result = maskNextRequestId(body);
+
+    expect(result.outcome).toBe("ok");
+    if (result.outcome !== "ok") return;
+    expect(result.value).toBe(value(1));
+    expect(result.masked.length).toBe(body.length);
+    expect(result.masked.toString("latin1")).toBe(body.toString("latin1").replace(value(1), "*".repeat(21)));
+    expect(body.equals(copy)).toBe(true);
+  });
+
+  it("T-M2 does not depend on the byte offset", () => {
+    const near = maskNextRequestId(nextBody(PLACEHOLDER, value(1)));
+    const far = maskNextRequestId(nextBody(PLACEHOLDER, value(1), { before: " ".repeat(5_000) }));
+
+    expect(near.outcome).toBe("ok");
+    expect(far.outcome).toBe("ok");
+  });
+
+  it("T-M3 does not touch another nanoid-shaped value or the _rsc value", () => {
+    const other = `self.__next_other="${value(9)}";`;
+    const result = maskNextRequestId(nextBody(PLACEHOLDER, value(1), { before: other, after: "fetch('?_rsc=abcdefghijklmnopqrstu')}" }));
+
+    expect(result.outcome).toBe("ok");
+    if (result.outcome !== "ok") return;
+    expect(result.masked.toString("latin1")).toContain(other);
+    expect(result.masked.toString("latin1")).toContain("?_rsc=abcdefghijklmnopqrstu");
+  });
+
+  it("T-M4 agrees when only the value differs, with UUID-only hashes still distinct", () => {
+    const set = validSet();
+    const result = gates(set);
+
+    expect(result.reasons).toEqual([]);
+    expect(result.uuidOnly.agreement).toBe(false);
+    expect(result.postMask?.agreement).toBe(true);
+    expect(new Set(set.map((o) => o.maskedBodyHash)).size).toBe(set.length);
+  });
+
+  it("T-M5 the prefix, suffix and placeholder have the approved lengths", () => {
+    expect(Buffer.byteLength(NEXT_R_PREFIX, "ascii")).toBe(32);
+    expect(Buffer.byteLength(NEXT_R_SUFFIX, "ascii")).toBe(69);
+  });
+});
+
+describe("refusal cases", () => {
+  const close = "x}</script>";
+
+  it.each([
+    ["no __next_r, script present", `<script id="_R_">x</script>`, "missing"],
+    ["no script at all", `<p>x</p>`, "missing"],
+    ["other case", `<script id="_R_">self.__NEXT_R="${value(1)}${NEXT_R_SUFFIX}${close}`, "missing"],
+    ["full target twice", `${NEXT_R_PREFIX}${value(1)}${NEXT_R_SUFFIX}${NEXT_R_PREFIX}${value(2)}${NEXT_R_SUFFIX}${close}`, "duplicate"],
+    ["second bare name elsewhere", `${NEXT_R_PREFIX}${value(1)}${NEXT_R_SUFFIX}${close}__next_r`, "duplicate"],
+    ["second script tag", `${NEXT_R_PREFIX}${value(1)}${NEXT_R_SUFFIX}${close}<script id="_R_">`, "duplicate"],
+    ["other script id", `<script id="_X_">self.__next_r="${value(1)}${NEXT_R_SUFFIX}${close}`, "unexpected"],
+    ["extra attribute", `<script id="_R_" nonce="n">self.__next_r="${value(1)}${NEXT_R_SUFFIX}${close}`, "unexpected"],
+    ["src attribute", `<script id="_R_" src="/x.js">self.__next_r="${value(1)}${NEXT_R_SUFFIX}${close}`, "unexpected"],
+    ["single quote", `<script id="_R_">self.__next_r='${value(1)}${NEXT_R_SUFFIX}${close}`, "unexpected"],
+    ["other assignment target", `<script id="_R_">window.__next_r="${value(1)}${NEXT_R_SUFFIX}${close}`, "unexpected"],
+    ["20 bytes", `${NEXT_R_PREFIX}${"A".repeat(20)}${NEXT_R_SUFFIX}${close}`, "malformed"],
+    ["22 bytes", `${NEXT_R_PREFIX}${"A".repeat(22)}${NEXT_R_SUFFIX}${close}`, "malformed"],
+    ["empty", `${NEXT_R_PREFIX}${NEXT_R_SUFFIX}${close}`, "malformed"],
+    ["byte outside the alphabet", `${NEXT_R_PREFIX}${"A".repeat(20)}!${NEXT_R_SUFFIX}${close}`, "malformed"],
+    ["the placeholder itself", `${NEXT_R_PREFIX}${"*".repeat(21)}${NEXT_R_SUFFIX}${close}`, "malformed"],
+    ["other suffix", `${NEXT_R_PREFIX}${value(1)}";x${close}`, "malformed"],
+    ["no closing script tag", `${NEXT_R_PREFIX}${value(1)}${NEXT_R_SUFFIX}x`, "malformed"],
+    ["truncated", `${NEXT_R_PREFIX}${"A".repeat(5)}`, "malformed"],
+  ])("T-R1 %s", (_name, text, outcome) => {
+    expect(maskNextRequestId(Buffer.from(text, "latin1")).outcome).toBe(outcome);
+  });
+
+  it.each(["NE", "NCA", "NCB", "PE", "RJ", "UP"] as const)("T-R2 one failed mask in %s withholds", (cls) => {
+    expect(gates([...validSet(), observeNext(cls, { raw: NO_SCRIPT })]).reasons).toEqual([REQUEST_ID_MASK_WITHHELD]);
+  });
+
+  it("T-R3 withholds when every body fails the same way, though all hashes match", () => {
+    const set = STATES.map((cls) => observeNext(cls, { raw: NO_SCRIPT }));
+    const result = gates(set);
+
+    expect(new Set(set.map((o) => o.maskedBodyHash)).size).toBe(1);
+    expect(result.reasons).toEqual([REQUEST_ID_MASK_WITHHELD]);
+    expect(result.postMask).toBeUndefined();
+  });
+
+  it("T-R4 reports an MF mask failure without withholding", () => {
+    const result = gates([...validSet(), observeNext("MF", { raw: NO_SCRIPT })]);
+
+    expect(result.reasons).toEqual([]);
+    expect(result.maskReported.map((entry) => entry.outcome)).toEqual(["missing"]);
+  });
+
+  it("T-R5 a failed mask and an unrelated difference are both reported", () => {
+    const set = [...validSet(), observeNext("UP", { raw: NO_SCRIPT }), observeNext("RJ", { text: "Not availablE" })];
+
+    expect(gates(set).reasons).toEqual([REQUEST_ID_MASK_WITHHELD, BODY_WITHHELD]);
+  });
+
+  it("T-R6 an empty agreement set establishes nothing and withholds", () => {
+    expect(gates([]).reasons).toEqual([BODY_WITHHELD, HEADER_WITHHELD]);
+    expect(gates([]).postMaskScope).toBe("none");
+  });
+
+  it("T-R7 agreeing successful responses and one failed mask: a subset comparison, not replicate-wide agreement", () => {
+    const set = [...validSet(), observeNext("PE", { raw: NO_SCRIPT })];
+    const result = gates(set);
+
+    expect(result.reasons).toEqual([REQUEST_ID_MASK_WITHHELD]);
+    expect(result.postMaskScope).toBe("subset");
+    expect(result.postMask?.agreement).toBe(true);
+    expect(result.postMask?.variationSummary.requests).toBe(set.length - 1);
+    expect(gates(validSet()).postMaskScope).toBe("replicate");
+    expect(gates(STATES.map((cls) => observeNext(cls, { raw: NO_SCRIPT }))).postMaskScope).toBe("none");
+  });
+
+  it("T-R8 a separate mismatch among the successful responses is still reported alongside the mask failure", () => {
+    const result = gates([...validSet(), observeNext("UP", { raw: NO_SCRIPT }), observeNext("RJ", { text: "Not availablE" })]);
+
+    expect(result.postMaskScope).toBe("subset");
+    expect(result.postMask?.agreement).toBe(false);
+    expect(result.reasons).toEqual([REQUEST_ID_MASK_WITHHELD, BODY_WITHHELD]);
+  });
+});
+
+describe("repeated values across responses", () => {
+  it("T-D1 a value repeated across two measured responses withholds with its own reason", () => {
+    const first = observeNext("NE", { v: "Z".repeat(21) });
+    const second = observeNext("RJ", { v: "Z".repeat(21) });
+    const result = gates([...validSet(), first, second]);
+
+    expect(result.reasons).toEqual([REQUEST_ID_VALUE_REPEATED]);
+    expect(result.repeatedValues).toEqual([{ value: "Z".repeat(21), requests: [first.request, second.request], classes: ["NE", "RJ"], identities: 2 }]);
+  });
+
+  it("T-D2 a repeat within one identity also withholds", () => {
+    const identity = "aaaaaaaa-0000-4000-8000-000000000000";
+    const set = [observeNext("PE", { identity, v: "Y".repeat(21) }), observeNext("PE", { identity, v: "Y".repeat(21) })];
+
+    expect(gates([...validSet(), ...set]).reasons).toEqual([REQUEST_ID_VALUE_REPEATED]);
+  });
+
+  it("T-D3 stays separate from a duplicate occurrence within one body", () => {
+    const twice = `${NEXT_R_PREFIX}${value(1)}${NEXT_R_SUFFIX}${NEXT_R_PREFIX}${value(1)}${NEXT_R_SUFFIX}x}</script>`;
+    const result = gates([...validSet(), observeNext("UP", { raw: () => Buffer.from(twice, "latin1") })]);
+
+    expect(result.reasons).toContain(REQUEST_ID_MASK_WITHHELD);
+    expect(result.reasons).not.toContain(REQUEST_ID_VALUE_REPEATED);
+  });
+
+  it("T-D4 a repeat involving MF is reported only", () => {
+    const set = [observeNext("NE", { v: "X".repeat(21) }), observeNext("MF", { v: "X".repeat(21) })];
+    const result = gates([...validSet(), ...set]);
+
+    expect(result.reasons).toEqual([]);
+    expect(result.repeatedReported.map((repeat) => repeat.classes)).toEqual([["NE", "MF"]]);
+  });
+});
+
+describe("the guard outcome reaches the decision", () => {
+  it.each(["missing", "disagreement", "launch-mismatch", "unreviewed-version"] as const)(
+    "T-N4 %s withholds even when bodies and headers agree",
+    (guard) => {
+      expect(gates(validSet(), guard).reasons).toEqual([NEXT_VERSION_WITHHELD]);
+    },
+  );
+});
+
+describe("the body diagnostic describes signatures and classifies nothing", () => {
+  const entries = (spec: Record<string, readonly string[]>) =>
+    Object.entries(spec).flatMap(([state, signatures]) => signatures.map((signature, i) => ({ state, signature, identity: `${state}${i}` })));
+  const unique = (prefix: string, n: number): string[] => Array.from({ length: n }, (_, i) => `${prefix}${i}`);
+
+  it("T-V1 regression: all-unique signatures (the S-A shape) are counted, not labelled", () => {
+    const summary = summarizeBodyVariation(entries({ NE: unique("n", 15), PE: unique("p", 5), RJ: unique("r", 5), UP: unique("u", 5) }));
+
+    expect(summary.label).toBe(BODY_VARIATION_LABEL);
+    expect(summary.distinctSignatures).toBe(30);
+    expect(summary.perState.PE).toMatchObject({ requests: 5, recurringSignatures: 0, singletonSignatures: 5 });
+    expect(summary.overlap.every((pair) => pair.sharedSignatures === 0)).toBe(true);
+    expect(JSON.stringify(summary)).not.toMatch(/state-associated|non-timing/i);
+  });
+
+  it("T-V2 a single repeated signature in each state makes no state-associated finding", () => {
+    const summary = summarizeBodyVariation(entries({ NE: ["a", "a"], RJ: ["b", "b"] }));
+
+    expect(summary.perState.NE).toMatchObject({ recurringSignatures: 1, requestsInRecurringSignatures: 2 });
+    expect(summary.overlap).toEqual([{ first: "NE", second: "RJ", sharedSignatures: 0 }]);
+    expect(JSON.stringify(summary)).not.toMatch(/state-associated/i);
+  });
+
+  it("T-V3 overlap is reported as a count", () => {
+    expect(summarizeBodyVariation(entries({ NE: ["a", "a", "b"], RJ: ["b", "b"] })).overlap).toEqual([{ first: "NE", second: "RJ", sharedSignatures: 1 }]);
+  });
+
+  it("T-V4 unique and recurring signatures give the same withholding decision", () => {
+    const allUnique = STATES.map((cls, i) => observeNext(cls, { text: `Not available ${i}` }));
+    const recurringByState = STATES.map((cls) => observeNext(cls, cls === "RJ" ? { text: "Rejected" } : {}));
+    const oneByte = [...validSet(), observeNext("NCB", { text: "Not availabl3" })];
+
+    for (const set of [allUnique, recurringByState, oneByte]) {
+      expect(gates(set).reasons).toEqual([BODY_WITHHELD]);
+    }
+  });
+
+  it("T-V5 the body gate no longer returns separatesStates", () => {
+    const result = evaluateBodyGate(STATES.map((cls, i) => observeNext(cls, { text: `Not available ${i}` })));
+
+    expect(result).not.toHaveProperty("separatesStates");
+    expect(result.variationSummary.label).toBe(BODY_VARIATION_LABEL);
+  });
+});
+
+describe("header behaviour is preserved by the body diagnostic change", () => {
+  const list = (i: number): string[] => headers({ extra: ["X-Request", String(i)] });
+
+  it("T-H1 compatibility check: all-unique header hashes keep today's literal §11.6.6 label", () => {
+    const result = evaluateHeaderGate(STATES.map((cls, i) => observe(cls, { rawHeaders: list(i) })));
+
+    expect(result.label).toBe(HEADER_WITHHELD);
+    expect(result.conditionC).toBe(true);
+    expect(result.association).toBe(STATE_ASSOCIATED);
+  });
+
+  it("T-H2 a body difference changes nothing in the header result", () => {
+    const set = STATES.map((cls) => observeNext(cls));
+    const before = evaluateHeaderGate(set);
+    const after = evaluateHeaderGate(set.map((o, i) => ({ ...o, maskedBodyHash: `changed${i}`, bodyReplacements: 9, status: 500 })));
+
+    expect(after).toEqual(before);
+    expect(before.agreement).toBe(true);
+  });
+
+  it("T-H3 evaluateE2Gates reports the unchanged header result on the original observations", () => {
+    const set = [...validSet(), observeNext("RJ", { rawHeaders: headers({ extra: ["Cache-Control", "private"] }) })];
+    const result = gates(set);
+
+    expect(result.headers).toEqual(evaluateHeaderGate(set));
+    expect(result.reasons).toEqual([HEADER_WITHHELD]);
+  });
+
+  it("T-H4 separatesStates keeps §11.6.6's disjoint-set behaviour", () => {
+    expect(separatesStates({ NE: { a: 1 }, RJ: { b: 1 } })).toBe(true);
+    expect(separatesStates({ NE: { a: 2, b: 1 }, RJ: { b: 1 } })).toBe(false);
+  });
+
+  it("T-H5 the header label draws no body conclusion and does not alter header withholding", () => {
+    const set = STATES.map((cls, i) => observeNext(cls, { rawHeaders: list(i) }));
+    const result = gates(set);
+
+    expect(result.headers).toEqual(evaluateHeaderGate(set));
+    expect(result.headers.association).toBe(STATE_ASSOCIATED);
+    expect(result.reasons).toEqual([HEADER_WITHHELD]);
+    expect(result.postMask?.agreement).toBe(true);
+    expect(JSON.stringify([result.postMask, result.uuidOnly])).not.toMatch(/state-associated/i);
+  });
+});
+
+describe("an unrelated byte difference still withholds", () => {
+  it.each([
+    ["elsewhere, across states", "RJ", { text: "Not availablE" }],
+    ["elsewhere, between never-existed requests", "NCB", { text: "Not availabl3" }],
+    ["inside the same script, after the suffix", "PE", { after: "fetch('?_rsc=DIFF')}" }],
+    ["a second nanoid-shaped value", "UP", { before: `self.__next_other="${"B".repeat(21)}";` }],
+    ["a one-byte shift before the script", "NE", { before: " " }],
+  ] as const)("T-U1 %s", (_name, cls, options) => {
+    expect(gates([...validSet(), observeNext(cls, options)]).reasons).toEqual([BODY_WITHHELD]);
+  });
+
+  it("T-U2 a differing status or UUID replacement count withholds", () => {
+    const set = validSet();
+
+    expect(gates([...set, observeNext("RJ", { status: 404 })]).reasons).toEqual([BODY_WITHHELD]);
+    expect(gates([...set, { ...observeNext("PE"), bodyReplacements: 2 }]).reasons).toEqual([BODY_WITHHELD]);
+  });
+});
+
+describe("diagnostics stay outside the gate", () => {
+  it("T-X1 stage 1 keeps the value visible while the post-mask result is reported apart", () => {
+    const bodies = [value(101), value(102), value(103)].map((v) => nextBody(PLACEHOLDER, v));
+    const diagnosis = diagnoseVariation({ learning: bodies.slice(0, 2), differing: [{ request: 1, body: bodies[2] as Buffer }], ncb: [] });
+    const result = gates(validSet());
+
+    expect(diagnosis.perRequest[0]?.edits?.length).toBeGreaterThan(0);
+    expect(diagnosis.label).toBe(DIAGNOSTIC_LABEL);
+    expect(result.uuidOnly.agreement).toBe(false);
+    expect(result.postMask?.agreement).toBe(true);
+  });
+
+  it("T-X2 a diagnostic explanation never overrides a failed gate check", () => {
+    const learning = ["Not available 1", "Not available 2"].map((text) => nextBody(PLACEHOLDER, value(1), { text }));
+    const diagnosis = diagnoseVariation({ learning, differing: [{ request: 99, body: nextBody(PLACEHOLDER, value(1), { text: "Not available 3" }) }], ncb: [] });
+
+    expect(diagnosis.perRequest[0]?.allEditsInsideV).toBe(true);
+    expect(gates([...validSet(), observeNext("UP", { text: "Not available 3" })]).reasons).toEqual([BODY_WITHHELD]);
   });
 });
