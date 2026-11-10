@@ -60,7 +60,7 @@ import { DIRECTORY_COPY } from "../../src/interface/public/directory-view";
 import { E3_MARKER_PATTERN, e3LocalRoleSetupStatements } from "../../src/interface/public/e3-local-persistence";
 import { checkDate, comparisonListOf, maskOwnIdentity } from "./body-compare";
 import { FIXTURE_CONTENT, loadFixtures, verifyStoredStates } from "./fixtures";
-import { checkProcessIdentity, type ListeningEntry, type ProcessIdentity, type ResourceEntry, type ResourceState, type TeardownReport } from "./isolation";
+import { checkProcessIdentity, type ListeningEntry, type PidFileEvidence, type ProcessIdentity, type ResourceEntry, type ResourceState, type TeardownReport } from "./isolation";
 import type { Plan, PlanIdentity } from "./schedule";
 
 /** The hard HTTP attempt cap across every phase (ruling S-6). */
@@ -625,13 +625,35 @@ export function createE3SuperuserOps(deps: SuperuserDeps): SuperuserOps {
 }
 
 /* ------------------------------------------------------------------------------------------- */
-/* Stopping a phase's server (full process-identity checks)                                       */
+/* Stopping owned process trees (full identity checks, ownership-proving orphan sweep)            */
 /* ------------------------------------------------------------------------------------------- */
 
-export interface PhaseStopDeps {
+/** Rounds of the orphan sweep (amendment A1 §4.4). Anything found after the last is uncertain. */
+export const ORPHAN_SWEEP_ROUNDS = 3;
+
+/** A Windows FILETIME (100 ns ticks since 1601-01-01 UTC) for a wall-clock time in milliseconds. */
+export function fileTimeOf(epochMilliseconds: number): bigint {
+  return (BigInt(Math.floor(epochMilliseconds)) + 11_644_473_600_000n) * 10_000n;
+}
+
+const numeric = (value: string | null | undefined): value is string => typeof value === "string" && /^\d+$/.test(value);
+const nonBlank = (value: string | null | undefined): value is string => typeof value === "string" && value.trim() !== "";
+
+/** Seams for finding and recording processes the recorded tree does not yet show. */
+export interface SweepDeps {
+  children(pid: number): Promise<readonly ProcessIdentity[]>;
+  /** Record a process entry: with an identity (`created`), or with only a PID (`left`, and never stopped). */
+  record(fields: { readonly label: string; readonly parentEntry: number; readonly pid: number; readonly identity?: ProcessIdentity; readonly reason?: string }): number;
+  /** O-4: whether this executable may belong to the owned operation. */
+  allowedExecutable(executable: string, parent: ProcessIdentity): boolean;
+  /** Wall clock, in milliseconds, for `stopSentAt`. */
+  now(): number;
+}
+
+export interface TreeStopDeps {
   entries(): readonly ResourceEntry[];
   update(id: number, patch: { readonly state: ResourceState; readonly reason?: string }): void;
-  /** Record the server's current descendants in the intent log. */
+  /** Record the root's current descendants in the intent log. */
   recordDescendants(): Promise<void>;
   inspect(pid: number): Promise<ProcessIdentity | undefined>;
   /** Stop exactly one process. */
@@ -639,7 +661,11 @@ export interface PhaseStopDeps {
   sleep(ms: number): Promise<void>;
   readonly exitPolls: number;
   readonly exitPollMs: number;
+  /** The orphan sweep. Absent for a phase server, whose descendants `recordDescendants` covers. */
+  readonly sweep?: SweepDeps;
 }
+
+export type PhaseStopDeps = TreeStopDeps;
 
 /** How deep `entry` sits under `rootEntry` in the recorded parent chain, or `undefined`. */
 export function depthUnder(entry: ResourceEntry, rootEntry: number, entries: readonly ResourceEntry[]): number | undefined {
@@ -654,60 +680,73 @@ export function depthUnder(entry: ResourceEntry, rootEntry: number, entries: rea
   return undefined;
 }
 
+/** A stopped, verified process whose exit was confirmed: the only kind of parent the sweep starts from (O-1). */
+interface ProvenParent {
+  readonly entryId: number;
+  readonly label: string;
+  readonly identity: ProcessIdentity;
+  /** Wall clock immediately before its stop was sent. */
+  readonly stopSentAt: number;
+}
+
 /**
- * Stop one phase's server and its recorded descendants, deepest first, each only after the full
- * identity check (`checkProcessIdentity`: PID, creation time, executable and command line) says
- * `verified`. A mismatch is never stopped. If recording the descendants fails, or any identity
- * inspection, stop or exit check is inconclusive, this throws an `E3Stop`. The run then starts no
- * further phase, and the intent log keeps every unresolved entry for the final owned-resource
- * teardown.
+ * Why a sweep candidate cannot be shown to belong to a proven parent (O-2 to O-5), or
+ * `undefined` when it can. A command line is never proof of anything.
  */
-export async function stopPhaseServer(rootEntry: number, deps: PhaseStopDeps): Promise<void> {
+export function orphanProofProblem(candidate: ProcessIdentity, parent: { readonly identity: ProcessIdentity; readonly stopSentAt: number }, allowedExecutable: (executable: string, parent: ProcessIdentity) => boolean): string | undefined {
+  if (candidate.parentPid !== parent.identity.pid) return "its parent PID is not the stopped parent's";
+  if (!numeric(candidate.creationTime) || !numeric(parent.identity.creationTime) || !nonBlank(candidate.executable) || !nonBlank(candidate.commandLine)) {
+    return "its identity is incomplete, so ownership cannot be shown";
+  }
+  const created = BigInt(candidate.creationTime);
+  if (created <= BigInt(parent.identity.creationTime)) return "it was created before its recorded parent";
+  if (created > fileTimeOf(parent.stopSentAt)) return "it was created after its parent's stop was sent, so the parent PID may have been reused";
+  if (!allowedExecutable(candidate.executable, parent.identity)) return "its executable is outside the owned set";
+  return undefined;
+}
+
+/**
+ * Stop one recorded tree, deepest first, each process only after `checkProcessIdentity` says
+ * `verified`, then run the ownership-proving orphan sweep (amendment A1 §4.1, §4.4).
+ *
+ * Returns what stayed unresolved; an empty list means everything was stopped and its exit
+ * confirmed. Nothing uncertain is ever stopped. An unconfirmed exit sets its entry to `left`
+ * with its identity kept, and an uncertain orphan is recorded with only its PID, so final
+ * teardown never stops it and keeps every directory it could still use.
+ */
+export async function stopOwnedTree(rootEntry: number, deps: TreeStopDeps): Promise<readonly string[]> {
   const unresolved: string[] = [];
   try {
     await deps.recordDescendants();
   } catch (error) {
-    throw new E3Stop(`Stopped (phase shutdown unresolved): recording the server's descendants failed (${(error as Error).message}); nothing was stopped, and the intent log is kept for teardown`);
+    return [`recording the server's descendants failed (${(error as Error).message}); nothing was stopped`];
   }
 
-  const entries = deps.entries();
-  const tree = entries
-    .map((entry) => ({ entry, depth: depthUnder(entry, rootEntry, entries) }))
-    .filter((item): item is { entry: ResourceEntry; depth: number } => item.depth !== undefined && item.entry.state === "created")
-    .sort((a, b) => b.depth - a.depth);
-  const stopped: { entry: ResourceEntry; recorded: ProcessIdentity }[] = [];
-
-  for (const { entry } of tree) {
-    const recorded = entry.identity;
-    if (recorded === undefined) {
-      unresolved.push(`${entry.label} has no recorded identity`);
-      continue;
-    }
+  /** Verify, stop and confirm one recorded process. Returns the proven parent on success. */
+  const stopOne = async (entry: { readonly id: number; readonly label: string }, recorded: ProcessIdentity): Promise<ProvenParent | undefined> => {
     let live: ProcessIdentity | undefined;
     try {
       live = await deps.inspect(recorded.pid);
     } catch (error) {
       unresolved.push(`${entry.label} could not be inspected (${(error as Error).message})`);
-      continue;
+      return undefined;
     }
     const check = checkProcessIdentity(recorded, live);
     if (check.status === "absent") {
       deps.update(entry.id, { state: "absent", reason: check.reason });
-      continue;
+      return undefined;
     }
     if (check.status === "mismatch") {
       unresolved.push(`${entry.label} was not stopped: ${check.reason}`);
-      continue;
+      return undefined;
     }
+    const stopSentAt = deps.sweep?.now() ?? 0;
     try {
       await deps.stop(recorded.pid);
-      stopped.push({ entry, recorded });
     } catch (error) {
       unresolved.push(`${entry.label} could not be stopped (${(error as Error).message})`);
+      return undefined;
     }
-  }
-
-  for (const { entry, recorded } of stopped) {
     let gone = false;
     for (let poll = 0; poll < deps.exitPolls && !gone; poll += 1) {
       try {
@@ -717,13 +756,472 @@ export async function stopPhaseServer(rootEntry: number, deps: PhaseStopDeps): P
       }
       if (!gone) await deps.sleep(deps.exitPollMs);
     }
-    if (gone) deps.update(entry.id, { state: "stopped" });
-    else unresolved.push(`${entry.label}'s exit could not be confirmed`);
+    if (!gone) {
+      deps.update(entry.id, { state: "left", reason: "its exit could not be confirmed after the stop; its identity is kept for teardown" });
+      unresolved.push(`${entry.label}'s exit could not be confirmed`);
+      return undefined;
+    }
+    deps.update(entry.id, { state: "stopped" });
+    return { entryId: entry.id, label: entry.label, identity: recorded, stopSentAt };
+  };
+
+  const entries = deps.entries();
+  const tree = entries
+    .map((entry) => ({ entry, depth: depthUnder(entry, rootEntry, entries) }))
+    .filter((item): item is { entry: ResourceEntry; depth: number } => item.depth !== undefined && item.entry.state === "created")
+    .sort((a, b) => b.depth - a.depth);
+
+  // Every process is verified and stopped before any exit is confirmed, deepest first.
+  const proven: ProvenParent[] = [];
+  for (const { entry } of tree) {
+    if (entry.identity === undefined) {
+      unresolved.push(`${entry.label} has no recorded identity`);
+      continue;
+    }
+    const parent = await stopOne(entry, entry.identity);
+    if (parent !== undefined) proven.push(parent);
   }
 
+  const sweep = deps.sweep;
+  if (sweep === undefined) return unresolved;
+
+  const recorded = (candidate: ProcessIdentity): boolean =>
+    deps.entries().some((entry) => (entry.identity !== undefined ? entry.identity.pid === candidate.pid && entry.identity.creationTime === candidate.creationTime : entry.pid === candidate.pid));
+  const childrenOf = async (parent: ProvenParent): Promise<readonly ProcessIdentity[] | undefined> => {
+    try {
+      return (await sweep.children(parent.identity.pid)).filter((candidate) => !recorded(candidate));
+    } catch (error) {
+      unresolved.push(`the children of ${parent.label} could not be listed (${(error as Error).message})`);
+      return undefined;
+    }
+  };
+  const uncertain = (candidate: ProcessIdentity, parent: ProvenParent, reason: string): void => {
+    sweep.record({ label: `orphan ${candidate.pid} of ${parent.label} (uncertain)`, parentEntry: parent.entryId, pid: candidate.pid, reason });
+    unresolved.push(`orphan ${candidate.pid} of ${parent.label} was not stopped: ${reason}`);
+  };
+
+  let parents = proven;
+  for (let round = 1; round <= ORPHAN_SWEEP_ROUNDS && parents.length > 0; round += 1) {
+    const next: ProvenParent[] = [];
+    for (const parent of parents) {
+      for (const candidate of (await childrenOf(parent)) ?? []) {
+        const problem = orphanProofProblem(candidate, parent, sweep.allowedExecutable);
+        if (problem !== undefined) {
+          uncertain(candidate, parent, problem);
+          continue;
+        }
+        const label = `orphan ${candidate.pid} of ${parent.label}`;
+        const id = sweep.record({ label, parentEntry: parent.entryId, pid: candidate.pid, identity: candidate });
+        // O-5: re-verified immediately before its stop, inside `stopOne`.
+        const stopped = await stopOne({ id, label }, candidate);
+        if (stopped !== undefined) next.push(stopped);
+      }
+    }
+    parents = next;
+  }
+  for (const parent of parents) {
+    for (const candidate of (await childrenOf(parent)) ?? []) uncertain(candidate, parent, `still found after ${ORPHAN_SWEEP_ROUNDS} sweep rounds`);
+  }
+
+  return unresolved;
+}
+
+/**
+ * Stop one phase's server and its recorded descendants (`stopOwnedTree`, without a sweep). If
+ * anything is unresolved this throws an `E3Stop`: the run then starts no further phase, and the
+ * intent log keeps every unresolved entry for the final owned-resource teardown.
+ */
+export async function stopPhaseServer(rootEntry: number, deps: PhaseStopDeps): Promise<void> {
+  const unresolved = await stopOwnedTree(rootEntry, deps);
   if (unresolved.length > 0) {
     throw new E3Stop(`Stopped (phase shutdown unresolved): ${unresolved.join("; ")}; no further phase was started, and the intent log is kept for teardown`);
   }
+}
+
+/* ------------------------------------------------------------------------------------------- */
+/* Bounded setup steps (amendment A1 §3–§4)                                                       */
+/* ------------------------------------------------------------------------------------------- */
+
+export const NPM_CI_DEADLINE_MS = 10 * 60_000;
+export const NEXT_BUILD_DEADLINE_MS = 10 * 60_000;
+export const CLUSTER_STARTUP_DEADLINE_MS = 3 * 60_000;
+export const CLUSTER_SETTLE_MS = 120_000;
+
+/** A started owned process: its intent-log entry and its exit. */
+export interface OwnedStep {
+  readonly entry: number;
+  readonly exited: Promise<number | null>;
+}
+
+/** A cancellable timer. */
+export interface Timer {
+  readonly promise: Promise<void>;
+  cancel(): void;
+}
+
+export interface BoundedStepSeams {
+  readonly timeout: (ms: number) => Timer;
+  readonly signal: AbortSignal;
+  readonly now: () => number;
+  /** Absolute wall-clock time (ms) at which the whole run's ceiling falls. */
+  readonly runDeadline: number;
+  /** Record a step's exit. `late` means after its outcome was fixed: noted only, never success. */
+  readonly stepExited: (entry: number, code: number | null, late: boolean) => void;
+  /** Identity-checked stop of the step's tree with the orphan sweep (`stopOwnedTree`). */
+  readonly stopStep: (entry: number) => Promise<readonly string[]>;
+}
+
+/** Resolves when the signal aborts; `dispose` removes the listener. */
+function abortWatch(signal: AbortSignal): { readonly promise: Promise<void>; dispose(): void } {
+  let listener: (() => void) | undefined;
+  const promise = new Promise<void>((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    listener = () => resolve();
+    signal.addEventListener("abort", listener, { once: true });
+  });
+  return { promise, dispose: () => listener !== undefined && signal.removeEventListener("abort", listener) };
+}
+
+/**
+ * One bounded setup step (`npm ci`, `next build`), against an **absolute** deadline: the earlier
+ * of `now + deadlineMs` and the run's own deadline, fixed before anything starts.
+ *
+ * - **Before `start()`:** the abort signal and the remaining time are checked. If either has run
+ *   out, nothing is started.
+ * - **During `start()`:** the time it takes counts against the same deadline. An inspection inside
+ *   `start()` (process identity, through PowerShell) is unbounded (ruling A1-3), so it can delay
+ *   this; the deadline is then enforced as soon as `start()` returns.
+ * - **After `start()`:** the signal and the deadline are checked again. If startup crossed the
+ *   deadline, the recorded owned process is settled and the run stops.
+ * - **Before accepting an exit as success:** they are checked again. An exit observed after the
+ *   deadline or the abort is late: it is recorded, never treated as success, and the step is
+ *   settled.
+ *
+ * Settling means stopping the step's tree with identity checks and the orphan sweep, then
+ * throwing an `E3Stop`, so no later step or phase starts.
+ */
+export async function runBoundedProcessStep(seams: BoundedStepSeams, label: string, deadlineMs: number, start: () => Promise<OwnedStep>): Promise<void> {
+  const deadlineAt = Math.min(seams.now() + deadlineMs, seams.runDeadline);
+  const allowance = Math.max(0, deadlineAt - seams.now());
+  if (seams.signal.aborted) throw new E3Stop(`Stopped (E-A1 ${label} aborted): the run was aborted before ${label} started; nothing was started`);
+  if (seams.now() >= deadlineAt) throw new E3Stop(`Stopped (E-A1 ${label} timeout): no time remained before ${label} would start; nothing was started`);
+
+  const step = await start();
+  let fixed = false;
+  let observed: { readonly code: number | null } | undefined;
+  const exited = step.exited.then((code) => {
+    observed = { code };
+    if (fixed) seams.stepExited(step.entry, code, true);
+    return "exit" as const;
+  });
+  /** The outcome is fixed: record any exit as late, settle the owned process, and stop the run. */
+  const settleAndStop = async (reason: "timeout" | "aborted", detail: string): Promise<never> => {
+    fixed = true;
+    if (observed !== undefined) seams.stepExited(step.entry, observed.code, true);
+    const unresolved = await seams.stopStep(step.entry);
+    throw new E3Stop(
+      `Stopped (E-A1 ${label} ${reason}): ${detail}; ` +
+        (unresolved.length === 0 ? "its processes were stopped and their exits confirmed" : `unresolved: ${unresolved.join("; ")}; the intent log is kept for teardown`),
+    );
+  };
+  const expired = (): "timeout" | "aborted" | undefined => (seams.signal.aborted ? "aborted" : seams.now() >= deadlineAt ? "timeout" : undefined);
+  const detailOf = (reason: "timeout" | "aborted", when: string): string => (reason === "timeout" ? `${label} did not finish within ${allowance} ms (${when})` : `${label} was interrupted (${when})`);
+
+  // Startup itself may have crossed the deadline, or the run may have been aborted meanwhile.
+  await Promise.resolve();
+  const afterStart = expired();
+  if (afterStart !== undefined) return settleAndStop(afterStart, detailOf(afterStart, afterStart === "timeout" ? "its startup crossed the deadline" : "the run was aborted during its startup"));
+
+  const timer = seams.timeout(Math.max(0, deadlineAt - seams.now()));
+  const aborted = abortWatch(seams.signal);
+  const first = await Promise.race([exited, timer.promise.then(() => "timeout" as const), aborted.promise.then(() => "aborted" as const)]);
+  timer.cancel();
+  aborted.dispose();
+
+  if (first === "exit") {
+    // An exit counts as success only if it arrived before the deadline and without an abort.
+    const late = expired();
+    if (late !== undefined) return settleAndStop(late, detailOf(late, "its exit arrived after the deadline"));
+    const code = (observed as { code: number | null }).code;
+    seams.stepExited(step.entry, code, false);
+    if (code !== 0) throw new E3Stop(`Stopped (E-A1): ${label} exited ${String(code)}`);
+    return;
+  }
+  return settleAndStop(first, detailOf(first, first === "timeout" ? "the deadline passed" : "the run was aborted"));
+}
+
+/** The refusal a cluster callback entered after its startup deadline throws, before any SQL. */
+export const LATE_CLUSTER_CALLBACK = "Stopped (L-1): cluster startup completed after its deadline";
+
+/** The handle a gated callback sees: `connectSuperuser` refuses once the gate has closed. */
+export function gateClusterHandle(handle: E3ClusterHandle, gate: { readonly open: boolean }): E3ClusterHandle {
+  return {
+    ...handle,
+    connectSuperuser: () => {
+      if (!gate.open) throw new E3Stop(LATE_CLUSTER_CALLBACK);
+      return handle.connectSuperuser();
+    },
+  };
+}
+
+export interface ClusterStartupSeams extends Pick<BoundedStepSeams, "timeout" | "signal" | "now" | "runDeadline"> {
+  readonly withCluster: <T>(body: (cluster: E3ClusterHandle) => Promise<T>) => Promise<T>;
+  /** Find, record and stop the owned startup children (`interruptClusterStartup`). Returns what stayed unresolved. */
+  readonly interruptClusterStartup: () => Promise<readonly string[]>;
+  /** Record the cluster entry as `left`: the helper did not settle in time. */
+  readonly markClusterUnsettled: (reason: string) => void;
+}
+
+const isCleanupFailure = (error: unknown): boolean => error instanceof AggregateError || (error as Error | undefined)?.name === "ClusterCleanupError";
+
+/**
+ * Cluster startup against an **absolute** deadline: the earlier of `now +
+ * CLUSTER_STARTUP_DEADLINE_MS` and the run's own (amendment A1 §4.2–§4.3).
+ *
+ * **The callback checks the clock itself.** At entry, before it cancels the startup timer, checks
+ * the listener or permits any SQL, it checks the abort signal and the absolute deadline. A
+ * callback that arrives late is refused even if the timer callback has not run yet, and the gate
+ * closes for good, so `connectSuperuser` refuses too. The gate records entry only after that check
+ * passes, so an expired deadline is never overridden by it.
+ *
+ * **If the deadline or the abort comes first,** the owned startup children are stopped, and the
+ * helper is given `CLUSTER_SETTLE_MS` to settle. If it does not, the cluster entry is recorded as
+ * `left`.
+ */
+export async function runBoundedClusterStartup<T>(seams: ClusterStartupSeams, body: (cluster: E3ClusterHandle) => Promise<T>): Promise<T> {
+  const deadlineAt = Math.min(seams.now() + CLUSTER_STARTUP_DEADLINE_MS, seams.runDeadline);
+  const allowance = Math.max(0, deadlineAt - seams.now());
+  if (seams.signal.aborted) throw new E3Stop("Stopped (L-1 aborted): the run was aborted before cluster startup; nothing was started");
+  if (seams.now() >= deadlineAt) throw new E3Stop("Stopped (L-1 timeout): no time remained before cluster startup; nothing was started");
+
+  /** `pending` until the callback either enters in time or the gate closes; never reopens. */
+  const gate = { open: true, state: "pending" as "pending" | "entered" | "closed" };
+  const close = (): void => {
+    gate.open = false;
+    gate.state = "closed";
+  };
+  const timer = seams.timeout(allowance);
+  const aborted = abortWatch(seams.signal);
+  const stopWatching = (): void => {
+    timer.cancel();
+    aborted.dispose();
+  };
+
+  const run = seams.withCluster(async (handle) => {
+    // First, before anything else: the gate, the abort and the absolute deadline.
+    if (gate.state === "closed" || seams.signal.aborted || seams.now() >= deadlineAt) {
+      close();
+      throw new E3Stop(LATE_CLUSTER_CALLBACK);
+    }
+    gate.state = "entered";
+    stopWatching();
+    return body(gateClusterHandle(handle, gate));
+  });
+  type Outcome = { readonly kind: "settled"; readonly ok: true; readonly value: T } | { readonly kind: "settled"; readonly ok: false; readonly error: unknown } | { readonly kind: "timeout" | "aborted" };
+  const outcome: Outcome = await Promise.race([
+    run.then(
+      (value): Outcome => ({ kind: "settled", ok: true, value }),
+      (error: unknown): Outcome => ({ kind: "settled", ok: false, error }),
+    ),
+    timer.promise.then((): Outcome => ({ kind: "timeout" })),
+    aborted.promise.then((): Outcome => ({ kind: "aborted" })),
+  ]);
+
+  if (outcome.kind === "settled") {
+    stopWatching();
+    if (outcome.ok) return outcome.value;
+    throw outcome.error;
+  }
+  // The callback passed its own deadline and abort check before the timer was observed here, so
+  // startup completed in time; the body runs on under its own checks.
+  if (gate.state === "entered") return run;
+
+  close();
+  stopWatching();
+  const unresolved = [...(await seams.interruptClusterStartup())];
+  const settle = seams.timeout(CLUSTER_SETTLE_MS);
+  let helperError: unknown;
+  const settled = await Promise.race([
+    run.then(
+      () => "settled" as const,
+      (error: unknown) => {
+        helperError = error;
+        return "settled" as const;
+      },
+    ),
+    settle.promise.then(() => "pending" as const),
+  ]);
+  settle.cancel();
+  if (settled === "pending") {
+    seams.markClusterUnsettled(`the cluster helper did not settle within ${CLUSTER_SETTLE_MS} ms after startup was ${outcome.kind === "timeout" ? "timed out" : "interrupted"}; its root and parent may still be in use and are preserved`);
+    unresolved.push(`the cluster helper did not settle within ${CLUSTER_SETTLE_MS} ms`);
+  } else if (isCleanupFailure(helperError)) {
+    unresolved.push(`the cluster helper's cleanup did not complete (${(helperError as Error).message})`);
+  }
+  throw new E3Stop(
+    `Stopped (L-1 ${outcome.kind}): cluster startup ${outcome.kind === "timeout" ? `did not reach the callback within ${allowance} ms` : "was interrupted"}; ` +
+      (unresolved.length === 0 ? "the startup processes were stopped and the helper settled" : `unresolved: ${unresolved.join("; ")}; the affected directories are preserved`),
+  );
+}
+
+/* ------------------------------------------------------------------------------------------- */
+/* Interrupting cluster startup (amendment A1 §4.2)                                               */
+/* ------------------------------------------------------------------------------------------- */
+
+export interface ClusterInterruptDeps {
+  /** The recorded cluster directory, or `undefined` if it was never located. */
+  readonly clusterDirectory: string | undefined;
+  readonly harnessPid: number;
+  children(pid: number): Promise<readonly ProcessIdentity[]>;
+  /** The bundled binary's path, or `undefined` when it cannot be resolved. */
+  bundledBinary(name: "initdb" | "postgres"): string | undefined;
+  samePath(a: string, b: string): boolean;
+  record(fields: { readonly label: string; readonly pid: number; readonly identity?: ProcessIdentity; readonly reason?: string }): number;
+  update(id: number, patch: { readonly state: ResourceState; readonly reason?: string }): void;
+  note(message: string, entry?: number): void;
+  /** `postmaster.pid` evidence, by the helper's own proof (`readPidFileEvidence`). */
+  pidFileEvidence(clusterDirectory: string): PidFileEvidence;
+  inspect(pid: number): Promise<ProcessIdentity | undefined>;
+  /** `requestCompleteShutdown`: `pg_ctl stop -m fast -w -t 30 -D <dir>`, outer bound 30 s, kills nothing. */
+  requestShutdown(clusterDirectory: string): Promise<{ readonly ok: boolean; readonly timedOut: boolean; readonly detail: string }>;
+  /** `stopOwnedTree` for a recorded startup child, with the sweep. */
+  stopTree(entry: number): Promise<readonly string[]>;
+}
+
+/** Windows command-line tokens, honouring double quotes. */
+export function commandLineTokens(commandLine: string): readonly string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let quoted = false;
+  let started = false;
+  for (const character of commandLine) {
+    if (character === '"') {
+      quoted = !quoted;
+      started = true;
+    } else if (/\s/.test(character) && !quoted) {
+      if (started) tokens.push(current);
+      current = "";
+      started = false;
+    } else {
+      current += character;
+      started = true;
+    }
+  }
+  if (started) tokens.push(current);
+  return tokens;
+}
+
+/** The data directory a startup child's arguments name: `--pgdata=<dir>` (initdb) or `-D <dir>` (postgres). */
+export function dataDirectoryArgument(kind: "initdb" | "postgres", commandLine: string): string | undefined {
+  const tokens = commandLineTokens(commandLine);
+  if (kind === "initdb") return tokens.find((token) => token.startsWith("--pgdata="))?.slice("--pgdata=".length);
+  const at = tokens.indexOf("-D");
+  return at < 0 ? undefined : tokens[at + 1];
+}
+
+/**
+ * Find, record and stop the cluster helper's owned startup children (amendment A1 §4.2).
+ *
+ * A child counts only if it is the harness's own child, its executable is exactly the bundled
+ * `initdb` or `postgres`, and its parsed arguments name the recorded cluster directory as a
+ * value. A child with an incomplete identity is recorded as uncertain and never stopped.
+ * `postgres` is shut down with `pg_ctl` **only** after both existing proofs: `postmaster.pid`
+ * proven for the recorded directory, naming the recorded child, whose live identity verifies.
+ * An unproven `pg_ctl` outcome is recorded, with the fact that its PID is unavailable, and left
+ * unresolved; nothing is killed in its place.
+ */
+export async function interruptClusterStartup(deps: ClusterInterruptDeps): Promise<readonly string[]> {
+  const directory = deps.clusterDirectory;
+  if (directory === undefined) return ["the cluster directory was never recorded, so no startup process can be attributed to it"];
+  let candidates: readonly ProcessIdentity[];
+  try {
+    candidates = await deps.children(deps.harnessPid);
+  } catch (error) {
+    return [`the harness's child processes could not be listed (${(error as Error).message})`];
+  }
+
+  const unresolved: string[] = [];
+  const owned: { readonly kind: "initdb" | "postgres"; readonly id: number; readonly identity: ProcessIdentity }[] = [];
+  for (const candidate of candidates) {
+    if (candidate.parentPid !== deps.harnessPid || !nonBlank(candidate.executable)) continue;
+    const kind = (["initdb", "postgres"] as const).find((name) => {
+      const binary = deps.bundledBinary(name);
+      return binary !== undefined && deps.samePath(candidate.executable as string, binary);
+    });
+    if (kind === undefined) continue;
+    const named = nonBlank(candidate.commandLine) ? dataDirectoryArgument(kind, candidate.commandLine) : undefined;
+    if (named === undefined || !deps.samePath(named, directory)) continue;
+    if (!numeric(candidate.creationTime)) {
+      deps.record({ label: `cluster startup ${kind} ${candidate.pid} (uncertain)`, pid: candidate.pid, reason: "its identity is incomplete, so it cannot be verified" });
+      unresolved.push(`${kind} ${candidate.pid} was not stopped: its identity is incomplete`);
+      continue;
+    }
+    owned.push({ kind, id: deps.record({ label: `cluster startup ${kind} ${candidate.pid}`, pid: candidate.pid, identity: candidate }), identity: candidate });
+  }
+
+  for (const child of owned.filter((c) => c.kind === "postgres")) {
+    const evidence = deps.pidFileEvidence(directory);
+    const leave = (reason: string): void => {
+      deps.update(child.id, { state: "left", reason });
+      unresolved.push(`postgres ${child.identity.pid}: ${reason}`);
+    };
+    if (evidence.status === "proven") {
+      if (evidence.pid !== child.identity.pid) {
+        leave(`postmaster.pid names pid ${evidence.pid}, not the recorded postgres child; pg_ctl was not run`);
+        continue;
+      }
+      let live: ProcessIdentity | undefined;
+      try {
+        live = await deps.inspect(child.identity.pid);
+      } catch (error) {
+        leave(`its identity could not be inspected (${(error as Error).message}); pg_ctl was not run`);
+        continue;
+      }
+      const check = checkProcessIdentity(child.identity, live);
+      if (check.status === "absent") {
+        deps.update(child.id, { state: "absent", reason: check.reason });
+        continue;
+      }
+      if (check.status !== "verified") {
+        leave(`${check.reason}; pg_ctl was not run`);
+        continue;
+      }
+      deps.note(`pg_ctl stop -m fast requested for the owned cluster directory; postmaster pid ${child.identity.pid} proven and verified`, child.id);
+      const outcome = await deps.requestShutdown(directory);
+      if (!outcome.ok) {
+        const reason = `pg_ctl stop ${outcome.timedOut ? "did not complete within its bound" : "failed"} (${outcome.detail}); complete shutdown is unproven; the pg_ctl process was not stopped and its PID is unavailable`;
+        deps.note(`pg_ctl stop outcome: unresolved. ${reason}`, child.id);
+        leave(reason);
+        continue;
+      }
+      deps.note("pg_ctl stop outcome: PostgreSQL reported a complete shutdown of the owned cluster", child.id);
+      unresolved.push(...(await deps.stopTree(child.id)));
+    } else if (evidence.status === "missing") {
+      // No postmaster.pid yet: an identity-checked stop of the child itself, then the sweep.
+      unresolved.push(...(await deps.stopTree(child.id)));
+    } else {
+      leave(`postmaster.pid is ${evidence.status} (${evidence.detail}); pg_ctl was not run and the child was not stopped`);
+    }
+  }
+
+  for (const child of owned.filter((c) => c.kind === "initdb")) unresolved.push(...(await deps.stopTree(child.id)));
+  return unresolved;
+}
+
+/* ------------------------------------------------------------------------------------------- */
+/* The exit code                                                                                  */
+/* ------------------------------------------------------------------------------------------- */
+
+/**
+ * `2` for a refusal before anything was created; `0` only when normal acceptance passed and
+ * zero residue was established; `1` otherwise. E-A4b never affects it.
+ */
+export function e3ExitCode(report: Pick<E3Report, "acceptancePassed"> | undefined, safety: Pick<FinalSafety, "zeroResidue"> | undefined, refused = false): 0 | 1 | 2 {
+  if (refused) return 2;
+  return report?.acceptancePassed === true && safety?.zeroResidue === true ? 0 : 1;
 }
 
 /* ------------------------------------------------------------------------------------------- */
@@ -811,11 +1309,13 @@ export interface E3Secrets {
   readonly marker: string;
 }
 
-export interface E3RunSeams {
-  /** Disposable worktree at the authorized commit, then `npm ci`. */
+export interface E3RunSeams extends BoundedStepSeams, ClusterStartupSeams {
+  /** Disposable worktree at the authorized commit. Git calls are unbounded (amendment A1 §6, ruling A1-3). */
   readonly prepareWorktree: () => Promise<void>;
-  /** `next build` with exactly the given environment; throws on failure. */
-  readonly build: (environment: Readonly<Record<string, string>>) => Promise<void>;
+  /** Start `npm ci` in the worktree as a recorded owned process. */
+  readonly startInstall: () => Promise<OwnedStep>;
+  /** Start `next build` with exactly the given environment as a recorded owned process. */
+  readonly startBuild: (environment: Readonly<Record<string, string>>) => Promise<OwnedStep>;
   /** Create the cluster with `E3_CLUSTER_REQUEST` (no database, no migration), run the body, then shut it down. */
   readonly withCluster: <T>(body: (cluster: E3ClusterHandle) => Promise<T>) => Promise<T>;
   /** `next start` on a free loopback port with exactly the given extra environment. */
@@ -982,11 +1482,14 @@ export async function runE3Check(seams: E3RunSeams, buildEnvironment: Readonly<R
     const environmentProblems = buildEnvironmentProblems(buildEnvironment);
     if (environmentProblems.length > 0) throw new E3Stop(`Stopped (build environment): ${environmentProblems.join("; ")}`);
     await seams.prepareWorktree();
-    await seams.build(buildEnvironment);
+    // Bounded: a timeout or abort stops the step's tree, and no later step or phase starts.
+    await runBoundedProcessStep(seams, "npm ci", NPM_CI_DEADLINE_MS, () => seams.startInstall());
+    await runBoundedProcessStep(seams, "next build", NEXT_BUILD_DEADLINE_MS, () => seams.startBuild(buildEnvironment));
     built = true;
     seams.note("E-A1: next build succeeded with no database and no E3 runtime configuration");
 
-    await seams.withCluster(async (cluster) => {
+    // Bounded and gated: a callback entered after the startup deadline throws before L-3.
+    await runBoundedClusterStartup(seams, async (cluster) => {
       evidence.port = cluster.port;
       // L-3: before the run's first network SQL statement. The helper was asked for no database,
       // so it has sent none; only initdb's bootstrap and the server start have run.
