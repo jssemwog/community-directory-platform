@@ -18,9 +18,10 @@ import { cpus, platform, release, tmpdir } from "node:os";
 import * as http from "node:http";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 
 import {
+  applyGovernedMigration,
   CLUSTER_PASSWORD,
   CLUSTER_USER,
   freePort,
@@ -29,6 +30,26 @@ import {
   type EmbeddedCluster,
 } from "../../src/data/testing/embedded-cluster";
 import { createListingPersistence } from "../../src/data/connection";
+import {
+  appDatabaseUrl,
+  createE3SuperuserOps,
+  createRedactor,
+  E3_CLUSTER_REQUEST,
+  e3ConsoleLines,
+  e3FinalSafety,
+  e3Fixtures,
+  E3Stop,
+  redactDeep,
+  renderE3Report,
+  runE3Check,
+  stopPhaseServer,
+  type AppServer,
+  type E3ClusterHandle,
+  type E3Exchange,
+  type E3RunSeams,
+  type E3Secrets,
+  type ScannedItem,
+} from "./e3-check";
 import {
   DEFAULT_ANALYSIS,
   medianOf,
@@ -69,6 +90,8 @@ import {
   outputDirectoryProblems,
   PERSONAL_DEMO_PORTS,
   portIsFree,
+  PROCESS_EXIT_POLL_MS,
+  PROCESS_EXIT_POLLS,
   ProcessInspectionError,
   projectionNeedsRuling,
   projectReplicateMs,
@@ -130,6 +153,7 @@ export const USAGE = `BI-4 timing pilot harness (issue #246). Every run needs it
   validate-e2 --out <abs dir> --validation-out <abs dir> --seed <s> --delays-ns <a,b,c> --background <n> --commit <sha>
   analyze --run <run dir> --out <abs dir>
   cleanup --run <run dir>
+  e3-check --out <abs dir> --commit <sha>
   --help
 
 No input has a default. The output directory must be absolute, existing, empty, outside the
@@ -139,7 +163,12 @@ nanoseconds. Results are exploratory or diagnostic; no threshold or verdict is a
 validate-e2 is validation only, not a smoke run: one E2 pass of the smoke schedule (80-request
 cap; cooperative limits of 20 min for the pass, 3 for teardown, 5 for evaluation), evaluated by the
 shared E2 gates into --validation-out. It computes no timing statistic, starts no S-B or S-C, and
-changes no smoke verdict. analyze refuses its output.`;
+changes no smoke verdict. analyze refuses its output.
+
+e3-check is the E3-local acceptance run (E3-local Scope Gate revision 4): next build with no
+database or E3 configuration, then one disposable cluster and three next start phases, with a hard
+60-attempt HTTP cap across every phase. It computes no timing statistic. Deliberate fault injection
+(E-A4b) is reported separately from the normal acceptance result.`;
 
 const FLAGS: Readonly<Record<string, readonly string[]>> = {
   smoke: ["--boundary", "--out", "--seed", "--delays-ns", "--background", "--commit"],
@@ -148,6 +177,7 @@ const FLAGS: Readonly<Record<string, readonly string[]>> = {
   "validate-e2": ["--out", "--validation-out", "--seed", "--delays-ns", "--background", "--commit"],
   analyze: ["--run", "--out"],
   cleanup: ["--run"],
+  "e3-check": ["--out", "--commit"],
 };
 
 /** Internal flags, used only when the smoke driver spawns a forced-pass child. */
@@ -1484,6 +1514,332 @@ function realValidateSeams(): ValidateE2Seams {
   };
 }
 
+// ---------------------------------------------------------------------------------------------
+// e3-check (E3-local Scope Gate revision 4): the real seams. The order and the rules are in
+// `e3-check.ts`, where they are tested; this binds them to processes, Git, the cluster and HTTP.
+// ---------------------------------------------------------------------------------------------
+
+/** The cooperative limit for one e3-check run. The 60-attempt HTTP cap is the hard one. */
+export const E3_PASS_MINUTES = 30;
+
+/** Environment names a child may inherit. Nothing names a database or an E3 setting. */
+const E3_INHERITED = ["PATH", "PATHEXT", "SystemRoot", "SystemDrive", "ComSpec", "TEMP", "TMP", "USERPROFILE", "LOCALAPPDATA", "APPDATA"] as const;
+
+function inheritedEnvironment(): Record<string, string> {
+  const environment: Record<string, string> = { NEXT_TELEMETRY_DISABLED: "1" };
+  for (const name of E3_INHERITED) {
+    const value = process.env[name];
+    if (value !== undefined) environment[name] = value;
+  }
+  return environment;
+}
+
+/** One direct request: no agent reuse, no redirect following, identity encoding. */
+function sendE3(port: number, method: "GET" | "OPTIONS", path: string): Promise<E3Exchange> {
+  return new Promise((accept, reject) => {
+    let writeStartMs = 0;
+    const request = http.request({ host: VALIDATION_LOOPBACK, port, path, method, agent: false, headers: { "Accept-Encoding": "identity", Connection: "close" } });
+    request.setTimeout(60_000, () => request.destroy(new Error("timed out after 60000ms")));
+    request.once("error", reject);
+    request.once("response", (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.once("error", reject);
+      response.once("end", () => accept({ status: response.statusCode ?? -1, rawHeaders: [...response.rawHeaders], body: Buffer.concat(chunks), writeStartMs, responseEndMs: Date.now() }));
+    });
+    writeStartMs = Date.now();
+    request.end();
+  });
+}
+
+function filesUnder(root: string): string[] {
+  const found: string[] = [];
+  const walk = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (entry.isFile()) found.push(path);
+    }
+  };
+  if (existsSync(root)) walk(root);
+  return found;
+}
+
+async function e3Check(flags: Readonly<Record<string, string>>): Promise<number> {
+  if (platform() !== "win32") throw new Error("the harness's process and cleanup operations are Windows-only");
+  // Generated first, so every message this command prints or writes can be redacted.
+  const hex = (bytes: number): string => randomBytes(bytes).toString("hex");
+  const secrets = { role: `bi4_e3_app_${hex(4)}`, password: hex(16), marker: `bi4-e3-synthetic:${hex(16)}` };
+  let redact = createRedactor([secrets.password]);
+  try {
+    return await e3CheckWith(flags, secrets, (next) => (redact = next), (text) => redact(text));
+  } catch (error) {
+    throw new Error(redact((error as Error).message));
+  }
+}
+
+async function e3CheckWith(
+  flags: Readonly<Record<string, string>>,
+  secrets: E3Secrets,
+  setRedactor: (redact: (text: string) => string) => void,
+  redact: (text: string) => string,
+): Promise<number> {
+  const out = flags["--out"] as string;
+  const commit = flags["--commit"] as string;
+  const git = createGitOps(REPOSITORY_ROOT);
+  const processes = windowsProcessOps();
+  const tempDirectory = tmpdir();
+  const hex = (bytes: number): string => randomBytes(bytes).toString("hex");
+  const print = (message: string): void => say(redact(message));
+
+  const preconditions = await checkPreconditions({
+    repositoryRoot: REPOSITORY_ROOT,
+    tempDirectory,
+    authorizedCommit: commit,
+    outputDirectory: out,
+    environment: process.env,
+    portIsFree,
+    gitHead: () => git.head(),
+    gitStatusPorcelain: () => git.statusPorcelain(),
+    directoryEntries,
+    restrictedMetadata: () => restrictedMetadataOf(REPOSITORY_ROOT),
+  });
+  const refusals = [...preconditions.refusals, ...Object.keys(process.env).filter((name) => name.startsWith("BI4_E3_")).map((name) => `${name} is set in the harness's own environment`)];
+  if (refusals.length > 0) {
+    for (const refusal of refusals) print(`refused: ${refusal}`);
+    return 2;
+  }
+  const restrictedBaseline = preconditions.restrictedBaseline as RestrictedMetadata;
+  const statusBaseline = preconditions.statusBaseline ?? "";
+
+  const log = new IntentLog(join(out, "run-state.json"));
+  const note = (message: string, entry?: number): void => log.note(redact(message), entry);
+  const controller = new AbortController();
+  const abortOn = createSignalAbortHandler(controller, (message) => note(message));
+  const uninstall = installAbortOnSignals(controller, undefined, (message) => note(message), abortOn);
+  const ceiling = setTimeout(() => controller.abort(new Error("timeout")), E3_PASS_MINUTES * MINUTE);
+  const startedAt = new Date();
+  const fixtures = e3Fixtures(randomUUID, hex);
+  const inspections = { lookup: windowsListenerLookup(), inspect: (pid: number) => processes.inspect(pid), children: (pid: number) => processes.children(pid) };
+  let worktree: string | undefined;
+  const nextEntry = (): string => join(worktree as string, "node_modules", "next", "dist", "bin", "next");
+  const sleep = (ms: number): Promise<void> => new Promise((resume) => setTimeout(resume, ms));
+
+  const seams: E3RunSeams = {
+    prepareWorktree: async () => {
+      const root = join(tempDirectory, `${HARNESS_ROOT_PREFIX}e3-${hex(6)}`);
+      if (!isHarnessRoot(root, tempDirectory)) throw new Error("internal: the e3 root is not a harness root");
+      const rootEntry = log.intend("harness-root", "e3 root", { path: root });
+      mkdirSync(root, { recursive: false });
+      log.update(rootEntry, { state: "created" });
+      worktree = join(root, "worktree");
+      const worktreeEntry = log.intend("worktree", "worktree", { path: worktree, commit });
+      await git.addDetachedWorktree(worktree, commit);
+      const adminRecord = adminRecordOf(readFileSync(join(worktree, ".git"), "utf8"));
+      log.update(worktreeEntry, { state: "created", ...(adminRecord === undefined ? {} : { adminRecord }) });
+      const listed = (await git.worktreeList()).find((entry) => resolve(entry.path).toLowerCase() === resolve(worktree as string).toLowerCase());
+      if (listed?.head !== commit || !listed.detached) throw new E3Stop("Stopped (setup): the disposable worktree is not detached at the authorized commit");
+
+      const npmCli = join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+      if (!existsSync(npmCli)) throw new E3Stop("Stopped (setup): npm-cli.js was not found beside the running node");
+      const npm = await startOwnedProcess(log, processes, {
+        label: "npm ci",
+        command: process.execPath,
+        args: [npmCli, "ci", "--prefer-offline", "--no-audit", "--no-fund", "--ignore-scripts"],
+        cwd: worktree,
+        env: Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined && !entry[0].startsWith("BI4_E3_") && !/DATABASE_URL/i.test(entry[0]))),
+        stdoutPath: join(out, "npm-ci.out.log"),
+        stderrPath: join(out, "npm-ci.err.log"),
+      });
+      const npmExit = await new Promise<number | null>((done) => npm.child.once("exit", (code) => done(code)));
+      if (npmExit !== 0) throw new E3Stop(`Stopped (setup): npm ci exited ${npmExit}`);
+      log.update(npm.entry, { state: "absent", reason: "exited after completing" });
+    },
+    build: async (environment) => {
+      const build = await startOwnedProcess(log, processes, {
+        label: "next build",
+        command: process.execPath,
+        args: [nextEntry(), "build"],
+        cwd: worktree as string,
+        env: environment,
+        stdoutPath: join(out, "next-build.out.log"),
+        stderrPath: join(out, "next-build.err.log"),
+      });
+      const exit = await new Promise<number | null>((done) => build.child.once("exit", (code) => done(code)));
+      log.update(build.entry, { state: "absent", reason: `exited ${exit}` });
+      if (exit !== 0) throw new E3Stop(`Stopped (E-A1): next build exited ${exit}`);
+    },
+    withCluster: async <T>(body: (cluster: E3ClusterHandle) => Promise<T>): Promise<T> => {
+      const slug = E3_CLUSTER_REQUEST.slug;
+      const clusterParent = join(tempDirectory, `${CLUSTER_PARENT_PREFIX}${hex(6)}`);
+      const clusterEntry = log.intend("cluster", slug, { parent: clusterParent });
+      if (!isHarnessRoot(clusterParent, tempDirectory)) throw new Error("internal: the cluster parent is not a harness root");
+      mkdirSync(clusterParent, { recursive: false });
+      let recordedRoot: string | undefined;
+      let locationProblem: string | undefined;
+
+      try {
+        // L-1: no database and no migration, so the helper sends no SQL before the callback.
+        const running = startUnderParent(clusterParent, () =>
+          withEmbeddedPostgres(E3_CLUSTER_REQUEST, async (cluster) => {
+            if (locationProblem !== undefined) throw new Error(`the cluster root was not created in the recorded location: ${locationProblem}`);
+            if (canonical(cluster.dataRoot) !== canonical(recordedRoot as string) || canonical(cluster.clusterDirectory) !== canonical(join(recordedRoot as string, "cluster"))) {
+              throw new Error("the helper's cluster root is not the recorded run-specific root");
+            }
+            // L-2.
+            const owned = proveOwnedPostmaster(cluster.clusterDirectory);
+            const live = await processes.inspect(owned.pid);
+            if (live === undefined) throw new E3Stop("Stopped (L-2): the postmaster exited before its identity was recorded");
+            log.update(clusterEntry, { state: "created", path: cluster.dataRoot, clusterDirectory: cluster.clusterDirectory, port: cluster.port, postmaster: live });
+            if (PERSONAL_DEMO_PORTS.includes(cluster.port)) throw new E3Stop("Stopped (L-1): the cluster port is a personal-demo port");
+            return body({
+              port: cluster.port,
+              postmaster: { pid: live.pid, creationTime: live.creationTime },
+              clusterDirectory: cluster.clusterDirectory,
+              // Opens nothing and registers nothing until its first statement, after L-3.
+              connectSuperuser: () =>
+                createE3SuperuserOps({
+                  port: cluster.port,
+                  urlFor: (database) => cluster.connectionStringFor(database),
+                  connect: (url, applicationName) => createListingPersistence({ pool: { connectionString: url, max: 1 }, startupParameters: { application_name: applicationName } }),
+                  register: (label, close) => cluster.closeBeforeShutdown(label, close),
+                  migrate: applyGovernedMigration,
+                  sleep,
+                  now: Date.now,
+                }),
+            });
+          }),
+        );
+        const located = locateClusterRoot(clusterParent, slug);
+        if ("path" in located) {
+          recordedRoot = located.path;
+          log.update(clusterEntry, { state: "created", path: located.path, clusterDirectory: join(located.path, "cluster") });
+        } else {
+          locationProblem = located.problem;
+          note(`cluster location refused: ${located.problem}`, clusterEntry);
+        }
+        const result = await running;
+        if (recordedRoot !== undefined && existsSync(recordedRoot)) log.update(clusterEntry, { state: "left", reason: "the helper reported success but its root still exists" });
+        else if (removeEmptyDirectory(clusterParent)) log.update(clusterEntry, { state: "removed" });
+        else log.update(clusterEntry, { state: "left", reason: "the cluster parent was not empty or could not be removed" });
+        return result;
+      } catch (error) {
+        if (!(error instanceof AggregateError) && (recordedRoot === undefined || !existsSync(recordedRoot))) {
+          if (!existsSync(clusterParent)) log.update(clusterEntry, { state: "absent", reason: "the cluster parent was never created" });
+          else if (removeEmptyDirectory(clusterParent)) log.update(clusterEntry, { state: "removed", reason: "the helper cleaned up after itself; the empty parent was removed" });
+          else log.update(clusterEntry, { state: "left", reason: "the cluster parent was not empty after the helper's cleanup" });
+        }
+        throw error;
+      }
+    },
+    startApp: async (phase, environment): Promise<AppServer> => {
+      const port = await freePort();
+      if (PERSONAL_DEMO_PORTS.includes(port)) throw new E3Stop("Stopped (setup): the app port is a personal-demo port");
+      const app = await startOwnedProcess(log, processes, {
+        label: `next start ${phase}`,
+        command: process.execPath,
+        args: [nextEntry(), "start", "--hostname", VALIDATION_LOOPBACK, "--port", String(port)],
+        cwd: worktree as string,
+        env: { ...inheritedEnvironment(), ...environment },
+        port,
+        stdoutPath: join(out, `next-start-${phase}.out.log`),
+        stderrPath: join(out, `next-start-${phase}.err.log`),
+      });
+      const recorded = log.entries()[app.entry]?.identity;
+      if (recorded === undefined) throw new E3Stop(`Stopped (setup): next start ${phase} has no recorded identity`);
+      return {
+        port,
+        server: { pid: recorded.pid, creationTime: recorded.creationTime },
+        stop: () =>
+          stopPhaseServer(app.entry, {
+            entries: () => log.entries(),
+            update: (id, patch) => log.update(id, patch),
+            recordDescendants: () => recordDescendants(log, processes, app.entry, port),
+            inspect: (pid) => processes.inspect(pid),
+            stop: (pid) => processes.stop(pid),
+            sleep,
+            exitPolls: PROCESS_EXIT_POLLS,
+            exitPollMs: PROCESS_EXIT_POLL_MS,
+          }),
+      };
+    },
+    send: sendE3,
+    inspections,
+    scanItems: async () => {
+      const nextDirectory = join(worktree as string, ".next");
+      const staticDirectory = join(nextDirectory, "static");
+      const staticAssets: ScannedItem[] = [];
+      const otherBuildFiles: ScannedItem[] = [];
+      for (const path of filesUnder(nextDirectory)) {
+        const item = { where: path.slice((worktree as string).length + 1), bytes: readFileSync(path) };
+        (isWithin(path, staticDirectory) ? staticAssets : otherBuildFiles).push(item);
+      }
+      const logs = readdirSync(out).filter((name) => name.endsWith(".log")).map((name) => ({ where: name, bytes: readFileSync(join(out, name)) }));
+      return { staticAssets, otherBuildFiles, logs };
+    },
+    fixtures,
+    secrets,
+    sleep,
+    now: Date.now,
+    signal: controller.signal,
+    note: (message) => note(message),
+  };
+
+  let report: Awaited<ReturnType<typeof runE3Check>> | undefined;
+  let safety: Awaited<ReturnType<typeof e3FinalSafety>>;
+  try {
+    report = await runE3Check(seams, inheritedEnvironment());
+  } finally {
+    clearTimeout(ceiling);
+    uninstall();
+    safety = await e3FinalSafety({
+      teardown: () =>
+        teardown({
+          log,
+          processes,
+          git,
+          clusters: helperClusterOps,
+          tempDirectory,
+          repositoryGitDirectory: join(REPOSITORY_ROOT, ".git"),
+          includeClusters: false,
+          deadline: Date.now() + TEARDOWN_ALLOWANCE_MINUTES * MINUTE,
+        }),
+      entries: () => log.entries(),
+      residue: (entries) =>
+        residueOf(entries, {
+          processes,
+          git,
+          repositoryRoot: REPOSITORY_ROOT,
+          repositoryGitDirectory: join(REPOSITORY_ROOT, ".git"),
+          restrictedBaseline,
+          statusBaseline,
+          portIsFree,
+        }),
+    });
+  }
+
+  // The report is redacted already; the port is now known, so the full URL is redacted here too.
+  const port = report.evidence.port;
+  const finalRedact = createRedactor([secrets.password, port === undefined ? undefined : appDatabaseUrl(secrets, port)]);
+  setRedactor(finalRedact);
+  if (!safety.zeroResidue) print(`Resources may remain. Recovery needs its own authorization: ${cleanupCommand(out)}`);
+
+  const header = {
+    "Authorized commit": commit,
+    Started: startedAt.toISOString(),
+    Ended: new Date().toISOString(),
+    Node: process.version,
+    Platform: `${platform()} ${release()}`,
+    Teardown: safety.zeroResidue ? "zero residue by the independent checks (processes, paths, ports, worktree records, repository state)" : `NOT clean: ${safety.problems.join("; ")}`,
+  };
+  writeFileSync(join(out, "e3-check.json"), `${JSON.stringify(redactDeep({ header, ...report, teardown: safety.teardown ?? null, safety: safety.problems }, finalRedact), null, 2)}\n`);
+  writeFileSync(join(out, "e3-check.md"), `${finalRedact(renderE3Report(report, header))}\n`);
+
+  for (const line of e3ConsoleLines(report, safety.problems)) print(line);
+  print(`report in ${out}`);
+  return report.acceptancePassed && safety.zeroResidue ? 0 : 1;
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const { command, flags } = parseArguments(argv);
 
@@ -1517,6 +1873,8 @@ async function main(argv: readonly string[]): Promise<number> {
   }
 
   if (command === "smoke") return smoke(flags);
+
+  if (command === "e3-check") return e3Check(flags);
 
   if (command === "validate-e2") {
     if (platform() !== "win32") throw new Error("the harness's process and cleanup operations are Windows-only");

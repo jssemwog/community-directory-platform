@@ -10,9 +10,11 @@
  * gives each test file its own module registry, so "has `pg` been loaded yet?" is a meaningful
  * question here and would be meaningless in a file that also opens connections.
  */
+import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -409,6 +411,128 @@ describe("shutdown (issue #177 §5)", () => {
       expect(Object.keys(persistence).sort()).toEqual(["db", "shutdown"]);
     } finally {
       void persistence.shutdown();
+    }
+  });
+});
+
+/* ------------------------------------------------------------------------------------------- */
+/* The optional onConnect pass-through (issue #246, E3-local Scope Gate revision 4 §4 row 9-10)   */
+/* ------------------------------------------------------------------------------------------- */
+
+/**
+ * A stand-in `pg` client, so the real `pg-pool` and the real Kysely dialect run with no server.
+ * `pg-pool` constructs each client as `new this.Client(this.options)` and prefers `options.Client`,
+ * so passing it in the configuration exercises the pool's own `newClient` path. The `Client` key is
+ * a test-only seam: it is not part of `ListingPoolConfiguration`, and the spread forwards it.
+ */
+class FakeClient extends EventEmitter {
+  static readonly created: FakeClient[] = [];
+  static readonly events: string[] = [];
+  readonly options: Record<string, unknown>;
+  readonly statements: string[] = [];
+  ended = false;
+  /** The fields `pg-pool` reads on release to decide whether to keep a client, as `pg` sets them. */
+  _queryable = true;
+  _ending = false;
+
+  constructor(options: Record<string, unknown>) {
+    super();
+    this.options = options;
+    FakeClient.created.push(this);
+  }
+
+  connect(callback: (error?: Error) => void): void {
+    setImmediate(() => callback());
+  }
+
+  async query(text: string): Promise<{ rows: unknown[]; command: string; rowCount: number }> {
+    this.statements.push(text);
+    FakeClient.events.push(`query:${text}`);
+    return { rows: [{ one: 1 }], command: "SELECT", rowCount: 1 };
+  }
+
+  end(callback?: () => void): void {
+    this.ended = true;
+    this._ending = true;
+    this._queryable = false;
+    FakeClient.events.push("end");
+    setImmediate(() => {
+      this.emit("end");
+      callback?.();
+    });
+  }
+}
+
+function fakePool(extra: Record<string, unknown>): ListingPoolConfiguration {
+  return { max: 1, idleTimeoutMillis: 0, Client: FakeClient, ...extra } as unknown as ListingPoolConfiguration;
+}
+
+describe("the optional onConnect hook reaches pg-pool unchanged (E-C1)", () => {
+  it("forwards the same function and awaits it before a new client is handed out", async () => {
+    FakeClient.created.length = 0;
+    FakeClient.events.length = 0;
+    const onConnect = async (client: unknown): Promise<void> => {
+      FakeClient.events.push("onConnect:start");
+      expect(client).toBe(FakeClient.created[0]);
+      await new Promise((resume) => setTimeout(resume, 20));
+      FakeClient.events.push("onConnect:end");
+    };
+    const persistence = createListingPersistence({ pool: fakePool({ onConnect }) });
+
+    try {
+      await sql`select 1`.execute(persistence.db);
+      await sql`select 2`.execute(persistence.db);
+
+      expect(FakeClient.created).toHaveLength(1);
+      expect((FakeClient.created[0] as FakeClient).options.onConnect).toBe(onConnect);
+      // Awaited once, for the newly opened client only, and before its first statement.
+      expect(FakeClient.events).toEqual(["onConnect:start", "onConnect:end", "query:select 1", "query:select 2"]);
+    } finally {
+      await persistence.shutdown();
+    }
+  });
+
+  it("closes a client whose onConnect rejects, fails that checkout, and never hands the client out", async () => {
+    FakeClient.created.length = 0;
+    FakeClient.events.length = 0;
+    let attempts = 0;
+    const persistence = createListingPersistence({
+      pool: fakePool({
+        onConnect: async () => {
+          attempts += 1;
+          if (attempts === 1) throw new Error("refused by the hook");
+        },
+      }),
+    });
+
+    try {
+      await expect(sql`select 1`.execute(persistence.db)).rejects.toThrow("refused by the hook");
+
+      const rejected = FakeClient.created[0] as FakeClient;
+      expect(rejected.ended).toBe(true);
+      expect(rejected.statements).toEqual([]);
+
+      // The next checkout opens a new client, which passes, and only it runs the statement.
+      await sql`select 1`.execute(persistence.db);
+      expect(FakeClient.created).toHaveLength(2);
+      expect(rejected.statements).toEqual([]);
+      expect((FakeClient.created[1] as FakeClient).statements).toEqual(["select 1"]);
+    } finally {
+      await persistence.shutdown();
+    }
+  });
+
+  it("leaves the pool configuration without the key when the hook is absent", async () => {
+    FakeClient.created.length = 0;
+    const persistence = createListingPersistence({ pool: fakePool({}) });
+
+    try {
+      await sql`select 1`.execute(persistence.db);
+      const options = (FakeClient.created[0] as FakeClient).options;
+      expect("onConnect" in options).toBe(false);
+      expect((FakeClient.created[0] as FakeClient).statements).toEqual(["select 1"]);
+    } finally {
+      await persistence.shutdown();
     }
   });
 });

@@ -248,6 +248,82 @@ authorization (`H-D10`), like every run.
   one. The second smoke's S-C stays Not exercised, and recovery of a surviving postmaster remains
   a separate decision.
 
+## E3-local acceptance (`e3-check`)
+
+`E3-local` lets the real listing-detail route (`S2`, `OP-2`) run under `next build` + `next start`
+against a **disposable synthetic** cluster that `e3-check` created and owns (`E3-local` Scope Gate
+revision 4, approved, with its approval record's clarification). **The live run needs its own
+authorization**, separate from the gate and from this code. It computes no timing statistic,
+applies no threshold, and leaves `BI-4` pending.
+
+```
+e3-check --out <abs dir> --commit <sha>
+```
+
+**The mode** (`src/interface/public/e3-local-persistence.ts`):
+- **When it is on:** default off, and only when `NODE_ENV=production` and `BI4_E3_LOCAL=1`.
+- **What it reads:** `BI4_E3_DATABASE_URL`, `BI4_E3_EXPECTED_SYSTEM_IDENTIFIER`, `BI4_E3_EXPECTED_DATABASE`
+  and `BI4_E3_SYNTHETIC_MARKER`. None has a `NEXT_PUBLIC_` name.
+- **What the URL must be:** host exactly `127.0.0.1`, an explicit port, the expected database as
+  its path, and no query string.
+- **Per-connection checks:** every newly opened pool connection runs C-1 to C-4 in `pg-pool`'s
+  awaited `onConnect`, before it is handed out:
+  - C-1: system identifier;
+  - C-2: database;
+  - C-3: marker;
+  - C-4: a non-superuser role.
+- **The pool:** one client, `idleTimeoutMillis: 0`, never recycled.
+- **Refusal:** a failed check, or any checkout error, refuses the process until restart.
+- **What a request sees:**
+
+| Route | Under `E3-local` |
+|---|---|
+| `/directory` (`S1`) | `404` from `src/proxy.ts` (plain text, every method). `/directory/` is the framework's `308` to `/directory`; case and encoding variants are recorded, not normalized |
+| `/directory/[id]` (`S2`) | The layout's pre-check runs before anything renders: refused, or its own checkout failed → `404`. Otherwise the page reads on a guarded client; a refusal that arrives after the response was committed renders the generic not-available content (ruling S-7) |
+| `/admin/**` | Unchanged: `404` with the admin headers |
+| Under `next dev` | Unchanged: the local demo, with every `BI4_E3_*` variable ignored |
+
+**The run, in order:**
+
+| Step | What happens |
+|---|---|
+| E-A1 | Disposable worktree, `npm ci`, `next build` with no `BI4_E3_*` variable and no database URL, before any cluster exists |
+| L-1 to L-3 | Cluster created with `withEmbeddedPostgres({ slug, databases: [] })`: **no database and no migration**. Before the callback the helper runs only `initdb` (a bootstrap child process with no listener; **not** network SQL) and the server start, so it sends no SQL. Postmaster proven from `postmaster.pid`. **Before the run's first network SQL statement**, every listening entry on the cluster port must be owned by that postmaster, on loopback, with one on `127.0.0.1`. If this fails, no network SQL is sent at all, during cleanup included: nothing was registered with the helper, whose cleanup is `pg_ctl stop` |
+| L-4 | As superuser, over `127.0.0.1` on the harness-owned port: a bootstrap connection to the built-in `postgres` database creates `bi4_e3` and is closed even on failure. Then, on `bi4_e3`: migrations, synthetic fixtures, identity (`data_directory` must be the created directory), marker, and the per-run app role. The role's `PUBLIC` defaults are revoked; it holds only `CONNECT`, `USAGE` on `public`, `SELECT` on `listing` and `EXECUTE` on `pg_control_system()` |
+| E-A2 | `next start` with every value but the flag. Every route answers `404`, except `/directory/`, which gets the framework's `308` |
+| E-A3 | Flag on, wrong expected identifier. The first `S2` request is the triggering request and must be `404`, and so must the next |
+| E-A4 | Verified. The equivalence set (two never-existed, pending, rejected, unpublished) must match on status, body with only its own UUID masked, and header list with only `Date` removed. The malformed control must show the not-available content with no fixture text. The public control is sent first and last and must show its name and differ from never-existed |
+| E-A4b | Fault injection: the marker is changed and the app's sessions are terminated. It has its **own PASS or FAIL** (both injected requests must answer `404`), reported separately with the observed statuses. It never changes the normal acceptance result or the exit code |
+| E-A5 | Stored states verified; then leak scans of `.next/static` (values and the `BI4_E3_` prefix), the rest of `.next`, every response and every log |
+
+**Rules that apply throughout:**
+- **Database listener:** checked again before each `next start`, at each handoff and after each
+  phase's last request.
+- **App listener:** must be exactly one `127.0.0.1` entry owned by the recorded `next start`
+  process or a descendant.
+- **Hard cap:** **60 HTTP attempts** across every phase, readiness and failed attempts included.
+- **Wire status:** read from direct responses; redirects are never followed.
+- **Stopping a phase's server:** the server and each recorded descendant are stopped deepest
+  first, only after the full identity check (PID, creation time, executable, command line) says
+  verified. A mismatch is never stopped. If recording descendants fails, or any inspection, stop or
+  exit check is inconclusive, the run stops **before the next phase** and the intent log is kept
+  for teardown.
+- **After the run:** owned-resource teardown, then the **independent residue checks**: recorded
+  process identities, paths, ports, worktree registrations, restricted-file metadata and the main
+  tree's `git status`. Zero residue is reported only when teardown, the intent log and these checks
+  all show nothing left. A failed inspection or any residue is reported and exits nonzero.
+- **What the run writes:** `e3-check.json`, `e3-check.md` and `run-state.json` in `--out`. **The
+  app-role password and full database URL are redacted** (`[redacted]`) from these files and from
+  console output, including response headers and exception messages; the redacted findings are
+  kept.
+- **Exit code:** `0` only when normal acceptance passed **and** zero residue was established;
+  `2` for a refusal before anything was created; otherwise `1`.
+
+**Residual window (revision 3 §3):** a listener can change between an inspection and a connection.
+The rechecks and the per-connection identity checks narrow that window, but they do not close it.
+This mode guards against accidental use of another database, not against a deliberate local
+attacker.
+
 ## Known limits
 
 - **Windows only.** Process identity and stopping use CIM queries and `taskkill`.

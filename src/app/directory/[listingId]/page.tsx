@@ -3,8 +3,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { findPubliclyAvailableListing } from "../../../data/public-listing-read";
-import { DIRECTORY_COPY, listingDetailStateOf } from "../../../interface/public/directory-view";
-import { localDemoPersistence } from "../../../interface/public/local-demo-persistence";
+import { DIRECTORY_COPY, listingDetailStateOf, NOT_AVAILABLE } from "../../../interface/public/directory-view";
+import { isRefused } from "../../../interface/public/e3-local-persistence";
+import { publicReadSource } from "../../../interface/public/public-read-persistence";
 import styles from "../directory.module.css";
 
 export const dynamic = "force-dynamic";
@@ -21,16 +22,25 @@ export const metadata: Metadata = { title: "Listing — local demonstration" };
  * different path and, in development, embeds a server stack trace in the page. This is
  * equivalence of the rendered response only; timing is not addressed and `BI-4` stays pending
  * (#246). Because the response is streamed, its HTTP status is 200 in every case.
+ *
+ * **`E3-local` (Scope Gate revision 4 §3.3).** The read is guarded: if the process is refused, or
+ * the client reservation fails, no query runs and the same `NotAvailable` content is rendered.
+ * That is the approved S-7 fallback, for a refusal that arrives after the directory layout's
+ * pre-stream check passed. No render order with the layout is assumed.
  */
 export default async function ListingPage({ params }: { params: Promise<{ listingId: string }> }) {
-  const persistence = localDemoPersistence();
+  const source = publicReadSource();
 
-  if (persistence === undefined) {
+  if (source === undefined) {
     notFound();
   }
 
   const { listingId } = await params;
-  const state = listingDetailStateOf(await findPubliclyAvailableListing(persistence.db, listingId));
+  const outcome =
+    source.kind === "demo"
+      ? await findPubliclyAvailableListing(source.persistence.db, listingId)
+      : await source.e3.read(listingId);
+  const state = isRefused(outcome) ? NOT_AVAILABLE : listingDetailStateOf(outcome);
 
   return (
     <>
