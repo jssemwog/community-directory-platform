@@ -113,6 +113,12 @@ export interface ListingPoolConfiguration {
   readonly statement_timeout?: number | false;
   readonly query_timeout?: number;
   readonly keepAlive?: boolean;
+  /**
+   * Passed through unchanged to `pg-pool`, which awaits it for each **newly opened** client before
+   * handing that client out. If it rejects, the pool closes the client and fails that checkout, so
+   * the client is never used (`pg-pool` `newClient`). Absent by default (`E3-local`, issue #246).
+   */
+  readonly onConnect?: (client: unknown) => Promise<void>;
 }
 
 export interface ListingPersistenceConfiguration {
