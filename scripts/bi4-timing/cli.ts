@@ -26,6 +26,7 @@ import {
   CLUSTER_USER,
   freePort,
   proveOwnedPostmaster,
+  requestCompleteShutdown,
   withEmbeddedPostgres,
   type EmbeddedCluster,
 } from "../../src/data/testing/embedded-cluster";
@@ -36,19 +37,25 @@ import {
   createRedactor,
   E3_CLUSTER_REQUEST,
   e3ConsoleLines,
+  e3ExitCode,
   e3FinalSafety,
   e3Fixtures,
   E3Stop,
+  interruptClusterStartup,
   redactDeep,
   renderE3Report,
   runE3Check,
+  stopOwnedTree,
   stopPhaseServer,
   type AppServer,
   type E3ClusterHandle,
   type E3Exchange,
   type E3RunSeams,
   type E3Secrets,
+  type OwnedStep,
   type ScannedItem,
+  type Timer,
+  type TreeStopDeps,
 } from "./e3-check";
 import {
   DEFAULT_ANALYSIS,
@@ -95,6 +102,7 @@ import {
   ProcessInspectionError,
   projectionNeedsRuling,
   projectReplicateMs,
+  readPidFileEvidence,
   recordDescendants,
   removeEmptyDirectory,
   residueOf,
@@ -112,6 +120,7 @@ import {
   type ReadyMarker,
   type RestrictedMetadata,
   type ListeningEntry,
+  type ProcessIdentity,
   type ProcessOps,
   type TeardownReport,
 } from "./isolation";
@@ -1607,7 +1616,7 @@ async function e3CheckWith(
   const refusals = [...preconditions.refusals, ...Object.keys(process.env).filter((name) => name.startsWith("BI4_E3_")).map((name) => `${name} is set in the harness's own environment`)];
   if (refusals.length > 0) {
     for (const refusal of refusals) print(`refused: ${refusal}`);
-    return 2;
+    return e3ExitCode(undefined, undefined, true);
   }
   const restrictedBaseline = preconditions.restrictedBaseline as RestrictedMetadata;
   const statusBaseline = preconditions.statusBaseline ?? "";
@@ -1624,6 +1633,63 @@ async function e3CheckWith(
   let worktree: string | undefined;
   const nextEntry = (): string => join(worktree as string, "node_modules", "next", "dist", "bin", "next");
   const sleep = (ms: number): Promise<void> => new Promise((resume) => setTimeout(resume, ms));
+  const runDeadline = Date.now() + E3_PASS_MINUTES * MINUTE;
+  const timeout = (ms: number): Timer => {
+    let handle: ReturnType<typeof setTimeout> | undefined;
+    const promise = new Promise<void>((resolve) => {
+      handle = setTimeout(resolve, ms);
+    });
+    return { promise, cancel: () => clearTimeout(handle) };
+  };
+  const sameExecutable = (a: string, b: string | null): boolean => b !== null && canonical(a) === canonical(b);
+  /** The cluster entry and, once located, its directory: what the startup interruption is pointed at. */
+  let currentCluster: { readonly entry: number; directory?: string } | undefined;
+  const stepLabels = new Map<number, string>();
+
+  /** Record a process: with an identity it is `created`; with only a PID it is `left` and never stopped. */
+  const recordProcess = (label: string, pid: number, parentEntry: number | undefined, identity?: ProcessIdentity, reason?: string): number => {
+    const id = log.intend("process", label, { pid, ...(parentEntry === undefined ? {} : { parentEntry }) });
+    log.update(id, identity === undefined ? { state: "left", reason: reason ?? "ownership could not be shown; never stopped" } : { state: "created", identity });
+    return id;
+  };
+
+  /** Identity-checked tree stop with the ownership-proving orphan sweep (amendment A1 §4.1, §4.4). */
+  const treeDeps = (rootEntry: number, allowedExecutable: (executable: string, parent: ProcessIdentity) => boolean): TreeStopDeps => ({
+    entries: () => log.entries(),
+    update: (id, patch) => log.update(id, patch),
+    recordDescendants: () => recordDescendants(log, processes, rootEntry),
+    inspect: (pid) => processes.inspect(pid),
+    stop: (pid) => processes.stop(pid),
+    sleep,
+    exitPolls: PROCESS_EXIT_POLLS,
+    exitPollMs: PROCESS_EXIT_POLL_MS,
+    sweep: {
+      children: (pid) => processes.children(pid),
+      record: ({ label, parentEntry, pid, identity, reason }) => recordProcess(label, pid, parentEntry, identity, reason),
+      allowedExecutable,
+      now: Date.now,
+    },
+  });
+
+  /** Start a bounded setup step as a recorded owned process, and observe its exit. */
+  const startStep = async (label: string, args: readonly string[], env: Readonly<Record<string, string>>, logName: string): Promise<OwnedStep> => {
+    const started = await startOwnedProcess(log, processes, {
+      label,
+      command: process.execPath,
+      args,
+      cwd: worktree as string,
+      env,
+      stdoutPath: join(out, `${logName}.out.log`),
+      stderrPath: join(out, `${logName}.err.log`),
+    });
+    stepLabels.set(started.entry, label);
+    const child = started.child;
+    const exited = new Promise<number | null>((done) => {
+      if (child.exitCode !== null || child.signalCode !== null) done(child.exitCode);
+      else child.once("exit", (code) => done(code));
+    });
+    return { entry: started.entry, exited };
+  };
 
   const seams: E3RunSeams = {
     prepareWorktree: async () => {
@@ -1639,40 +1705,56 @@ async function e3CheckWith(
       log.update(worktreeEntry, { state: "created", ...(adminRecord === undefined ? {} : { adminRecord }) });
       const listed = (await git.worktreeList()).find((entry) => resolve(entry.path).toLowerCase() === resolve(worktree as string).toLowerCase());
       if (listed?.head !== commit || !listed.detached) throw new E3Stop("Stopped (setup): the disposable worktree is not detached at the authorized commit");
-
+    },
+    startInstall: async () => {
       const npmCli = join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
       if (!existsSync(npmCli)) throw new E3Stop("Stopped (setup): npm-cli.js was not found beside the running node");
-      const npm = await startOwnedProcess(log, processes, {
-        label: "npm ci",
-        command: process.execPath,
-        args: [npmCli, "ci", "--prefer-offline", "--no-audit", "--no-fund", "--ignore-scripts"],
-        cwd: worktree,
-        env: Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined && !entry[0].startsWith("BI4_E3_") && !/DATABASE_URL/i.test(entry[0]))),
-        stdoutPath: join(out, "npm-ci.out.log"),
-        stderrPath: join(out, "npm-ci.err.log"),
-      });
-      const npmExit = await new Promise<number | null>((done) => npm.child.once("exit", (code) => done(code)));
-      if (npmExit !== 0) throw new E3Stop(`Stopped (setup): npm ci exited ${npmExit}`);
-      log.update(npm.entry, { state: "absent", reason: "exited after completing" });
+      return startStep("npm ci", [npmCli, "ci", "--prefer-offline", "--no-audit", "--no-fund", "--ignore-scripts"], Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined && !entry[0].startsWith("BI4_E3_") && !/DATABASE_URL/i.test(entry[0]))), "npm-ci");
     },
-    build: async (environment) => {
-      const build = await startOwnedProcess(log, processes, {
-        label: "next build",
-        command: process.execPath,
-        args: [nextEntry(), "build"],
-        cwd: worktree as string,
-        env: environment,
-        stdoutPath: join(out, "next-build.out.log"),
-        stderrPath: join(out, "next-build.err.log"),
+    startBuild: (environment) => startStep("next build", [nextEntry(), "build"], environment, "next-build"),
+    stepExited: (entry, code, late) => {
+      if (late) note(`${stepLabels.get(entry) ?? "step"} exited ${String(code)} after its deadline; recorded only, never treated as success`, entry);
+      else log.update(entry, { state: "absent", reason: `exited ${String(code)}` });
+    },
+    stopStep: (entry) => stopOwnedTree(entry, treeDeps(entry, (executable, parent) => sameExecutable(executable, parent.executable) || sameExecutable(executable, process.execPath) || (worktree !== undefined && isWithin(executable, worktree)))),
+    timeout,
+    runDeadline,
+    interruptClusterStartup: async () => {
+      let binDirectory: string | undefined;
+      try {
+        // Only the declared `pg_ctl` export is read: its directory identifies the bundled binaries
+        // by path. Nothing here runs `initdb` or `postgres` (issue #185).
+        binDirectory = dirname((await import("@embedded-postgres/windows-x64")).pg_ctl);
+      } catch {
+        binDirectory = undefined;
+      }
+      const inBinDirectory = (executable: string): boolean => binDirectory !== undefined && isWithin(executable, binDirectory);
+      return interruptClusterStartup({
+        clusterDirectory: currentCluster?.directory,
+        harnessPid: process.pid,
+        children: (pid) => processes.children(pid),
+        bundledBinary: (name) => (binDirectory === undefined ? undefined : join(binDirectory, `${name}.exe`)),
+        samePath: (a, b) => canonical(a) === canonical(b),
+        record: ({ label, pid, identity, reason }) => recordProcess(label, pid, currentCluster?.entry, identity, reason),
+        update: (id, patch) => log.update(id, patch),
+        note: (message, entry) => note(message, entry),
+        pidFileEvidence: (directory) => readPidFileEvidence(directory),
+        inspect: (pid) => processes.inspect(pid),
+        requestShutdown: async (directory) => {
+          const outcome = await requestCompleteShutdown(directory);
+          return { ok: outcome.ok, timedOut: outcome.timedOut, detail: outcome.detail };
+        },
+        stopTree: (id) => stopOwnedTree(id, treeDeps(id, inBinDirectory)),
       });
-      const exit = await new Promise<number | null>((done) => build.child.once("exit", (code) => done(code)));
-      log.update(build.entry, { state: "absent", reason: `exited ${exit}` });
-      if (exit !== 0) throw new E3Stop(`Stopped (E-A1): next build exited ${exit}`);
+    },
+    markClusterUnsettled: (reason) => {
+      if (currentCluster !== undefined) log.update(currentCluster.entry, { state: "left", reason });
     },
     withCluster: async <T>(body: (cluster: E3ClusterHandle) => Promise<T>): Promise<T> => {
       const slug = E3_CLUSTER_REQUEST.slug;
       const clusterParent = join(tempDirectory, `${CLUSTER_PARENT_PREFIX}${hex(6)}`);
       const clusterEntry = log.intend("cluster", slug, { parent: clusterParent });
+      currentCluster = { entry: clusterEntry };
       if (!isHarnessRoot(clusterParent, tempDirectory)) throw new Error("internal: the cluster parent is not a harness root");
       mkdirSync(clusterParent, { recursive: false });
       let recordedRoot: string | undefined;
@@ -1713,6 +1795,7 @@ async function e3CheckWith(
         const located = locateClusterRoot(clusterParent, slug);
         if ("path" in located) {
           recordedRoot = located.path;
+          currentCluster = { entry: clusterEntry, directory: join(located.path, "cluster") };
           log.update(clusterEntry, { state: "created", path: located.path, clusterDirectory: join(located.path, "cluster") });
         } else {
           locationProblem = located.problem;
@@ -1728,6 +1811,9 @@ async function e3CheckWith(
           if (!existsSync(clusterParent)) log.update(clusterEntry, { state: "absent", reason: "the cluster parent was never created" });
           else if (removeEmptyDirectory(clusterParent)) log.update(clusterEntry, { state: "removed", reason: "the helper cleaned up after itself; the empty parent was removed" });
           else log.update(clusterEntry, { state: "left", reason: "the cluster parent was not empty after the helper's cleanup" });
+        } else {
+          // The helper's cleanup did not complete (ruling A1-5 included): preserve and record.
+          log.update(clusterEntry, { state: "left", reason: "the cluster helper's cleanup did not complete; the cluster root and parent are preserved" });
         }
         throw error;
       }
@@ -1837,7 +1923,7 @@ async function e3CheckWith(
 
   for (const line of e3ConsoleLines(report, safety.problems)) print(line);
   print(`report in ${out}`);
-  return report.acceptancePassed && safety.zeroResidue ? 0 : 1;
+  return e3ExitCode(report, safety);
 }
 
 async function main(argv: readonly string[]): Promise<number> {

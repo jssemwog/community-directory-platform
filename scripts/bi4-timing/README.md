@@ -260,6 +260,18 @@ applies no threshold, and leaves `BI-4` pending.
 e3-check --out <abs dir> --commit <sha>
 ```
 
+From Git Bash, pinned at live-run authorization to the merged commit (`<MERGED_SHA>`, short form
+`<SHORT>`), with both exit statuses captured immediately after the pipeline:
+
+```bash
+cd /c/Users/jssem/ag_projects/community-directory-platform && \
+node --experimental-transform-types --import ./scripts/local-demo/register.mjs \
+  scripts/bi4-timing/cli.ts e3-check \
+  --out "C:/Users/jssem/Downloads/bi4-e3/e3-check-<SHORT>" \
+  --commit <MERGED_SHA> \
+  2>&1 | tee "C:/Users/jssem/Downloads/bi4-e3/e3-check-<SHORT>.console.log"; statuses=("${PIPESTATUS[@]}"); echo "e3-check exit=${statuses[0]} tee exit=${statuses[1]}"
+```
+
 **The mode** (`src/interface/public/e3-local-persistence.ts`):
 - **When it is on:** default off, and only when `NODE_ENV=production` and `BI4_E3_LOCAL=1`.
 - **What it reads:** `BI4_E3_DATABASE_URL`, `BI4_E3_EXPECTED_SYSTEM_IDENTIFIER`, `BI4_E3_EXPECTED_DATABASE`
@@ -318,6 +330,75 @@ e3-check --out <abs dir> --commit <sha>
   kept.
 - **Exit code:** `0` only when normal acceptance passed **and** zero residue was established;
   `2` for a refusal before anything was created; otherwise `1`.
+
+**Bounded setup (amendment A1 revision 2, approved):**
+
+| Step | Hard deadline | On timeout, Ctrl-C or the 30-minute ceiling |
+|---|---|---|
+| `npm ci` | 10 min | The step's recorded tree is stopped deepest first, each process only after the full identity check, exits confirmed; then the orphan sweep |
+| `next build` | 10 min | As for `npm ci` |
+| Cluster startup, until the callback is entered | 3 min | The gate closes. The owned `initdb` or `postgres` children are found and stopped; the helper gets 120 s to settle |
+
+**Absolute deadlines.** Each deadline is fixed before the step begins, as the earlier of the step's
+own deadline and the run's 30-minute deadline. The run's abort interrupts the step.
+
+**Process steps** (`npm ci`, `next build`):
+- **Before `start()`:** the abort signal and the remaining time are checked. If either has run out,
+  nothing is started.
+- **During `start()`:** the time it takes counts against the same deadline.
+- **After `start()`:** both are checked again. If startup crossed the deadline, the recorded
+  process is settled and the run stops.
+- **Before an exit counts as success:** both are checked again.
+
+An identity inspection inside `start()` is unbounded (A1-3), so it can delay settlement.
+
+**Cluster startup:** the callback itself checks the abort signal and the absolute deadline at
+entry. It does so before cancelling the startup timer, before checking the listener, and before
+permitting any SQL. A late callback is therefore refused even if the timer has not fired yet.
+
+**After a timeout or interruption:**
+- **The outcome is fixed:** no later step or phase starts.
+- **A late completion is noted only:** an exit code of 0, or the cluster becoming ready, never
+  counts as success and never resumes the run.
+- **The late cluster callback is refused twice:** it throws before L-3, and `connectSuperuser`
+  refuses too. So it issues no SQL and cannot advance the run.
+
+**Finding the cluster's startup children:** a child counts only if it is the harness's own
+child, its executable is exactly the bundled `initdb.exe` or `postgres.exe` (identified by path
+beside the declared `pg_ctl`; never run), and its parsed `--pgdata=` or `-D` argument names the
+recorded cluster directory.
+
+**`pg_ctl stop`** runs only after both existing proofs: `postmaster.pid`, proven for that
+directory, names the recorded child, and that child's live identity verifies. Its wait is bounded
+(`-t 30` plus an outer 30 s timer), but `pg_ctl` is **never killed**. An unproven outcome is
+recorded in the intent log, together with the fact that the `pg_ctl` PID is unavailable, and left
+unresolved. The cluster root and parent are then preserved, the run exits 1, and no zero-residue
+claim is made.
+
+**The orphan sweep stops a process only if all of these hold:**
+- its parent is a recorded process that was verified, stopped, and confirmed exited;
+- its parent PID matches;
+- it was created after its parent and no later than the moment that parent's stop was sent;
+- its executable is in the owned set;
+- its identity is complete, and passes the identity check again immediately before the stop.
+
+A command line is never proof. Anything uncertain is recorded with only its PID, which means it is
+never stopped and keeps the directories it could use.
+
+**Final teardown preserves what unresolved work could still use:**
+- **A pending cluster helper:** its cluster entry is `left`, and its root and parent are never
+  touched.
+- **An unconfirmed or uncertain process:** the worktree and harness root are kept.
+- **In every case:** the intent log is kept, and the run exits 1.
+
+**Not bounded (ruling A1-3):**
+- **What:** Git calls (`git worktree add`, `list`, `remove`) and the PowerShell CIM inspections
+  have no timeout, so they **can overrun the 30-minute limit**.
+- **Ctrl-C:** it takes effect only after the in-flight call returns.
+- **A call that never returns:** the launcher cannot end it, and the operator has to end the
+  harness process.
+- **What is kept:** the intent log, written at every step, for a separately authorized
+  `cleanup --run`.
 
 **Residual window (revision 3 §3):** a listener can change between an inspection and a connection.
 The rechecks and the per-connection identity checks narrow that window, but they do not close it.
