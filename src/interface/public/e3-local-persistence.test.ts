@@ -365,7 +365,7 @@ describe("C-1 to C-4: connection verification", () => {
     expect(await connectionMatches(client([row, row]), expected)).toBe(false);
   });
 
-  it("marks the process refused before onConnect rejects", async () => {
+  it("marks the process refused before onConnect rejects, and does not end the pool inside the hook", async () => {
     let captured: ListingPersistenceConfiguration | undefined;
     const scripted = scriptedPool();
     const handle = createE3Local(configuration(), {
@@ -382,6 +382,15 @@ describe("C-1 to C-4: connection verification", () => {
     const failing = onConnect(client([{ ...row, marker: null }]));
     await expect(failing).rejects.toBeInstanceOf(E3LocalRefused);
     expect(handle.isRefused()).toBe(true);
+    // Pool-lifecycle amendment: refusal never ends the pool; only an explicit shutdown does.
+    expect(scripted.shutdowns()).toBe(0);
+
+    // A connection opened after refusal is rejected before any SQL.
+    const later = client([row]);
+    await expect(onConnect(later)).rejects.toBeInstanceOf(E3LocalRefused);
+    expect(later.query).not.toHaveBeenCalled();
+
+    await handle.shutdown();
     expect(scripted.shutdowns()).toBe(1);
   });
 });
@@ -635,5 +644,87 @@ describe("the app-role setup statements (revision 3 §4.1)", () => {
     ]) {
       expect(() => e3LocalRoleSetupStatements(input)).toThrow();
     }
+  });
+});
+
+/* ------------------------------------------------------------------------------------------- */
+/* Regression: the refusal timeout seen in run e3-check-a63838bb (issue #246)                      */
+/* ------------------------------------------------------------------------------------------- */
+
+/**
+ * In the live run, the request that triggered each refusal (E-A3, E-A4b) got no response within
+ * 60 s, while the next request got an immediate 404. Under `next start`, the directory layout's
+ * pre-check and the page's read run in parallel, so two checkouts race on the one-client pool:
+ * the first opens a client whose `onConnect` verification fails; the second is queued behind it.
+ *
+ * These tests use the real stack (`connection.ts`, the pinned `pg-pool`, Kysely) over a fake
+ * client, and a **bounded wait**: a checkout that never settles fails with a clear message
+ * instead of hanging the suite.
+ */
+async function settlesWithin<T>(promise: Promise<T>, ms: number): Promise<{ readonly settled: true; readonly value: T } | { readonly settled: false }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bound = new Promise<{ readonly settled: false }>((resolve) => {
+    timer = setTimeout(() => resolve({ settled: false }), ms);
+  });
+  try {
+    return await Promise.race([promise.then((value) => ({ settled: true as const, value })), bound]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const SETTLE_BOUND_MS = 2_000;
+
+describe("refusal timeout regression (#246, run e3-check-a63838bb)", () => {
+  for (const order of ["layout-first", "page-first"] as const) {
+    it(`settles both the layout pre-check and the page read when the new client fails verification (${order})`, async () => {
+      const server = fakeServer();
+      server.marker = "bi4-e3-synthetic:ffffffffffffffffffffffffffffffff";
+      const stack = realStack(server);
+      const handle = createE3Local(configuration(), { createPersistence: stack.createPersistence });
+
+      // Both start in the same turn, as the layout and the page do under `next start`.
+      const precheck = order === "layout-first" ? handle.precheck() : undefined;
+      const read = handle.read(NE);
+      const precheckSecond = order === "page-first" ? handle.precheck() : undefined;
+      const layout = (precheck ?? precheckSecond) as Promise<"ok" | "refused">;
+
+      const layoutOutcome = await settlesWithin(layout, SETTLE_BOUND_MS);
+      const pageOutcome = await settlesWithin(read, SETTLE_BOUND_MS);
+
+      expect(layoutOutcome.settled, `the layout pre-check did not settle within ${SETTLE_BOUND_MS} ms (${order})`).toBe(true);
+      expect(pageOutcome.settled, `the page read did not settle within ${SETTLE_BOUND_MS} ms (${order})`).toBe(true);
+      if (layoutOutcome.settled) expect(layoutOutcome.value).toBe("refused");
+      if (pageOutcome.settled) expect(pageOutcome.value).toBe(REFUSED);
+      expect(stack.created.flatMap((c) => c.statements).some(isListingQuery)).toBe(false);
+
+      // The first client was verified and failed; every client opened after refusal sent no SQL.
+      const [verified, ...afterRefusal] = stack.created;
+      expect(verified?.statements).toEqual([VERIFICATION_STATEMENT]);
+      expect(afterRefusal.length).toBeGreaterThan(0);
+      for (const client of afterRefusal) expect(client.statements).toEqual([]);
+
+      // Every failed client is closed.
+      await settle();
+      for (const client of stack.created) expect(client.ended).toBe(true);
+
+      // Later direct requests do no checkout at all.
+      const opened = stack.created.length;
+      expect(await handle.precheck()).toBe("refused");
+      expect(await handle.read(NE)).toBe(REFUSED);
+      expect(stack.created).toHaveLength(opened);
+
+      // The explicit shutdown completes once the queued operations have settled.
+      expect(await settlesWithin(handle.shutdown(), SETTLE_BOUND_MS), `the explicit shutdown did not complete within ${SETTLE_BOUND_MS} ms (${order})`).toEqual({ settled: true, value: undefined });
+    });
+  }
+
+  it("a single checkout whose new client fails verification settles (the uncontended path, already covered)", async () => {
+    const server = fakeServer();
+    server.marker = null;
+    const stack = realStack(server);
+    const handle = createE3Local(configuration(), { createPersistence: stack.createPersistence });
+    const outcome = await settlesWithin(handle.precheck(), SETTLE_BOUND_MS);
+    expect(outcome).toEqual({ settled: true, value: "refused" });
   });
 });

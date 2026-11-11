@@ -22,6 +22,7 @@ import {
   PersistenceConfigurationError,
   createListingPersistence,
   startupOptionsFor,
+  type ListingPersistence,
   type ListingPoolConfiguration,
 } from "./connection";
 
@@ -534,5 +535,76 @@ describe("the optional onConnect hook reaches pg-pool unchanged (E-C1)", () => {
     } finally {
       await persistence.shutdown();
     }
+  });
+});
+
+/* ------------------------------------------------------------------------------------------- */
+/* Characterization: the pinned pg-pool and a queued checkout when the pool ends (issue #246)     */
+/* ------------------------------------------------------------------------------------------- */
+
+/**
+ * Evidence for the `E3-local` refusal timeout. `pg-pool` 3.14.0 `end()` sets `ending` and calls
+ * `_pulseQueue()`, which, while ending, removes idle clients and returns without serving or
+ * rejecting `_pendingQueue`. A checkout queued behind a client still in `onConnect` (pool full,
+ * no `connectionTimeoutMillis`) is therefore never settled once the pool is ended. Each wait is
+ * bounded so a hang is reported, not suffered.
+ */
+async function settledWithin(promise: Promise<unknown>, ms: number): Promise<"resolved" | "rejected" | "pending"> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bound = new Promise<"pending">((resolve) => {
+    timer = setTimeout(() => resolve("pending"), ms);
+  });
+  try {
+    return await Promise.race([promise.then(() => "resolved" as const, () => "rejected" as const), bound]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+describe("a checkout queued behind a rejecting onConnect (pinned pg-pool 3.14.0)", () => {
+  it("control: without ending the pool, the queued checkout is served by a new client", async () => {
+    FakeClient.created.length = 0;
+    let attempts = 0;
+    const persistence = createListingPersistence({
+      pool: fakePool({
+        onConnect: async () => {
+          attempts += 1;
+          if (attempts === 1) throw new Error("verification failed");
+        },
+      }),
+    });
+
+    try {
+      const first = sql`select 1`.execute(persistence.db);
+      const second = sql`select 2`.execute(persistence.db);
+      expect(await settledWithin(first, 1_000)).toBe("rejected");
+      expect(await settledWithin(second, 1_000)).toBe("resolved");
+      expect(FakeClient.created).toHaveLength(2);
+    } finally {
+      await persistence.shutdown();
+    }
+  });
+
+  it("ending the pool inside the rejecting onConnect leaves the queued checkout unsettled", async () => {
+    FakeClient.created.length = 0;
+    let persistence: ListingPersistence | undefined = undefined;
+    const created: ListingPersistence = createListingPersistence({
+      pool: fakePool({
+        onConnect: async () => {
+          // As `E3-local`'s refusal does: end the pool, then reject.
+          void persistence?.shutdown();
+          throw new Error("verification failed");
+        },
+      }),
+    });
+    persistence = created;
+
+    const first = sql`select 1`.execute(created.db);
+    const second = sql`select 2`.execute(created.db);
+
+    // The checkout that opened the client is told; the one queued behind it never is.
+    expect(await settledWithin(first, 1_000)).toBe("rejected");
+    expect(await settledWithin(second, 1_000)).toBe("pending");
+    expect(FakeClient.created).toHaveLength(1);
   });
 });
