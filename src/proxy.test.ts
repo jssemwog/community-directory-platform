@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 
-import { STAGING_VARIABLES, stagingKeyDigestHex } from "./interface/public/staging-access";
+import { STAGING_STATUS_IDENTITY, STAGING_VARIABLES, stagingKeyDigestHex } from "./interface/public/staging-access";
 import { config, proxy } from "./proxy";
 
 const ORIGIN = "http://127.0.0.1:3999";
@@ -26,6 +26,8 @@ const ADMIN_HEADERS: Readonly<Record<string, string>> = {
 };
 const ADMIN_PAGE_PATHS = ["/admin", "/admin/sign-in", "/admin/sign-in/code", "/admin/sign-in/recovery", "/admin/recovery"];
 const METHODS = ["GET", "HEAD", "POST", "OPTIONS", "PUT", "DELETE"];
+/** The reserved S2 identity that serves staging status (amendment A1, option D). */
+const STATUS = `/directory/${STAGING_STATUS_IDENTITY}`;
 
 const saved: Record<string, string | undefined> = {};
 const env = process.env as Record<string, string | undefined>;
@@ -132,6 +134,7 @@ describe("PX-4: the global matcher, and S2 is unaffected outside staging", () =>
       "/_next/image?url=%2Fx.png&w=64&q=75",
       "/favicon.ico",
       "/bi4-staging/status",
+      "/directory/__bi4_status__",
       "/anything/else",
     ]) {
       expect(unstable_doesMiddlewareMatch({ config, url }), url).toBe(true);
@@ -141,7 +144,7 @@ describe("PX-4: the global matcher, and S2 is unaffected outside staging", () =>
   it("passes S2 and every non-admin path through with no header added, flag on or off", () => {
     for (const flag of ["1", undefined]) {
       setEnvironment("production", flag);
-      for (const path of ["/", "/directory/9f0c5a1e-3b7d-4c2a-8e6f-1a2b3c4d5e6f", "/_next/static/chunks/main.js", "/bi4-staging/status", "/Admin", "/administrator"]) {
+      for (const path of ["/", "/directory/9f0c5a1e-3b7d-4c2a-8e6f-1a2b3c4d5e6f", "/_next/static/chunks/main.js", "/bi4-staging/status", STATUS, "/Admin", "/administrator"]) {
         for (const method of METHODS) {
           const response = call(path, method);
           expect(isPassThrough(response), `${method} ${path}`).toBe(true);
@@ -305,7 +308,7 @@ describe("OP-2 staging gate", () => {
     stagingEnvironment();
     const paths = [
       "/", "/directory", `/directory/${STAGING_UUID}`, "/directory/malformed", "/admin", "/admin/sign-in", "/admin/sign-in/password",
-      "/_next/static/chunks/main.js", "/_next/image?url=%2Fx.png&w=64&q=75", "/favicon.ico", "/bi4-staging/status", "/random/path",
+      "/_next/static/chunks/main.js", "/_next/image?url=%2Fx.png&w=64&q=75", "/favicon.ico", "/bi4-staging/status", STATUS, "/random/path",
     ];
     for (const path of paths) {
       for (const method of METHODS) {
@@ -323,25 +326,27 @@ describe("OP-2 staging gate", () => {
     await expectGate(proxy(new NextRequest(`${ORIGIN}/directory/${STAGING_UUID}`, { headers: duplicated })), "duplicate header");
   });
 
-  it("PX-10: a valid key reaches only GET/HEAD S2 and GET status; admin and everything else get the gate 404", async () => {
+  it("PX-10: a valid key reaches only GET/HEAD S2 (status included); admin, /bi4-staging/status and everything else get the gate 404", async () => {
     stagingEnvironment();
     for (const path of ["/", "/directory", "/admin", "/admin/sign-in", "/admin/recovery/codes", "/_next/static/chunks/main.js", "/favicon.ico", "/random"]) {
       for (const method of METHODS) await expectGate(stagingCall(path, { method }), `keyed ${method} ${path}`);
     }
     for (const method of ["POST", "OPTIONS", "PUT", "DELETE"]) await expectGate(stagingCall(`/directory/${STAGING_UUID}`, { method }), `keyed ${method} S2`);
-    for (const method of ["HEAD", "POST", "OPTIONS", "PUT", "DELETE"]) await expectGate(stagingCall("/bi4-staging/status", { method }), `keyed ${method} status`);
+    for (const method of METHODS) await expectGate(stagingCall("/bi4-staging/status", { method }), `keyed ${method} /bi4-staging/status`);
+    for (const method of ["POST", "OPTIONS", "PUT", "DELETE"]) await expectGate(stagingCall(STATUS, { method }), `keyed ${method} status`);
 
     for (const method of ["GET", "HEAD"]) {
-      for (const path of [`/directory/${STAGING_UUID}`, "/directory/malformed"]) {
+      for (const path of [`/directory/${STAGING_UUID}`, "/directory/malformed", STATUS]) {
         expect(isPassThrough(stagingCall(path, { method })), `${method} ${path}`).toBe(true);
       }
     }
-    expect(isPassThrough(stagingCall("/bi4-staging/status"))).toBe(true);
+    await expectGate(stagingCall(`${STATUS}?x=1`), "keyed status with a query string");
+    await expectGate(stagingCall(STATUS, { headers: { cookie: "a=b" } }), "keyed status with a cookie");
   });
 
   it("PX-11: the key header is deleted from the forwarded request", () => {
     stagingEnvironment();
-    for (const path of [`/directory/${STAGING_UUID}`, "/bi4-staging/status"]) {
+    for (const path of [`/directory/${STAGING_UUID}`, STATUS]) {
       const response = stagingCall(path, { headers: { accept: "text/html" } });
       const overridden = (response.headers.get("x-middleware-override-headers") ?? "").split(",");
       expect(overridden, path).not.toContain("x-bi4-staging-key");
@@ -351,12 +356,11 @@ describe("OP-2 staging gate", () => {
     }
   });
 
-  it("PX-12: keyed S2 responses get Cache-Control private, no-store; status gets no proxy header", () => {
+  it("PX-12: keyed S2 responses, status included, get Cache-Control private, no-store", () => {
     stagingEnvironment();
-    for (const path of [`/directory/${STAGING_UUID}`, "/directory/malformed"]) {
-      expect(stagingCall(path).headers.get("cache-control"), path).toBe("private, no-store");
+    for (const path of [`/directory/${STAGING_UUID}`, "/directory/malformed", STATUS]) {
+      for (const method of ["GET", "HEAD"]) expect(stagingCall(path, { method }).headers.get("cache-control"), `${method} ${path}`).toBe("private, no-store");
     }
-    expect(addedHeaders(stagingCall("/bi4-staging/status"))).toEqual({});
   });
 
   it("PX-13: deny-all on every invalid condition, even with a valid key", async () => {
@@ -371,7 +375,7 @@ describe("OP-2 staging gate", () => {
     ];
     for (const overrides of cases) {
       stagingEnvironment(overrides);
-      for (const path of [`/directory/${STAGING_UUID}`, "/bi4-staging/status", "/admin", "/"]) {
+      for (const path of [`/directory/${STAGING_UUID}`, STATUS, "/bi4-staging/status", "/admin", "/"]) {
         await expectGate(stagingCall(path), `${JSON.stringify(overrides)} ${path}`);
       }
     }

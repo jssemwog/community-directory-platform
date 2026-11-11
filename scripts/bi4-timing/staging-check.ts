@@ -47,7 +47,7 @@ import {
   STAGING_DATABASE,
   STAGING_KEY_HEADER,
   STAGING_MARKER_PATTERN,
-  STAGING_STATUS_PATH,
+  STAGING_STATUS_IDENTITY,
   stagingKeyDigestHex,
 } from "../../src/interface/public/staging-access";
 import {
@@ -59,7 +59,7 @@ import {
   stagingRoleSetupStatements,
   tlsFailureCode,
 } from "../../src/interface/public/staging-persistence";
-import type { StagingStatusPayload } from "../../src/interface/public/staging-status";
+import { STATUS_ELEMENT_ID, STATUS_SCHEMA, type StagingStatusPayload } from "../../src/interface/public/staging-status";
 import { comparisonListOf, maskNextRequestId, maskOwnIdentity, PLACEHOLDER } from "./body-compare";
 import { createRedactor, e3FixturePlan, e3Fixtures, leakHits, prefixHits, redactDeep, type E3Fixtures, type ScannedItem } from "./e3-check";
 import { loadFixtures, verifyStoredStates } from "./fixtures";
@@ -655,6 +655,19 @@ export interface Probe {
 
 export const PROBE_METHODS: readonly string[] = ["GET", "HEAD", "POST", "OPTIONS"];
 
+/**
+ * The staging status path (amendment A1, option D): the reserved `S2` identity. It is served only
+ * when the staging source is configured; elsewhere it is an ordinary `S2` path.
+ */
+export const STAGING_STATUS_PATH = `/directory/${STAGING_STATUS_IDENTITY}`;
+
+/**
+ * The former status route's path. There is no route file for it, so it is a missing route in every
+ * build. It stays in the probe set as an ordinary path: the gate under staging, the baseline's
+ * not-found everywhere else.
+ */
+export const FORMER_STATUS_PATH = "/bi4-staging/status";
+
 /** The §5 / R-3 path list. The static asset path is discovered per build. */
 export function probePaths(fixtures: E3Fixtures, staticAsset: string, randomSuffix: string = randomBytes(4).toString("hex")): readonly string[] {
   return [
@@ -680,12 +693,16 @@ export function probePaths(fixtures: E3Fixtures, staticAsset: string, randomSuff
     staticAsset,
     "/_next/image?url=%2Ffavicon.ico&w=64&q=75",
     "/favicon.ico",
+    FORMER_STATUS_PATH,
     STAGING_STATUS_PATH,
     `/bi4-staging-probe-${randomSuffix}`,
   ];
 }
 
-/** R-3 (keyless and wrong key, every path and method, plus the special forms) and R-4 (keyed, not S2 or status). */
+/**
+ * R-3 (keyless and wrong key, every path and method, plus the special forms) and R-4 (keyed, not
+ * S2). Status is an `S2` path (amendment A1), so keyed GET/HEAD on it pass and are not probed here.
+ */
 export function gateProbes(fixtures: E3Fixtures, staticAsset: string): readonly Probe[] {
   const probes: Probe[] = [];
   const paths = probePaths(fixtures, staticAsset);
@@ -700,14 +717,16 @@ export function gateProbes(fixtures: E3Fixtures, staticAsset: string): readonly 
   probes.push({ label: "R-3 key in query string", method: "GET", path: `${s2}?${STAGING_KEY_HEADER}=KEY`, key: "none", expect: "gate" });
   probes.push({ label: "R-3 key in cookie", method: "GET", path: s2, key: "none", headers: { cookie: `${STAGING_KEY_HEADER}=KEY` }, expect: "gate" });
   probes.push({ label: "R-3 keyed with a query string", method: "GET", path: `${s2}?x=1`, key: "valid", expect: "gate" });
-  // R-4 (§8 A): with a valid key, every path other than S2 and the status route gets the gate 404
-  // (GET on each path), and so do the methods S2 and the status route do not allow.
+  // R-4 (§8 A): with a valid key, every path other than S2 gets the gate 404 (GET on each path,
+  // the former status route included), and so do the methods S2 does not allow, on an ordinary
+  // S2 path and on the status identity.
   for (const path of paths) {
-    if (/^\/directory\/[^/]+$/.test(path) || path === STAGING_STATUS_PATH) continue;
+    if (/^\/directory\/[^/]+$/.test(path)) continue;
     probes.push({ label: `R-4 keyed GET ${path}`, method: "GET", path, key: "valid", expect: path.endsWith("/") && path !== "/" ? "gate-or-redirect" : "gate" });
   }
   for (const method of ["POST", "OPTIONS"]) probes.push({ label: `R-4 keyed ${method} ${s2}`, method, path: s2, key: "valid", expect: "gate" });
-  for (const method of ["HEAD", "POST", "OPTIONS"]) probes.push({ label: `R-4 keyed ${method} status`, method, path: STAGING_STATUS_PATH, key: "valid", expect: "gate" });
+  for (const method of ["POST", "OPTIONS"]) probes.push({ label: `R-4 keyed ${method} status`, method, path: STAGING_STATUS_PATH, key: "valid", expect: "gate" });
+  for (const method of ["HEAD", "POST", "OPTIONS"]) probes.push({ label: `R-4 keyed ${method} ${FORMER_STATUS_PATH}`, method, path: FORMER_STATUS_PATH, key: "valid", expect: "gate" });
   return probes;
 }
 
@@ -853,6 +872,95 @@ export function statusProblems(
     }
   }
   return problems;
+}
+
+/**
+ * One keyed status response, classified under the amendment A1 §2.5 contract (§2.6). A class
+ * describes the **observed response shape** only:
+ * - `status`: 200 with exactly one status element whose JSON parses as the status schema;
+ * - `gated`: the Proxy gate's exact 404;
+ * - `refused-404`: a framework-style HTML 404 with no status element and not the gate. That shape
+ *   alone does not establish why the request was refused; R-7 establishes database refusal through
+ *   its controlled sequence;
+ * - `malformed`: anything else.
+ */
+export type StatusRead =
+  | { readonly kind: "status"; readonly payload: StagingStatusPayload }
+  | { readonly kind: "gated" }
+  | { readonly kind: "refused-404" }
+  | { readonly kind: "malformed"; readonly reason: string };
+
+const STATUS_ELEMENT = new RegExp(`<script\\b([^>]*)\\bid="${STATUS_ELEMENT_ID}"([^>]*)>([\\s\\S]*?)</script>`, "g");
+const STATUS_ID_TEXT = `id="${STATUS_ELEMENT_ID}"`;
+const STATUS_STATES: readonly string[] = ["unconnected", "verified", "refused"];
+
+/** Whether a parsed value has the status payload's shape (the fields the checks read). */
+function isStatusPayload(value: unknown): value is StagingStatusPayload {
+  if (typeof value !== "object" || value === null) return false;
+  const payload = value as Record<string, unknown>;
+  const counters = payload.counters as Record<string, unknown> | undefined;
+  const render = payload.render as Record<string, unknown> | undefined;
+  return (
+    payload.schema === STATUS_SCHEMA &&
+    typeof payload.bootNonce === "string" &&
+    typeof payload.state === "string" &&
+    STATUS_STATES.includes(payload.state) &&
+    typeof render === "object" &&
+    render !== null &&
+    typeof counters === "object" &&
+    counters !== null &&
+    ["s2Reads", "refusals", "readsAfterRefusal", "overlappedReads"].every((name) => typeof counters[name] === "number")
+  );
+}
+
+/** A framework-style HTML 404 that is not the gate and carries no status element (§2.5). */
+export function isFrameworkNotFound(exchange: Exchange): boolean {
+  if (exchange.status !== 404 || gateProblems(exchange, "", "GET").length === 0) return false;
+  const contentType = headerValuesOf(exchange, "content-type");
+  if (contentType.length !== 1 || !(contentType[0] as string).toLowerCase().startsWith("text/html")) return false;
+  const body = exchange.body.toString("utf8");
+  return /<html\b/i.test(body) && !body.includes(STATUS_ID_TEXT);
+}
+
+/** §2.6: classify one keyed `GET` status response. */
+export function classifyStatus(exchange: Exchange): StatusRead {
+  if (exchange.status === 404 && gateProblems(exchange, "", "GET").length === 0) return { kind: "gated" };
+  if (isFrameworkNotFound(exchange)) return { kind: "refused-404" };
+  if (exchange.status !== 200) return { kind: "malformed", reason: `status ${exchange.status}` };
+  const body = exchange.body.toString("utf8");
+  const elements = [...body.matchAll(STATUS_ELEMENT)];
+  const idCount = body.split(STATUS_ID_TEXT).length - 1;
+  if (elements.length !== 1 || idCount !== 1) return { kind: "malformed", reason: `${elements.length} status element(s), ${idCount} id occurrence(s); expected exactly one` };
+  const [element] = elements as [RegExpMatchArray];
+  if (!/\btype="application\/json"/.test(`${element[1]} ${element[2]}`)) return { kind: "malformed", reason: "the status element is not type application/json" };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(element[3] as string);
+  } catch {
+    return { kind: "malformed", reason: "the status element's JSON does not parse" };
+  }
+  if (!isStatusPayload(parsed)) return { kind: "malformed", reason: "the status element's JSON does not match the status schema" };
+  return { kind: "status", payload: parsed };
+}
+
+/** A one-line description of a classified read, for problems and reports. */
+export function describeStatusRead(read: StatusRead): string {
+  if (read.kind === "status") return `status (state ${read.payload.state})`;
+  if (read.kind === "malformed") return `malformed (${read.reason})`;
+  return read.kind;
+}
+
+/**
+ * `staging-status --expect` (§2.7). `verified` accepts only a `status` read with state verified.
+ * `refused` accepts a `refused-404`, or a `status` read with state refused (the S-7 race). `gated`
+ * and `malformed` fail both. Returns the problems from the classification alone.
+ */
+export function expectProblems(expect: "verified" | "refused", read: StatusRead): readonly string[] {
+  if (expect === "verified") {
+    return read.kind === "status" && read.payload.state === "verified" ? [] : [`R-5 / M-1: status read is ${describeStatusRead(read)}, expected status with state verified`];
+  }
+  if (read.kind === "refused-404" || (read.kind === "status" && read.payload.state === "refused")) return [];
+  return [`R-7: status read is ${describeStatusRead(read)}, expected refused-404 or status with state refused`];
 }
 
 /** F-1 to F-4 (§6.3): what the operator must confirm in the console, and the one automated check. */
@@ -1240,6 +1348,34 @@ export function staticAssetOf(html: string): string | undefined {
 /** §5.2: the only approved difference (D-G1 ruled: bytes must be identical, so none by default). */
 export const APPROVED_REGRESSION_DIFFERENCES: readonly string[] = [];
 
+/**
+ * Amendment A1 §1: whether the `Last-Modified` **value** may be masked for one probe. All of:
+ * 1. the probe is GET or HEAD on the paired static asset (a `/_next/static/…` matrix entry; the
+ *    baseline and candidate entries sit at the same index);
+ * 2. the paired GET responses for that asset are both 200 with byte-identical raw bodies;
+ * 3. the compared responses each carry exactly one `Last-Modified` header.
+ * Nothing else is relaxed: the header's presence and position, every other header, the status and
+ * the body stay under the ordinary comparison.
+ */
+export function lastModifiedRelief(probes: readonly ExchangeRequest[], baseline: readonly Exchange[], candidate: readonly Exchange[], index: number): boolean {
+  const probe = probes[index];
+  if (probe === undefined || (probe.method !== "GET" && probe.method !== "HEAD") || !probe.path.startsWith("/_next/static/")) return false;
+  const pairedGet = probes.findIndex((other) => other.method === "GET" && other.path === probe.path);
+  const bGet = baseline[pairedGet];
+  const cGet = candidate[pairedGet];
+  if (pairedGet < 0 || bGet === undefined || cGet === undefined) return false;
+  if (bGet.status !== 200 || cGet.status !== 200 || !bGet.body.equals(cGet.body)) return false;
+  const b = baseline[index];
+  const c = candidate[index];
+  if (b === undefined || c === undefined) return false;
+  return headerValuesOf(b, "last-modified").length === 1 && headerValuesOf(c, "last-modified").length === 1;
+}
+
+/** Mask only the `Last-Modified` value in a masked header list (name/value pairs, order kept). */
+function maskLastModifiedValue(headers: readonly string[]): readonly string[] {
+  return headers.map((value, i) => (i % 2 === 1 && headers[i - 1] === "last-modified" ? "<masked:last-modified>" : value));
+}
+
 /** PB-1 / PB-2: candidate equals baseline per probe, after masking. */
 export function compareRegression(
   probes: readonly ExchangeRequest[],
@@ -1260,7 +1396,10 @@ export function compareRegression(
     if (b.status !== c.status) problems.push(`${label}: status ${c.status}, baseline ${b.status}`);
     const mb = maskBuildDependent(b, buildIds.baseline);
     const mc = maskBuildDependent(c, buildIds.candidate);
-    if (JSON.stringify(mb.headers) !== JSON.stringify(mc.headers)) problems.push(`${label}: header list differs after masking`);
+    const relief = lastModifiedRelief(probes, baseline, candidate, index);
+    const hb = relief ? maskLastModifiedValue(mb.headers) : mb.headers;
+    const hc = relief ? maskLastModifiedValue(mc.headers) : mc.headers;
+    if (JSON.stringify(hb) !== JSON.stringify(hc)) problems.push(`${label}: header list differs after masking`);
     if (mb.body !== mc.body) problems.push(`${label}: body differs after masking`);
   });
   return problems;
@@ -1582,10 +1721,13 @@ async function keyedExchange(record: StagingRecord, seams: StagingSeams, budget:
   return seams.transport(record.render.url, { ...request, headers: { ...request.headers, ...keyHeaders(key, keys.key, keys.wrong) } });
 }
 
-async function readStatus(record: StagingRecord, seams: StagingSeams, budget: Budget, keys: { readonly key: string; readonly wrong: string }, label: string): Promise<StagingStatusPayload> {
+/** Thrown inside readiness to stop at a status read that is not verified; no further request is sent. */
+class ReadinessStopped extends Error {}
+
+/** One keyed status read, classified (§2.6). Never assumes a payload. */
+async function readStatus(record: StagingRecord, seams: StagingSeams, budget: Budget, keys: { readonly key: string; readonly wrong: string }, label: string): Promise<{ readonly read: StatusRead; readonly exchange: Exchange }> {
   const exchange = await keyedExchange(record, seams, budget, label, { method: "GET", path: STAGING_STATUS_PATH }, "valid", keys);
-  if (exchange.status !== 200) throw new Error(`${label}: the status route returned ${exchange.status}`);
-  return JSON.parse(exchange.body.toString("utf8")) as StagingStatusPayload;
+  return { read: classifyStatus(exchange), exchange };
 }
 
 /** Run one subcommand. Returns the exit code: 0 only when every check passed. */
@@ -1751,20 +1893,28 @@ export async function runStagingCommand(command: string, flags: Readonly<Record<
     const out = flags["--out"] as string;
     requireOut(seams, out);
     const budget = createBudget(2);
-    const current = await readStatus(record, seams, budget, keys, "status");
+    const expect = flags["--expect"];
+    if (expect !== "verified" && expect !== "refused") throw new Error("--expect must be verified or refused");
     const previousFlag = flags["--previous"] as string;
     const previous = previousFlag === "none" ? undefined : (JSON.parse(readText(previousFlag)) as StagingStatusPayload);
     const expectedFlag = flags["--expected-reads"] as string;
     const expectedReads = expectedFlag === "none" ? undefined : Number(expectedFlag);
-    const expect = flags["--expect"];
-    let problems = [...statusProblems(record, current, previous, expectedReads)];
-    if (expect === "refused") {
-      problems = problems.filter((problem) => !problem.includes("state is") && !problem.includes("refusals is") && !problem.includes("bootNonce changed") && !problem.includes("RENDER_INSTANCE_ID changed"));
-      if (current.state !== "refused") problems.push(`R-7: state is ${current.state}, expected refused (fresh-process refusal)`);
-    } else if (expect !== "verified") {
-      throw new Error("--expect must be verified or refused");
+    const { read } = await readStatus(record, seams, budget, keys, "status");
+    const problems: string[] = [...expectProblems(expect, read)];
+    if (read.kind === "status") {
+      const payloadProblems = statusProblems(record, read.payload, previous, expectedReads);
+      // Under --expect refused, the state, the refusal counter and a restart are what R-7 expects.
+      problems.push(...(expect === "refused" ? payloadProblems.filter((problem) => !problem.includes("state is") && !problem.includes("refusals is") && !problem.includes("bootNonce changed") && !problem.includes("RENDER_INSTANCE_ID changed")) : payloadProblems));
     }
-    writeReport(out, "status", { current, problems }, redact);
+    let r7S2: string | undefined;
+    if (expect === "refused") {
+      // R-7 (§2.7): a keyed S2 request for a recorded fixture must also get the layout's 404.
+      // Refusal is sticky, so this holds after an S-7 refusal too.
+      const s2 = await keyedExchange(record, seams, budget, "R-7 keyed S2", { method: "GET", path: `/directory/${record.run.fixtures.publiclyAvailable}` }, "valid", keys);
+      r7S2 = isFrameworkNotFound(s2) ? "framework 404" : `status ${s2.status}${gateProblems(s2, "", "GET").length === 0 ? " (the gate)" : ""}`;
+      if (!isFrameworkNotFound(s2)) problems.push(`R-7: the keyed S2 request returned ${r7S2}, expected the layout's framework 404`);
+    }
+    writeReport(out, "status", { classification: describeStatusRead(read), current: read.kind === "status" ? read.payload : null, ...(r7S2 === undefined ? {} : { r7KeyedS2: r7S2 }), problems }, redact);
     for (const problem of problems) say(problem);
     say(problems.length === 0 ? "staging-status: passed" : `staging-status: FAILED (${problems.length})`);
     return problems.length === 0 ? 0 : 1;
@@ -1814,64 +1964,87 @@ export async function runStagingCommand(command: string, flags: Readonly<Record<
       return exchange;
     };
 
-    const first = await readStatus(record, seams, budget, keys, "status (start)");
-    problems.push(...statusProblems(record, first, undefined, undefined));
+    // Every status read must be class `status` with state verified. Anything else (a refused-404,
+    // a refused payload, the gate, a malformed response) fails and stops readiness at once: no
+    // further request is sent (§2.7, R-5 and M-1).
+    let first: StagingStatusPayload | undefined;
+    let after10: StagingStatusPayload | undefined;
+    let stoppedAt: string | undefined;
+    const verifiedStatus = async (label: string, check: string): Promise<StagingStatusPayload> => {
+      const { read } = await readStatus(record, seams, budget, keys, label);
+      if (read.kind === "status" && read.payload.state === "verified") return read.payload;
+      problems.push(`${check}: ${label} is ${describeStatusRead(read)}, expected status with state verified; readiness stops here`);
+      stoppedAt = label;
+      throw new ReadinessStopped(label);
+    };
 
-    // R-3 and R-4.
-    const gateResults: { label: string; method: string; exchange: Exchange }[] = [];
-    for (const probe of gateProbes(fixtures, "/_next/static/chunks/main.js")) {
-      const request = { method: probe.method, path: probe.path.replace("=KEY", `=${keys.key}`), ...(probe.headers === undefined ? {} : { headers: Object.fromEntries(Object.entries(probe.headers).map(([name, value]) => [name, value.replace("=KEY", `=${keys.key}`)])) }) };
-      const exchange = await send(probe.label, request, probe.key);
-      problems.push(...probeProblems(probe, exchange));
-      gateResults.push({ label: probe.label, method: probe.method, exchange });
+    try {
+      // R-5: the first keyed status read on the started process is verified, with no S2 read yet.
+      first = await verifiedStatus("status (start)", "R-5");
+      if (first.counters.s2Reads !== 0) problems.push(`R-5: s2Reads is ${first.counters.s2Reads} on the first status read, expected 0`);
+      problems.push(...statusProblems(record, first, undefined, undefined));
+
+      // R-3 and R-4.
+      const gateResults: { label: string; method: string; exchange: Exchange }[] = [];
+      for (const probe of gateProbes(fixtures, "/_next/static/chunks/main.js")) {
+        const request = { method: probe.method, path: probe.path.replace("=KEY", `=${keys.key}`), ...(probe.headers === undefined ? {} : { headers: Object.fromEntries(Object.entries(probe.headers).map(([name, value]) => [name, value.replace("=KEY", `=${keys.key}`)])) }) };
+        const exchange = await send(probe.label, request, probe.key);
+        problems.push(...probeProblems(probe, exchange));
+        gateResults.push({ label: probe.label, method: probe.method, exchange });
+      }
+      problems.push(...gateUniformityProblems(gateResults));
+
+      // R-2b: K-1 to K-5, through Render.
+      for (const url of [`/directory/${fixtures.publiclyAvailable}`, `/directory/${fixtures.neverExisted[0]}`, STAGING_STATUS_PATH]) {
+        const run = await runKChecks(url, (request, mode) => send(`K ${request.method} ${url} (${mode})`, request, mode), seams.wait);
+        for (const result of run.results) problems.push(...result.problems);
+        const keyed = run.results.find((result) => result.id === "K-5");
+        if (keyed !== undefined) say(`R-2b: Cache-Control through Render for ${url}: ${JSON.stringify(headerValuesOf(keyed.exchange, "cache-control"))}`);
+        if (url === STAGING_STATUS_PATH && keyed !== undefined && classifyStatus(keyed.exchange).kind !== "status") {
+          problems.push(`K-5 ${url}: the keyed status response is ${describeStatusRead(classifyStatus(keyed.exchange))}, expected status`);
+        }
+      }
+
+      // R-9: the read counter grows by exactly the keyed S2 requests sent.
+      const beforeCount = await verifiedStatus("status (R-9 before)", "M-1");
+      for (let i = 0; i < 3; i += 1) await send(`R-9 keyed S2 ${i + 1}`, { method: "GET", path: `/directory/${fixtures.publiclyAvailable}` }, "valid");
+      const afterCount = await verifiedStatus("status (R-9 after)", "M-1");
+      problems.push(...statusProblems(record, afterCount, beforeCount, 3));
+
+      // R-10: remote equivalence, public controls first and last.
+      const s2 = (identity: string) => ({ method: "GET", path: `/directory/${identity}` });
+      const before10 = await verifiedStatus("status (R-10 before)", "M-1");
+      const firstControl = await send("R-10 public control (first)", s2(fixtures.publiclyAvailable), "valid");
+      const members: EquivalenceMember[] = [];
+      for (const [label, identity, state] of [
+        ["never-existed 1", fixtures.neverExisted[0], "NE"],
+        ["never-existed 2", fixtures.neverExisted[1], "NE"],
+        ["pending", fixtures.pending, "PE"],
+        ["rejected", fixtures.rejected, "RJ"],
+        ["unpublished", fixtures.unpublished, "UP"],
+      ] as const) {
+        members.push({ label: `R-10 ${label}`, identity, state, exchange: await send(`R-10 ${label}`, s2(identity), "valid") });
+      }
+      const malformed = await send("R-10 malformed", s2(fixtures.malformed), "valid");
+      if (malformed.status !== 200 || !malformed.body.toString("utf8").includes("<h1>Not available</h1>")) problems.push("R-10: the malformed control did not render the not-available content");
+      const lastControl = await send("R-10 public control (last)", s2(fixtures.publiclyAvailable), "valid");
+      problems.push(
+        ...remoteEquivalenceProblems(members, [
+          { label: "R-10 public control (first)", identity: fixtures.publiclyAvailable, exchange: firstControl, publicName: fixtures.publicName },
+          { label: "R-10 public control (last)", identity: fixtures.publiclyAvailable, exchange: lastControl, publicName: fixtures.publicName },
+        ]),
+      );
+      after10 = await verifiedStatus("status (R-10 after)", "M-1");
+      problems.push(...statusProblems(record, after10, before10, 8));
+    } catch (error) {
+      if (!(error instanceof ReadinessStopped)) throw error;
     }
-    problems.push(...gateUniformityProblems(gateResults));
-
-    // R-2b: K-1 to K-5, through Render.
-    for (const url of [`/directory/${fixtures.publiclyAvailable}`, `/directory/${fixtures.neverExisted[0]}`, STAGING_STATUS_PATH]) {
-      const run = await runKChecks(url, (request, mode) => send(`K ${request.method} ${url} (${mode})`, request, mode), seams.wait);
-      for (const result of run.results) problems.push(...result.problems);
-      const keyed = run.results.find((result) => result.id === "K-5");
-      if (keyed !== undefined) say(`R-2b: Cache-Control through Render for ${url}: ${JSON.stringify(headerValuesOf(keyed.exchange, "cache-control"))}`);
-    }
-
-    // R-9: the read counter grows by exactly the keyed S2 requests sent.
-    const beforeCount = await readStatus(record, seams, budget, keys, "status (R-9 before)");
-    for (let i = 0; i < 3; i += 1) await send(`R-9 keyed S2 ${i + 1}`, { method: "GET", path: `/directory/${fixtures.publiclyAvailable}` }, "valid");
-    const afterCount = await readStatus(record, seams, budget, keys, "status (R-9 after)");
-    problems.push(...statusProblems(record, afterCount, beforeCount, 3));
-
-    // R-10: remote equivalence, public controls first and last.
-    const s2 = (identity: string) => ({ method: "GET", path: `/directory/${identity}` });
-    const before10 = await readStatus(record, seams, budget, keys, "status (R-10 before)");
-    const firstControl = await send("R-10 public control (first)", s2(fixtures.publiclyAvailable), "valid");
-    const members: EquivalenceMember[] = [];
-    for (const [label, identity, state] of [
-      ["never-existed 1", fixtures.neverExisted[0], "NE"],
-      ["never-existed 2", fixtures.neverExisted[1], "NE"],
-      ["pending", fixtures.pending, "PE"],
-      ["rejected", fixtures.rejected, "RJ"],
-      ["unpublished", fixtures.unpublished, "UP"],
-    ] as const) {
-      members.push({ label: `R-10 ${label}`, identity, state, exchange: await send(`R-10 ${label}`, s2(identity), "valid") });
-    }
-    const malformed = await send("R-10 malformed", s2(fixtures.malformed), "valid");
-    if (malformed.status !== 200 || !malformed.body.toString("utf8").includes("<h1>Not available</h1>")) problems.push("R-10: the malformed control did not render the not-available content");
-    const lastControl = await send("R-10 public control (last)", s2(fixtures.publiclyAvailable), "valid");
-    problems.push(
-      ...remoteEquivalenceProblems(members, [
-        { label: "R-10 public control (first)", identity: fixtures.publiclyAvailable, exchange: firstControl, publicName: fixtures.publicName },
-        { label: "R-10 public control (last)", identity: fixtures.publiclyAvailable, exchange: lastControl, publicName: fixtures.publicName },
-      ]),
-    );
-    const after10 = await readStatus(record, seams, budget, keys, "status (R-10 after)");
-    problems.push(...statusProblems(record, after10, before10, 8));
 
     // R-12: leak scan of every response.
     problems.push(...stagingLeakProblems(scanned, { key: keys.key, digest: record.run.keyDigestHex, marker: record.run.marker }));
 
     const largestS2 = Math.max(0, ...log.filter((entry) => entry.status === 200).map((entry) => entry.bytes));
-    writeReport(out, "readiness", { attempts: budget.used(), cap: budget.limit, problems, largestKeyedResponseBytes: largestS2, coverage: READINESS_COVERAGE, exchanges: log, statusStart: first, statusEnd: after10 }, redact);
+    writeReport(out, "readiness", { attempts: budget.used(), cap: budget.limit, problems, ...(stoppedAt === undefined ? {} : { stoppedAt }), largestKeyedResponseBytes: largestS2, coverage: READINESS_COVERAGE, exchanges: log, statusStart: first ?? null, statusEnd: after10 ?? null }, redact);
     for (const problem of problems) say(problem);
     say(`attempts: ${budget.used()} of ${budget.limit}; largest keyed response ${largestS2} bytes (R-2 egress estimate)`);
     say(problems.length === 0 ? "staging-readiness: passed for R-2b, R-3, R-4, R-9, R-10 and R-12 (responses)." : `staging-readiness: FAILED (${problems.length})`);
@@ -1921,16 +2094,16 @@ export const READINESS_COVERAGE: readonly CoverageEntry[] = [
   { id: "R-2", coveredBy: "staging-record (recordProblems) and staging-status (service ID, hostname, commit)", kind: "automated + operator action", outstanding: "the Render settings transcribed from the dashboard (plan, region, instances, health path, auto-deploy, previews, edge cache, variable names); the response size is in the readiness log" },
   { id: "R-2b", coveredBy: "staging-readiness (K-1 to K-5 through Render)", kind: "automated", outstanding: "none" },
   { id: "R-3", coveredBy: "staging-readiness", kind: "automated", outstanding: "none" },
-  { id: "R-4", coveredBy: "staging-readiness (GET on every path, plus the disallowed methods on S2 and status)", kind: "automated", outstanding: "none" },
-  { id: "R-5", coveredBy: "staging-verify (V-4: positive, wrong-CA and IP-literal controls) and staging-status (verified)", kind: "automated", outstanding: "none" },
+  { id: "R-4", coveredBy: "staging-readiness (GET on every path, /bi4-staging/status included, plus the disallowed methods on S2 and the status identity)", kind: "automated", outstanding: "none" },
+  { id: "R-5", coveredBy: "staging-verify (V-4: positive, wrong-CA and IP-literal controls); staging-readiness (the first keyed status read is class status, state verified, s2Reads 0) and staging-status --expect verified", kind: "automated", outstanding: "none" },
   { id: "R-6", coveredBy: "staging-setup and staging-verify (role attributes and listing privileges)", kind: "automated", outstanding: "none" },
-  { id: "R-7", coveredBy: "staging-marker, then staging-status --expect refused / verified", kind: "automated + operator action", outstanding: "the two Render service restarts, with their times" },
+  { id: "R-7", coveredBy: "the controlled sequence: staging-status --expect verified; staging-marker --set wrong, restart, staging-status --expect refused (keyed status refused-404 and keyed S2 framework 404); staging-marker --set recorded, restart, staging-status --expect verified", kind: "automated + operator action", outstanding: "the two Render service restarts, with their times" },
   { id: "R-8", coveredBy: "staging-verify --operator-rule none (network refusal required)", kind: "automated + operator action", outstanding: "removing the operator's trusted-source rule in the console" },
   { id: "R-9", coveredBy: "staging-readiness", kind: "automated", outstanding: "none" },
   { id: "R-10", coveredBy: "staging-readiness (Date and Rndr-Id removed, own UUID masked)", kind: "automated", outstanding: "none" },
   { id: "R-11", coveredBy: "none", kind: "not implemented", outstanding: "the calibration pilot belongs to the later measurement slice" },
   { id: "R-12", coveredBy: "staging-readiness (every response)", kind: "automated + operator action", outstanding: "an export of the Render application logs for the scan" },
-  { id: "M-1", coveredBy: "staging-status --previous", kind: "automated", outstanding: "none" },
+  { id: "M-1", coveredBy: "staging-status --previous (an unexpected 404 or a refused payload invalidates the run, whatever its cause)", kind: "automated", outstanding: "none" },
   { id: "M-2", coveredBy: "none", kind: "operator evidence", outstanding: "the Render event list for each window (no deploy, restart, instance, edge-cache, plan or suspension event)" },
   { id: "M-3, M-4, M-5, M-8", coveredBy: "none", kind: "not implemented", outstanding: "the remote measurement harness (later slice)" },
   { id: "M-6", coveredBy: "staging-project", kind: "automated + operator action", outstanding: "the accrued amounts read from both billing pages at each phase boundary" },
@@ -2088,7 +2261,7 @@ export async function runLoopbackCommand(command: string, flags: Readonly<Record
       ...(keyedS2.status === 200 ? [] : [`keyed S2 returned ${keyedS2.status}`]),
       ...cachePolicyProblems(keyedS2, "keyed S2 (local next start)"),
       ...gateProblems(keylessS2, "keyless S2", "GET"),
-      ...(status.status === 200 ? [] : [`status returned ${status.status}`]),
+      ...(classifyStatus(status).kind === "status" ? [] : [`status read is ${describeStatusRead(classifyStatus(status))}, expected status`]),
       ...cachePolicyProblems(status, "status (local next start)"),
     ];
     const observed = { keyedS2CacheControl: headerValuesOf(keyedS2, "cache-control"), statusCacheControl: headerValuesOf(status, "cache-control") };

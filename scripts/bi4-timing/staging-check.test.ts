@@ -6,7 +6,10 @@
  * and their evaluation (R-3, R-4); SC-4 the cache policy and K-1 to K-5; SC-5 remote equivalence
  * (R-10, Date and Rndr-Id removed); SC-6 status (M-1, R-9, SP-5); SC-7 spend projection;
  * SC-8 regression (PB); SC-9 setup values, leaks and origins; SC-10 readiness end to end against a
- * fake endpoint.
+ * fake endpoint. Amendment A1 revision 2: A1-U1 to A1-U6 the `Last-Modified` rule (SC-8); A1-U13
+ * the status path and probe sets (SC-3); A1-U15 and A1-U16 the classified status reader and
+ * `--expect` (SC-16, SC-10); A1-U17 and A1-U18 readiness against refusing and healthy cold
+ * endpoints (SC-10).
  */
 
 import { randomBytes, randomUUID } from "node:crypto";
@@ -29,11 +32,16 @@ import {
   assetProofProblems,
   buildScanProblems,
   captureFileName,
+  classifyStatus,
   compareCaptures,
   DEMO_LISTINGS,
   demoComparisonProblems,
   demoRequests,
+  expectProblems,
+  FORMER_STATUS_PATH,
   GATE_BASELINE_COMMIT,
+  isFrameworkNotFound,
+  lastModifiedRelief,
   modeEnvironmentProblems,
   modeSignatureProblems,
   networkFilterProblems,
@@ -73,6 +81,7 @@ import {
   runKChecks,
   runStagingCommand,
   sha256Hex,
+  STAGING_STATUS_PATH,
   staticAssetOf,
   stagingLeakProblems,
   statusProblems,
@@ -183,6 +192,17 @@ function baseSeams(overrides: Partial<StagingSeams> = {}): StagingSeams {
 
 const GATE = () => exchange(404, ["Content-Type", "text/plain; charset=utf-8", "Cache-Control", "no-store", "Date", new Date().toUTCString(), "Rndr-Id", randomBytes(6).toString("hex")], "Not Found");
 
+/** The framework's not-found page, as the directory layout's `notFound()` answers it. */
+const FRAMEWORK_404 = () =>
+  exchange(404, ["Cache-Control", "private, no-cache, no-store, max-age=0, must-revalidate", "Content-Type", "text/html; charset=utf-8", "X-Powered-By", "Next.js"], '<!DOCTYPE html><html lang="en"><head><title>404: This page could not be found.</title></head><body><h1>404</h1></body></html>');
+
+/** A status page: one escaped JSON element, as the page's status branch renders it. */
+function statusPage(payload: unknown, options: { readonly elements?: number; readonly type?: string } = {}): Exchange {
+  const json = JSON.stringify(payload).replace(/</g, "\\u003c");
+  const element = `<script type="${options.type ?? "application/json"}" id="bi4-staging-status">${json}</script>`;
+  return exchange(200, ["Content-Type", "text/html; charset=utf-8", "Cache-Control", "private, no-store"], `<!DOCTYPE html><html><body>${element.repeat(options.elements ?? 1)}</body></html>`);
+}
+
 /* ------------------------------------------------------------------------------------------- */
 
 describe("SC-1: the record and V-1", () => {
@@ -279,12 +299,29 @@ describe("SC-3: the gate probes", () => {
   it("covers every path and method keyless and with a wrong key, and fits the readiness cap", () => {
     const probes = gateProbes(fixtures, "/_next/static/chunks/main.js");
     const keyless = probes.filter((probe) => probe.key === "none" && probe.label.startsWith("R-3 keyless"));
-    expect(keyless).toHaveLength(24 * 4);
-    expect(probes.filter((probe) => probe.key === "wrong")).toHaveLength(24 * 4);
+    expect(keyless).toHaveLength(25 * 4);
+    expect(probes.filter((probe) => probe.key === "wrong")).toHaveLength(25 * 4);
     expect(probes.some((probe) => probe.label === "R-3 key in cookie")).toBe(true);
     expect(probes.filter((probe) => probe.key === "valid" && probe.path === "/admin")).toHaveLength(1);
     expect(probes.some((probe) => probe.key === "valid" && probe.method === "GET" && /^\/directory\/[^/?]+$/.test(probe.path))).toBe(false);
     expect(probes.length + 18 + 15).toBeLessThanOrEqual(READINESS_CAP);
+  });
+
+  it("A1-U13: probes the status identity as an S2 path and the former status route as an ordinary path", () => {
+    expect(STAGING_STATUS_PATH).toBe("/directory/__bi4_status__");
+    expect(FORMER_STATUS_PATH).toBe("/bi4-staging/status");
+    const probes = gateProbes(fixtures, "/_next/static/chunks/main.js");
+    const keyed = probes.filter((probe) => probe.key === "valid");
+    for (const method of ["GET", "HEAD", "POST", "OPTIONS"]) {
+      expect(keyed.some((probe) => probe.path === FORMER_STATUS_PATH && probe.method === method && probe.expect === "gate"), `keyed ${method} former`).toBe(true);
+      expect(probes.some((probe) => probe.key === "none" && probe.path === STAGING_STATUS_PATH && probe.method === method), `keyless ${method} status`).toBe(true);
+    }
+    expect(keyed.filter((probe) => probe.path === STAGING_STATUS_PATH).map((probe) => probe.method).sort()).toEqual(["OPTIONS", "POST"]);
+    const matrix = regressionProbes(fixtures, "/_next/static/chunks/a.js").map((probe) => `${probe.method} ${probe.path}`);
+    for (const method of ["GET", "HEAD", "POST", "OPTIONS"]) {
+      expect(matrix).toContain(`${method} ${STAGING_STATUS_PATH}`);
+      expect(matrix).toContain(`${method} ${FORMER_STATUS_PATH}`);
+    }
   });
 
   it("accepts only the exact gate 404, or a 308 to the slash-less path for trailing-slash forms", () => {
@@ -401,7 +438,7 @@ describe("SC-7: spend projection (seven-day basis, $24 stop, $30 ceiling)", () =
 describe("SC-8: regression (PB-1 to PB-5)", () => {
   it("builds the matrix and compares after masking Date, ETag, x-nextjs-* and build IDs", () => {
     const probes = regressionProbes(fixtures, "/_next/static/chunks/a.js");
-    expect(probes).toHaveLength(24 * 4);
+    expect(probes).toHaveLength(25 * 4);
     const page = (build: string, date: string) => exchange(200, ["Date", date, "ETag", `"${build}"`, "x-nextjs-cache", build], `<script src="/_next/static/${build}/_buildManifest.js"></script>`);
     const baseline = probes.map(() => page("BUILDAAAA1", "Mon, 01 Jan 2026 00:00:00 GMT"));
     const candidate = probes.map(() => page("BUILDBBBB2", "Tue, 02 Jan 2026 00:00:00 GMT"));
@@ -410,6 +447,79 @@ describe("SC-8: regression (PB-1 to PB-5)", () => {
     expect(compareRegression(probes, baseline, changed, { baseline: "BUILDAAAA1", candidate: "BUILDBBBB2" })[0]).toMatch(/status 404, baseline 200/);
     const header = candidate.map((item, index) => (index === 5 ? { ...item, rawHeaders: [...item.rawHeaders, "X-Frame-Options", "DENY"] } : item));
     expect(compareRegression(probes, baseline, header, { baseline: "BUILDAAAA1", candidate: "BUILDBBBB2" })[0]).toMatch(/header list differs/);
+  });
+
+  describe("amendment A1 §1: Last-Modified on the paired static asset", () => {
+    const ASSET = "/_next/static/chunks/a.js";
+    const probes: ExchangeRequest[] = [
+      { method: "GET", path: ASSET },
+      { method: "HEAD", path: ASSET },
+      { method: "POST", path: ASSET },
+      { method: "OPTIONS", path: ASSET },
+      { method: "GET", path: "/" },
+      { method: "GET", path: "/bi4-staging/status" },
+      { method: "GET", path: "/directory/e0000000-0000-4000-8000-000000000001" },
+    ];
+    const BYTES = "console.log('asset');".repeat(20);
+    const asset = (lastModified: string | null, body = BYTES, extra: string[] = []): Exchange =>
+      exchange(200, ["Cache-Control", "public, max-age=31536000, immutable", ...(lastModified === null ? [] : ["Last-Modified", lastModified]), "Content-Type", "application/javascript; charset=UTF-8", ...extra], body);
+    const head = (lastModified: string | null, extra: string[] = []): Exchange => ({ ...asset(lastModified, BYTES, extra), body: Buffer.alloc(0) });
+    const page = (lastModified: string): Exchange => exchange(200, ["Content-Type", "text/html; charset=utf-8", "Last-Modified", lastModified], "<html>same</html>");
+    const B = "Wed, 11 Nov 2026 18:43:16 GMT";
+    const C = "Wed, 11 Nov 2026 18:45:04 GMT";
+    // Positions: 0 GET asset, 1 HEAD asset, 2 POST asset, 3 OPTIONS asset, 4 GET /, 5 GET former status, 6 GET S2.
+    const side = (lm: string, overrides: Partial<Record<number, Exchange>> = {}): Exchange[] =>
+      [asset(lm), head(lm), page(lm), page(lm), page(B), page(B), page(B)].map((item, index) => overrides[index] ?? item);
+    const compare = (b: Exchange[], c: Exchange[]) => compareRegression(probes, b, c, {});
+    const sameOther = { 2: page(B), 3: page(B) };
+
+    it("A1-U1: equal bytes, one Last-Modified each side, different values: GET and HEAD pass", () => {
+      expect(compare(side(B), side(C, sameOther))).toEqual([]);
+      expect(lastModifiedRelief(probes, side(B), side(C), 0)).toBe(true);
+      expect(lastModifiedRelief(probes, side(B), side(C), 1)).toBe(true);
+    });
+
+    it("A1-U2: unequal asset bytes fail on GET (header and body) and on HEAD (header)", () => {
+      const different = asset(C, `${BYTES.slice(0, -1)}X`);
+      const problems = compare(side(B), side(C, { ...sameOther, 0: different }));
+      expect(problems).toContain("GET /_next/static/<asset>: header list differs after masking");
+      expect(problems).toContain("GET /_next/static/<asset>: body differs after masking");
+      expect(problems).toContain("HEAD /_next/static/<asset>: header list differs after masking");
+    });
+
+    it("A1-U2: a non-200 paired GET removes the relief", () => {
+      const notOk = { ...asset(C), status: 304 };
+      expect(compare(side(B), side(C, { ...sameOther, 0: notOk }))).toContain("HEAD /_next/static/<asset>: header list differs after masking");
+    });
+
+    it("A1-U3: a Last-Modified missing on either side, or duplicated, fails", () => {
+      expect(compare(side(B, { 0: asset(null) }), side(C, sameOther))).toContain("GET /_next/static/<asset>: header list differs after masking");
+      expect(compare(side(B), side(C, { ...sameOther, 1: head(null) }))).toContain("HEAD /_next/static/<asset>: header list differs after masking");
+      const twice = asset(C, BYTES, ["Last-Modified", C]);
+      expect(lastModifiedRelief(probes, side(B), side(C, { 0: twice }), 0)).toBe(false);
+      expect(compare(side(B), side(C, { ...sameOther, 0: twice }))).toContain("GET /_next/static/<asset>: header list differs after masking");
+    });
+
+    it("A1-U4: a Last-Modified difference on a non-static route fails", () => {
+      const problems = compare(side(B), side(C, { ...sameOther, 4: page(C), 5: page(C), 6: page(C) }));
+      expect(problems).toEqual([
+        "GET /: header list differs after masking",
+        "GET /bi4-staging/status: header list differs after masking",
+        "GET /directory/e0000000-0000-4000-8000-000000000001: header list differs after masking",
+      ]);
+    });
+
+    it("A1-U5: POST and OPTIONS on the static asset are not eligible", () => {
+      expect(compare(side(B), side(C))).toEqual(["POST /_next/static/<asset>: header list differs after masking", "OPTIONS /_next/static/<asset>: header list differs after masking"]);
+    });
+
+    it("A1-U6: any other header difference on an eligible probe still fails", () => {
+      expect(compare(side(B), side(C, { ...sameOther, 0: asset(C, BYTES, ["X-Extra", "1"]) }))).toEqual(["GET /_next/static/<asset>: header list differs after masking"]);
+      const cache = exchange(200, ["Cache-Control", "no-cache", "Last-Modified", C, "Content-Type", "application/javascript; charset=UTF-8"], BYTES);
+      expect(compare(side(B), side(C, { ...sameOther, 0: cache }))).toEqual(["GET /_next/static/<asset>: header list differs after masking"]);
+      const moved = exchange(200, ["Last-Modified", C, "Cache-Control", "public, max-age=31536000, immutable", "Content-Type", "application/javascript; charset=UTF-8"], BYTES);
+      expect(compare(side(B), side(C, { ...sameOther, 0: moved }))).toEqual(["GET /_next/static/<asset>: header list differs after masking"]);
+    });
   });
 
   it("finds a page's build ID and first static asset", () => {
@@ -456,9 +566,15 @@ describe("SC-9: setup values, leaks and origins", () => {
 /* SC-10: readiness end to end against a fake endpoint that implements the gate                   */
 /* ------------------------------------------------------------------------------------------- */
 
-function fakeEndpoint(r: StagingRecord, options: { readonly cacheControl?: string; readonly cacheKeyless?: boolean } = {}) {
+/**
+ * A fake staging endpoint. Status is served at the reserved S2 identity, behind a layout-style
+ * pre-check: with `refusing`, every keyed S2 request, status included, gets the framework 404 (a
+ * cold refusing process), and no read happens. Status reads never count as S2 reads.
+ */
+function fakeEndpoint(r: StagingRecord, options: { readonly cacheControl?: string; readonly cacheKeyless?: boolean; readonly refusing?: boolean } = {}) {
   let s2Reads = 0;
   let lastKeyed: Exchange | undefined;
+  const statusReadsAt: number[] = [];
   const gate = () => GATE();
   const transport = async (_origin: string, request: ExchangeRequest): Promise<Exchange> => {
     const url = new URL(request.path, "https://x");
@@ -467,14 +583,9 @@ function fakeEndpoint(r: StagingRecord, options: { readonly cacheControl?: strin
     if (url.pathname.endsWith("/") && url.pathname !== "/") return exchange(308, { Location: url.pathname.slice(0, -1) });
     if (!keyed) return options.cacheKeyless && lastKeyed !== undefined ? lastKeyed : gate();
     if (url.search !== "" || request.headers?.cookie !== undefined) return gate();
-    if (s2 && request.method === "GET") {
-      s2Reads += 1;
-      const identity = url.pathname.slice("/directory/".length);
-      const text = identity === r.run.fixtures.publiclyAvailable ? `<h1>${r.run.fixtures.publicName}</h1>` : "<h1>Not available</h1>";
-      lastKeyed = exchange(200, ["Content-Type", "text/html; charset=utf-8", "Cache-Control", options.cacheControl ?? "private, no-store", "Rndr-Id", randomBytes(4).toString("hex")], `<a href="/directory/${identity}">${text}</a>`);
-      return lastKeyed;
-    }
-    if (url.pathname === "/bi4-staging/status" && request.method === "GET") {
+    if (s2 && (request.method === "GET" || request.method === "HEAD") && options.refusing) return FRAMEWORK_404();
+    if (url.pathname === "/directory/__bi4_status__" && request.method === "GET") {
+      statusReadsAt.push(s2Reads);
       const status: StagingStatusPayload = {
         schema: "bi4-staging-status/1",
         bootNonce: "n".repeat(32),
@@ -485,11 +596,18 @@ function fakeEndpoint(r: StagingRecord, options: { readonly cacheControl?: strin
         calibration: { enabled: false, total: [] },
         notes: [],
       };
-      return exchange(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }, JSON.stringify(status));
+      return statusPage(status);
+    }
+    if (s2 && request.method === "GET") {
+      s2Reads += 1;
+      const identity = url.pathname.slice("/directory/".length);
+      const text = identity === r.run.fixtures.publiclyAvailable ? `<h1>${r.run.fixtures.publicName}</h1>` : "<h1>Not available</h1>";
+      lastKeyed = exchange(200, ["Content-Type", "text/html; charset=utf-8", "Cache-Control", options.cacheControl ?? "private, no-store", "Rndr-Id", randomBytes(4).toString("hex")], `<a href="/directory/${identity}">${text}</a>`);
+      return lastKeyed;
     }
     return gate();
   };
-  return { transport };
+  return { transport, statusReadsAt, s2ReadCount: () => s2Reads };
 }
 
 describe("SC-10: readiness end to end against a fake endpoint", () => {
@@ -507,9 +625,70 @@ describe("SC-10: readiness end to end against a fake endpoint", () => {
     const out = mkdtempSync(join(tmpdir(), "staging-check-out-"));
     directories.push(out);
     const lines: string[] = [];
-    const seams = baseSeams({ environment: { BI4_STAGING_KEY: KEY }, transport: fakeEndpoint(r, options).transport, say: (line) => lines.push(line) });
-    return runStagingCommand("staging-readiness", { "--record": recordFile, "--record-sha256": sha256Hex(bytes), "--out": out }, seams).then((code) => ({ code, lines }));
+    const endpoint = fakeEndpoint(r, options);
+    const seams = baseSeams({ environment: { BI4_STAGING_KEY: KEY }, transport: endpoint.transport, say: (line) => lines.push(line) });
+    return runStagingCommand("staging-readiness", { "--record": recordFile, "--record-sha256": sha256Hex(bytes), "--out": out }, seams).then((code) => ({ code, lines, endpoint, out }));
   }
+
+  function runStatus(r: StagingRecord, expect: string, options: Parameters<typeof fakeEndpoint>[1] = {}) {
+    const directory = mkdtempSync(join(tmpdir(), "staging-check-"));
+    directories.push(directory);
+    const recordFile = join(directory, "record.json");
+    const bytes = recordBytes(r);
+    writeFileSync(recordFile, bytes);
+    const out = mkdtempSync(join(tmpdir(), "staging-check-out-"));
+    directories.push(out);
+    const lines: string[] = [];
+    const sent: string[] = [];
+    const endpoint = fakeEndpoint(r, options);
+    const transport = (origin: string, request: ExchangeRequest) => {
+      sent.push(`${request.method} ${request.path}`);
+      return endpoint.transport(origin, request);
+    };
+    const seams = baseSeams({ environment: { BI4_STAGING_KEY: KEY }, transport, say: (line) => lines.push(line) });
+    const flags = { "--record": recordFile, "--record-sha256": sha256Hex(bytes), "--previous": "none", "--expected-reads": "none", "--expect": expect, "--out": out };
+    return runStagingCommand("staging-status", flags, seams).then((code) => ({ code, lines, sent, out }));
+  }
+
+  it("A1-U18: healthy cold endpoint: the first status read is verified with s2Reads 0, and status reads never count", async () => {
+    const { code, endpoint, out } = await run(record());
+    expect(code).toBe(0);
+    expect(endpoint.statusReadsAt[0]).toBe(0);
+    const report = JSON.parse(readFileSync(join(out, "readiness.json"), "utf8"));
+    expect(report.statusStart.state).toBe("verified");
+    expect(report.statusStart.counters.s2Reads).toBe(0);
+    // The final status shows exactly the keyed listing reads the endpoint counted; status reads add none.
+    expect(report.statusEnd.counters.s2Reads).toBe(endpoint.s2ReadCount());
+    expect(report.stoppedAt).toBeUndefined();
+  });
+
+  it("A1-U17: refusing endpoint: readiness fails at R-5 with refused-404 and sends nothing more", async () => {
+    const { code, lines, out } = await run(record(), { refusing: true });
+    expect(code).toBe(1);
+    expect(lines.some((line) => line.startsWith("R-5: status (start) is refused-404"))).toBe(true);
+    expect(Number(/attempts: (\d+) of/.exec(lines.join("\n"))?.[1])).toBe(1);
+    const report = JSON.parse(readFileSync(join(out, "readiness.json"), "utf8"));
+    expect(report.stoppedAt).toBe("status (start)");
+    expect(report.statusStart).toBeNull();
+  });
+
+  it("A1-U16: staging-status --expect refused passes on refused-404 with the keyed S2 framework 404 (R-7)", async () => {
+    const r = record();
+    const refused = await runStatus(r, "refused", { refusing: true });
+    expect(refused.code).toBe(0);
+    expect(refused.sent).toEqual(["GET /directory/__bi4_status__", `GET /directory/${r.run.fixtures.publiclyAvailable}`]);
+    const report = JSON.parse(readFileSync(join(refused.out, "status.json"), "utf8"));
+    expect(report.classification).toBe("refused-404");
+    expect(report.r7KeyedS2).toBe("framework 404");
+  });
+
+  it("A1-U16: --expect refused fails on a healthy endpoint; --expect verified passes there and fails on a refusing one", async () => {
+    expect((await runStatus(record(), "refused")).code).toBe(1);
+    expect((await runStatus(record(), "verified")).code).toBe(0);
+    const failing = await runStatus(record(), "verified", { refusing: true });
+    expect(failing.code).toBe(1);
+    expect(failing.sent).toEqual(["GET /directory/__bi4_status__"]);
+  });
 
   it("passes against an endpoint that implements the gate and the cache policy, within the cap", async () => {
     const { code, lines } = await run(record());
@@ -546,6 +725,66 @@ describe("SC-10: readiness end to end against a fake endpoint", () => {
 
   it("refuses a key that does not hash to the recorded digest", async () => {
     await expect(run(record({ run: { keyDigestHex: "e".repeat(64) } }))).rejects.toThrow(/does not hash/);
+  });
+});
+
+/* ------------------------------------------------------------------------------------------- */
+/* SC-16: the classified status reader (amendment A1 revision 2 §2.6)                              */
+/* ------------------------------------------------------------------------------------------- */
+
+describe("SC-16: the classified status reader", () => {
+  const payload = {
+    schema: "bi4-staging-status/1",
+    bootNonce: "n".repeat(32),
+    render: { serviceId: "srv", instanceId: "i1", gitCommit: "c".repeat(40), externalHostname: "h" },
+    state: "verified",
+    counters: { s2Reads: 0, refusals: 0, readsAfterRefusal: 0, overlappedReads: 0 },
+    sinceLastStatus: { eventLoop: null, calibration: [] },
+    calibration: { enabled: false, total: [] },
+    notes: ["a </script> in a note"],
+  };
+
+  it("A1-U15: 200 with one valid element is status", () => {
+    const read = classifyStatus(statusPage(payload));
+    expect(read.kind).toBe("status");
+    expect(read.kind === "status" && read.payload.notes[0]).toBe("a </script> in a note");
+  });
+
+  it("A1-U15: the gate's exact 404 is gated; a framework HTML 404 without an element is refused-404", () => {
+    expect(classifyStatus(GATE()).kind).toBe("gated");
+    expect(classifyStatus(FRAMEWORK_404()).kind).toBe("refused-404");
+    expect(isFrameworkNotFound(FRAMEWORK_404())).toBe(true);
+    expect(isFrameworkNotFound(GATE())).toBe(false);
+  });
+
+  it("A1-U15: everything else is malformed", () => {
+    const cases: [string, Exchange][] = [
+      ["no element", exchange(200, { "Content-Type": "text/html" }, "<html><body>listing</body></html>")],
+      ["two elements", statusPage(payload, { elements: 2 })],
+      ["wrong type", statusPage(payload, { type: "text/javascript" })],
+      ["bad JSON", exchange(200, { "Content-Type": "text/html" }, '<html><script type="application/json" id="bi4-staging-status">{nope</script></html>')],
+      ["schema mismatch", statusPage({ ...payload, schema: "other/1" })],
+      ["unknown state", statusPage({ ...payload, state: "fine" })],
+      ["missing counters", statusPage({ ...payload, counters: undefined })],
+      ["500", exchange(500, { "Content-Type": "text/html" }, "<html>error</html>")],
+      ["304", exchange(304, {})],
+      ["404 with an element", { ...statusPage(payload), status: 404 }],
+      ["404 plain text, not the gate", exchange(404, { "Content-Type": "text/plain" }, "nope")],
+    ];
+    for (const [label, response] of cases) expect(classifyStatus(response).kind, label).toBe("malformed");
+  });
+
+  it("A1-U16: expectProblems", () => {
+    const verified = classifyStatus(statusPage(payload));
+    const refusedPayload = classifyStatus(statusPage({ ...payload, state: "refused" }));
+    const refused404 = classifyStatus(FRAMEWORK_404());
+    const gated = classifyStatus(GATE());
+    const malformed = classifyStatus(exchange(500, {}));
+    expect(expectProblems("verified", verified)).toEqual([]);
+    for (const read of [refusedPayload, refused404, gated, malformed]) expect(expectProblems("verified", read)).toHaveLength(1);
+    expect(expectProblems("refused", refused404)).toEqual([]);
+    expect(expectProblems("refused", refusedPayload)).toEqual([]);
+    for (const read of [verified, gated, malformed]) expect(expectProblems("refused", read)).toHaveLength(1);
   });
 });
 
@@ -1091,7 +1330,7 @@ describe("SC-14: regression procedure proofs", () => {
     const rig = captureRig();
     expect(await runLoopbackCommand("staging-regress-capture", rig.flags, rig.seams)).toBe(0);
     expect(rig.sent.slice(0, 3)).toEqual(["GET /", "GET /directory", "GET /_next/static/chunks/a.js"]);
-    expect(rig.sent.length).toBe(3 + 24 * 4);
+    expect(rig.sent.length).toBe(3 + 25 * 4);
     const capture = rig.read();
     expect(capture.stoppedAt).toBeNull();
     expect(capture.launchEnvironment.kind).toBe("operator attestation");

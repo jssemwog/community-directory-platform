@@ -68,8 +68,13 @@ export const STAGING_DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 /** The marker's exact shape: a fixed prefix and a 32-hex-digit per-lifetime nonce. */
 export const STAGING_MARKER_PATTERN = /^bi4-staging-synthetic:[0-9a-f]{32}$/;
 
-/** The status route's path (§7.5). */
-export const STAGING_STATUS_PATH = "/bi4-staging/status";
+/**
+ * The reserved `S2` identity that serves the staging status (amendment A1, option D). It is not
+ * UUID-shaped, so `OP-2` can never treat it as a listing, and it is never inserted. Status is served
+ * at `/directory/__bi4_status__` only when the staging source is configured. Outside staging that
+ * path is an ordinary `S2` path with no configured source, so it behaves exactly as on the baseline.
+ */
+export const STAGING_STATUS_IDENTITY = "__bi4_status__";
 
 /**
  * The calibration delay ceiling, **a code constant, not configuration** (§7.2, D-G4): 2 ms.

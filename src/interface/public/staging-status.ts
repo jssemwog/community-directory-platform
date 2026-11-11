@@ -1,7 +1,10 @@
 /**
  * The staging status payload (issue #246, OP-2 staging Scope Gate revision 2 §7.5).
  *
- * Served only under the staging mode, behind the proxy's key gate, at `GET /bi4-staging/status`.
+ * Served only under the staging source, behind the proxy's key gate, at the reserved `S2` identity
+ * `GET /directory/__bi4_status__` (amendment A1, option D). The page renders it as JSON in one
+ * `<script type="application/json" id="bi4-staging-status">` element, after the directory layout's
+ * pre-check. A cold refusing process never reaches the page: the layout answers 404 first.
  * It reports process identity (to detect restarts and redeploys), the data source's state, the
  * read counters and the side-by-side calibration and event-loop summaries.
  *
@@ -14,7 +17,8 @@
  * histogram, and no sampled stall is attributed to a cause (approval ruling 2).
  */
 
-import type { StagingSnapshot } from "./staging-persistence";
+import { STAGING_STATUS_IDENTITY } from "./staging-access";
+import type { StagingHandle, StagingSnapshot } from "./staging-persistence";
 
 export const STATUS_SCHEMA = "bi4-staging-status/1";
 
@@ -80,8 +84,48 @@ export function stagingStatusPayload(snapshot: StagingSnapshot, environment: Rea
   };
 }
 
-/** The response headers for the payload. */
-export const STATUS_HEADERS: Readonly<Record<string, string>> = Object.freeze({
-  "Content-Type": "application/json; charset=utf-8",
-  "Cache-Control": "no-store",
-});
+/** The id of the one element that carries the status JSON in the page. */
+export const STATUS_ELEMENT_ID = "bi4-staging-status";
+
+const LINE_SEPARATOR = String.fromCharCode(0x2028);
+const PARAGRAPH_SEPARATOR = String.fromCharCode(0x2029);
+
+/**
+ * JSON safe to place inside a `<script>` element: `<`, `>`, `&`, U+2028 and U+2029 are escaped, so
+ * the payload can never close the element or start a comment. `JSON.parse` reads it back unchanged.
+ */
+export function jsonForScriptElement(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .split(LINE_SEPARATOR)
+    .join("\\" + "u2028")
+    .split(PARAGRAPH_SEPARATOR)
+    .join("\\" + "u2029");
+}
+
+/** The slice of a public read source the status view needs. */
+export type StatusViewSource = { readonly kind: "staging"; readonly staging: Pick<StagingHandle, "precheck" | "status"> } | { readonly kind: string };
+
+/**
+ * The status view for one `S2` request, or `null`.
+ *
+ * Returns `null`, so the page takes its ordinary path, for every source other than staging (the
+ * demo, `E3-local`, none) and for every identity other than the reserved one. For the reserved
+ * identity under staging, it runs the pre-check (as the layout does) and returns the escaped payload
+ * JSON. **It never calls `read()`,** so status reads do not count as listing reads. A refused
+ * pre-check still returns the payload, with `state: "refused"`. That can only show when the refusal
+ * arrived after the layout's own pre-check passed (S-7); a cold refusing process is answered 404 by
+ * the layout first.
+ */
+export async function statusViewFor(
+  source: StatusViewSource | undefined,
+  listingId: string,
+  environment: Readonly<Record<string, string | undefined>>,
+): Promise<string | null> {
+  if (source === undefined || source.kind !== "staging" || listingId !== STAGING_STATUS_IDENTITY) return null;
+  const staging = (source as { staging: Pick<StagingHandle, "precheck" | "status"> }).staging;
+  await staging.precheck();
+  return jsonForScriptElement(stagingStatusPayload(staging.status(), environment));
+}

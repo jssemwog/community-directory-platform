@@ -4,7 +4,6 @@ import {
   isStagingS2Path,
   presentsStagingKey,
   STAGING_KEY_HEADER,
-  STAGING_STATUS_PATH,
   stagingModeOf,
   type StagingConfiguration,
 } from "./interface/public/staging-access";
@@ -51,17 +50,18 @@ import {
  * Under the staging mode (production, `BI4_STAGING` present; `staging-access.ts`), the service is
  * publicly reachable and **application-key gated**:
  * - deny-all (armed but not validly configured): every request gets the gate `404`;
- * - otherwise a request passes **only** if it is `GET`/`HEAD` on one `S2` path or `GET` on the
- *   status route, has no query string and no `Cookie` header, and presents the key in exactly one
- *   `X-BI4-Staging-Key` header. Everything else, `/admin/**`, `/` and static assets included, gets
- *   the gate `404`, keyed or not;
+ * - otherwise a request passes **only** if it is `GET`/`HEAD` on one `S2` path, has no query
+ *   string and no `Cookie` header, and presents the key in exactly one `X-BI4-Staging-Key` header.
+ *   Everything else, `/admin/**`, `/`, static assets and `/bi4-staging/status` included, gets the
+ *   gate `404`, keyed or not. Status is served at the reserved `S2` identity
+ *   `/directory/__bi4_status__` (amendment A1, option D), so it needs no allowance of its own;
  * - the key header is **deleted** from the forwarded request, so nothing upstream sees it;
  * - a keyed `S2` response gets `Cache-Control: private, no-store`, the same for every class (§4.1).
  *   Whether that value survives to the wire is checked by the local configured check and, for
  *   readiness, through Render (R-2b).
  *
- * The gate is **not** the only line of defence: the staging data are synthetic, the status route
- * re-checks the mode itself, and the app role can read only `listing`.
+ * The gate is **not** the only line of defence: the staging data are synthetic, the status view
+ * renders only under the staging source, and the app role can read only `listing`.
  */
 const PAGE_PATHS = new Set(["/admin", "/admin/sign-in", "/admin/sign-in/code", "/admin/sign-in/recovery", "/admin/recovery"]);
 
@@ -82,9 +82,8 @@ function stagingGate(request: NextRequest, configuration: StagingConfiguration):
   const { pathname, search } = request.nextUrl;
   const method = request.method;
   const isS2 = isStagingS2Path(pathname) && (method === "GET" || method === "HEAD");
-  const isStatus = pathname === STAGING_STATUS_PATH && method === "GET";
 
-  if (!keyed || !(isS2 || isStatus) || search !== "" || request.headers.has("cookie")) {
+  if (!keyed || !isS2 || search !== "" || request.headers.has("cookie")) {
     return plainNotFound();
   }
 
