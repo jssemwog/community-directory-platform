@@ -27,6 +27,11 @@ export const metadata: Metadata = { title: "Listing — local demonstration" };
  * the client reservation fails, no query runs and the same `NotAvailable` content is rendered.
  * That is the approved S-7 fallback, for a refusal that arrives after the directory layout's
  * pre-stream check passed. No render order with the layout is assumed.
+ *
+ * **OP-2 staging (OP-2 staging Scope Gate revision 2).** The staging source's read is guarded the
+ * same way and returns the same `REFUSED` outcome. When calibration is on, a read of an approved
+ * calibration identity is delayed inside that source, after the database read. The page itself is
+ * unchanged.
  */
 export default async function ListingPage({ params }: { params: Promise<{ listingId: string }> }) {
   const source = publicReadSource();
@@ -39,7 +44,9 @@ export default async function ListingPage({ params }: { params: Promise<{ listin
   const outcome =
     source.kind === "demo"
       ? await findPubliclyAvailableListing(source.persistence.db, listingId)
-      : await source.e3.read(listingId);
+      : source.kind === "e3-local"
+        ? await source.e3.read(listingId)
+        : await source.staging.read(listingId);
   const state = isRefused(outcome) ? NOT_AVAILABLE : listingDetailStateOf(outcome);
 
   return (
