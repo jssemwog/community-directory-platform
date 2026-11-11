@@ -1,5 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import {
+  isStagingS2Path,
+  presentsStagingKey,
+  STAGING_KEY_HEADER,
+  STAGING_STATUS_PATH,
+  stagingModeOf,
+  type StagingConfiguration,
+} from "./interface/public/staging-access";
+
 /**
  * Response headers for the administrative paths only (issue #260 OD-10).
  *
@@ -32,28 +41,91 @@ import { NextResponse, type NextRequest } from "next/server";
  * matches: `/directory/` is answered by the framework's trailing-slash redirect before this runs,
  * and case or encoding variants are not normalized. Otherwise `/directory` passes through with no
  * header added; the admin headers are never applied to it.
+ *
+ * **OP-2 private staging (issue #246, OP-2 staging Scope Gate revision 2 §3).** The matcher is
+ * **global** (`/:path*`), because the staging gate must see every request and a matcher must be a
+ * build-time constant. Outside the staging mode, behaviour is unchanged: the admin headers apply to
+ * `/admin` and `/admin/**` only (what the old matcher covered), the `OPTIONS` refusal and the
+ * `E3-local` rule are as before, and **every other path passes through with no header added**.
+ *
+ * Under the staging mode (production, `BI4_STAGING` present; `staging-access.ts`), the service is
+ * publicly reachable and **application-key gated**:
+ * - deny-all (armed but not validly configured): every request gets the gate `404`;
+ * - otherwise a request passes **only** if it is `GET`/`HEAD` on one `S2` path or `GET` on the
+ *   status route, has no query string and no `Cookie` header, and presents the key in exactly one
+ *   `X-BI4-Staging-Key` header. Everything else, `/admin/**`, `/` and static assets included, gets
+ *   the gate `404`, keyed or not;
+ * - the key header is **deleted** from the forwarded request, so nothing upstream sees it;
+ * - a keyed `S2` response gets `Cache-Control: private, no-store`, the same for every class (§4.1).
+ *   Whether that value survives to the wire is checked by the local configured check and, for
+ *   readiness, through Render (R-2b).
+ *
+ * The gate is **not** the only line of defence: the staging data are synthetic, the status route
+ * re-checks the mode itself, and the app role can read only `listing`.
  */
 const PAGE_PATHS = new Set(["/admin", "/admin/sign-in", "/admin/sign-in/code", "/admin/sign-in/recovery", "/admin/recovery"]);
 
 const DIRECTORY_INDEX = "/directory";
 
+/** The plain-text `404` shared by the `E3-local` rule, the `OPTIONS` refusal and the staging gate. */
+function plainNotFound(): NextResponse {
+  return new NextResponse("Not Found", {
+    status: 404,
+    headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+  });
+}
+
+/** The staging gate (§3.2). Every refusal is the same response. */
+function stagingGate(request: NextRequest, configuration: StagingConfiguration): NextResponse {
+  // The key is checked first and always, so the work does not depend on the path.
+  const keyed = presentsStagingKey(request.headers, configuration.keyDigestHex);
+  const { pathname, search } = request.nextUrl;
+  const method = request.method;
+  const isS2 = isStagingS2Path(pathname) && (method === "GET" || method === "HEAD");
+  const isStatus = pathname === STAGING_STATUS_PATH && method === "GET";
+
+  if (!keyed || !(isS2 || isStatus) || search !== "" || request.headers.has("cookie")) {
+    return plainNotFound();
+  }
+
+  const forwarded = new Headers(request.headers);
+  forwarded.delete(STAGING_KEY_HEADER);
+  const response = NextResponse.next({ request: { headers: forwarded } });
+
+  if (isS2) {
+    response.headers.set("Cache-Control", "private, no-store");
+  }
+
+  return response;
+}
+
 export function proxy(request: NextRequest) {
-  if (request.nextUrl.pathname === DIRECTORY_INDEX) {
+  const staging = stagingModeOf(process.env);
+
+  if (staging.kind === "deny-all") {
+    return plainNotFound();
+  }
+
+  if (staging.kind === "on") {
+    return stagingGate(request, staging.configuration);
+  }
+
+  const { pathname } = request.nextUrl;
+
+  if (pathname === DIRECTORY_INDEX) {
     if (process.env.NODE_ENV === "production" && process.env.BI4_E3_LOCAL === "1") {
-      return new NextResponse("Not Found", {
-        status: 404,
-        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
-      });
+      return plainNotFound();
     }
 
     return NextResponse.next();
   }
 
-  if (request.method === "OPTIONS" && PAGE_PATHS.has(request.nextUrl.pathname)) {
-    return new NextResponse("Not Found", {
-      status: 404,
-      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
-    });
+  if (pathname !== "/admin" && !pathname.startsWith("/admin/")) {
+    return NextResponse.next();
+  }
+
+  if (request.method === "OPTIONS" && PAGE_PATHS.has(pathname)) {
+    return plainNotFound();
   }
 
   const response = NextResponse.next();
@@ -67,5 +139,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin", "/admin/:path*", "/directory"],
+  matcher: ["/:path*"],
 };

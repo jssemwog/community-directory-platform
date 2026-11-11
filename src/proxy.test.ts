@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 
+import { STAGING_VARIABLES, stagingKeyDigestHex } from "./interface/public/staging-access";
 import { config, proxy } from "./proxy";
 
 const ORIGIN = "http://127.0.0.1:3999";
@@ -115,28 +116,39 @@ describe("PX-3: development and flag-off behaviour are preserved", () => {
   });
 });
 
-describe("PX-4: the matcher, and S2 is unaffected", () => {
-  it("extends the admin matcher by exactly the constant /directory", () => {
-    expect(config.matcher).toEqual(["/admin", "/admin/:path*", "/directory"]);
+describe("PX-4: the global matcher, and S2 is unaffected outside staging", () => {
+  it("is exactly the global matcher (OP-2 staging Scope Gate revision 2 §3.1)", () => {
+    expect(config.matcher).toEqual(["/:path*"]);
   });
 
-  it("does not run the proxy for an S2 path, per Next's own matcher helper", () => {
-    for (const url of ["/directory/9f0c5a1e-3b7d-4c2a-8e6f-1a2b3c4d5e6f", "/directory/not-a-uuid", "/directory/a/b"]) {
-      expect(unstable_doesMiddlewareMatch({ config, url }), url).toBe(false);
+  it("runs the proxy for every path, per Next's own matcher helper", () => {
+    for (const url of [
+      "/",
+      "/directory",
+      "/directory/9f0c5a1e-3b7d-4c2a-8e6f-1a2b3c4d5e6f",
+      "/directory/a/b",
+      "/admin/sign-in",
+      "/_next/static/chunks/main.js",
+      "/_next/image?url=%2Fx.png&w=64&q=75",
+      "/favicon.ico",
+      "/bi4-staging/status",
+      "/anything/else",
+    ]) {
+      expect(unstable_doesMiddlewareMatch({ config, url }), url).toBe(true);
     }
-    expect(unstable_doesMiddlewareMatch({ config, url: "/directory" })).toBe(true);
-    expect(unstable_doesMiddlewareMatch({ config, url: "/admin/sign-in" })).toBe(true);
-    expect(unstable_doesMiddlewareMatch({ config, url: "/" })).toBe(false);
   });
 
-  it("passes an S2 path through untouched if the function is called directly", () => {
-    setEnvironment("production", "1");
-    const response = call("/directory/9f0c5a1e-3b7d-4c2a-8e6f-1a2b3c4d5e6f");
-
-    // Outside the exact rule, the function falls through to the admin branch's pass-through. The
-    // matcher above guarantees that this branch is never reached for S2 in a real server.
-    expect(response.status).not.toBe(404);
-    expect(isPassThrough(response)).toBe(true);
+  it("passes S2 and every non-admin path through with no header added, flag on or off", () => {
+    for (const flag of ["1", undefined]) {
+      setEnvironment("production", flag);
+      for (const path of ["/", "/directory/9f0c5a1e-3b7d-4c2a-8e6f-1a2b3c4d5e6f", "/_next/static/chunks/main.js", "/bi4-staging/status", "/Admin", "/administrator"]) {
+        for (const method of METHODS) {
+          const response = call(path, method);
+          expect(isPassThrough(response), `${method} ${path}`).toBe(true);
+          expect(addedHeaders(response), `${method} ${path}`).toEqual({});
+        }
+      }
+    }
   });
 });
 
@@ -187,9 +199,9 @@ describe("PX-6: the flag is read on each request", () => {
 describe("PX-7: isolation from the database and from rendering state", () => {
   const source = readFileSync(fileURLToPath(new URL("./proxy.ts", import.meta.url)), "utf8");
 
-  it("imports only next/server", () => {
-    const imports = [...source.matchAll(/^import\s.+?from\s+"([^"]+)";?$/gm)].map((match) => match[1]);
-    expect(imports).toEqual(["next/server"]);
+  it("imports only next/server and the pure staging-access module", () => {
+    const imports = [...source.matchAll(/^import\s[\s\S]+?from\s+"([^"]+)";?$/gm)].map((match) => match[1]);
+    expect(imports).toEqual(["next/server", "./interface/public/staging-access"]);
     expect(source).not.toMatch(/\brequire\(/);
     expect(source).not.toMatch(/\bimport\(/);
   });
@@ -213,5 +225,164 @@ describe("PX-8: /directory/ and other spellings are outside the exact rule", () 
     setEnvironment("production", "1");
     expect(call("/Directory").status).not.toBe(404);
     expect(call("/DIRECTORY").status).not.toBe(404);
+  });
+});
+
+/* ------------------------------------------------------------------------------------------- */
+/* OP-2 staging gate (issue #246, OP-2 staging Scope Gate revision 2 §3, §4.1), PX-9 to PX-14.   */
+/* These call the function directly. They do not establish wire behaviour: that is the local      */
+/* configured check, the separately authorized PB runs, and readiness through Render (R-2b, R-3).  */
+/* ------------------------------------------------------------------------------------------- */
+
+const STAGING_KEY = "Z".repeat(40) + "-_7";
+const STAGING_HOST = "db-staging.example.test";
+const STAGING_UUID = "9f0c5a1e-3b7d-4c2a-8e6f-1a2b3c4d5e6f";
+const STAGING_NAMES = [...STAGING_VARIABLES, "BI4_E3_LOCAL", "LOCAL_DEMO_DATABASE_URL", "NODE_ENV"];
+/** A static, public, unit-test-only certificate (no private key anywhere). Only its PEM parses. */
+const stagingCaPem = [
+  "-----BEGIN CERTIFICATE-----",
+  "MIIBnzCCAUWgAwIBAgIUM/tHawQHc2VgtgOJ5sjZf38C2RkwCgYIKoZIzj0EAwIw",
+  "JTEjMCEGA1UEAwwaYmk0LXN0YWdpbmctdW5pdC10ZXN0LW9ubHkwHhcNMjYxMTEx",
+  "MTEzNDQ4WhcNMzYxMTA4MTEzNDQ4WjAlMSMwIQYDVQQDDBpiaTQtc3RhZ2luZy11",
+  "bml0LXRlc3Qtb25seTBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABPueybXMoSgm",
+  "HRwFP4x+RFH+dexRFE9Z6Bm+FptL1yydxnHlZTKEmlIKhX6wPAKX/5yJ9IwWDfO4",
+  "gmfHkiE3aFyjUzBRMB0GA1UdDgQWBBSp1WZT67VAq4Uyu3yH8Ypxh16BDTAfBgNV",
+  "HSMEGDAWgBSp1WZT67VAq4Uyu3yH8Ypxh16BDTAPBgNVHRMBAf8EBTADAQH/MAoG",
+  "CCqGSM49BAMCA0gAMEUCIAffgOmcM/XT520QRFBNjSn2gVkoP1AFxePl+HlnMHz0",
+  "AiEAyQRumnKXOaeHWZ/83mUuIYtRsnZHJz7ljDGcueLpdJ0=",
+  "-----END CERTIFICATE-----",
+].join("\n") + "\n";
+
+function stagingEnvironment(overrides: Record<string, string | undefined> = {}): void {
+  const values: Record<string, string | undefined> = {
+    NODE_ENV: "production",
+    BI4_STAGING: "1",
+    BI4_STAGING_DATABASE_URL: `postgres://bi4_staging_app:${"p".repeat(32)}@${STAGING_HOST}:25060/bi4_staging`,
+    BI4_STAGING_EXPECTED_HOST: STAGING_HOST,
+    BI4_STAGING_CA_PEM: stagingCaPem,
+    BI4_STAGING_EXPECTED_DATABASE: "bi4_staging",
+    BI4_STAGING_SYNTHETIC_MARKER: `bi4-staging-synthetic:${"d".repeat(32)}`,
+    BI4_STAGING_ACCESS_KEY_SHA256: stagingKeyDigestHex(STAGING_KEY),
+    BI4_STAGING_CALIBRATION: undefined,
+    BI4_E3_LOCAL: undefined,
+    LOCAL_DEMO_DATABASE_URL: undefined,
+    ...overrides,
+  };
+  for (const [name, value] of Object.entries(values)) {
+    if (value === undefined) delete env[name];
+    else env[name] = value;
+  }
+}
+
+function stagingCall(path: string, init: { method?: string; key?: string | null; headers?: Record<string, string> } = {}) {
+  const headers = new Headers(init.headers);
+  if (init.key !== null) headers.set("X-BI4-Staging-Key", init.key ?? STAGING_KEY);
+  return proxy(new NextRequest(`${ORIGIN}${path}`, { method: init.method ?? "GET", headers }));
+}
+
+async function expectGate(response: Response, label: string): Promise<void> {
+  expect(response.status, label).toBe(404);
+  expect(isPassThrough(response), label).toBe(false);
+  expect(addedHeaders(response), label).toEqual({ "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+  expect(await response.text(), label).toBe("Not Found");
+}
+
+describe("OP-2 staging gate", () => {
+  const savedStaging: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const name of STAGING_NAMES) savedStaging[name] = env[name];
+  });
+
+  afterEach(() => {
+    for (const name of STAGING_NAMES) {
+      if (savedStaging[name] === undefined) delete env[name];
+      else env[name] = savedStaging[name];
+    }
+  });
+
+  it("PX-9: keyless, wrong-key, query-string, cookie and duplicate-header requests all get the gate 404", async () => {
+    stagingEnvironment();
+    const paths = [
+      "/", "/directory", `/directory/${STAGING_UUID}`, "/directory/malformed", "/admin", "/admin/sign-in", "/admin/sign-in/password",
+      "/_next/static/chunks/main.js", "/_next/image?url=%2Fx.png&w=64&q=75", "/favicon.ico", "/bi4-staging/status", "/random/path",
+    ];
+    for (const path of paths) {
+      for (const method of METHODS) {
+        await expectGate(stagingCall(path, { method, key: null }), `keyless ${method} ${path}`);
+        await expectGate(stagingCall(path, { method, key: "W".repeat(43) }), `wrong key ${method} ${path}`);
+      }
+    }
+    await expectGate(stagingCall(`/directory/${STAGING_UUID}?k=${STAGING_KEY}`, { key: null }), "key in query only");
+    await expectGate(stagingCall(`/directory/${STAGING_UUID}?x=1`), "keyed with a query string");
+    await expectGate(stagingCall(`/directory/${STAGING_UUID}`, { key: null, headers: { cookie: `x-bi4-staging-key=${STAGING_KEY}` } }), "key in cookie only");
+    await expectGate(stagingCall(`/directory/${STAGING_UUID}`, { headers: { cookie: "a=b" } }), "keyed with a cookie");
+    const duplicated = new Headers();
+    duplicated.append("x-bi4-staging-key", STAGING_KEY);
+    duplicated.append("x-bi4-staging-key", STAGING_KEY);
+    await expectGate(proxy(new NextRequest(`${ORIGIN}/directory/${STAGING_UUID}`, { headers: duplicated })), "duplicate header");
+  });
+
+  it("PX-10: a valid key reaches only GET/HEAD S2 and GET status; admin and everything else get the gate 404", async () => {
+    stagingEnvironment();
+    for (const path of ["/", "/directory", "/admin", "/admin/sign-in", "/admin/recovery/codes", "/_next/static/chunks/main.js", "/favicon.ico", "/random"]) {
+      for (const method of METHODS) await expectGate(stagingCall(path, { method }), `keyed ${method} ${path}`);
+    }
+    for (const method of ["POST", "OPTIONS", "PUT", "DELETE"]) await expectGate(stagingCall(`/directory/${STAGING_UUID}`, { method }), `keyed ${method} S2`);
+    for (const method of ["HEAD", "POST", "OPTIONS", "PUT", "DELETE"]) await expectGate(stagingCall("/bi4-staging/status", { method }), `keyed ${method} status`);
+
+    for (const method of ["GET", "HEAD"]) {
+      for (const path of [`/directory/${STAGING_UUID}`, "/directory/malformed"]) {
+        expect(isPassThrough(stagingCall(path, { method })), `${method} ${path}`).toBe(true);
+      }
+    }
+    expect(isPassThrough(stagingCall("/bi4-staging/status"))).toBe(true);
+  });
+
+  it("PX-11: the key header is deleted from the forwarded request", () => {
+    stagingEnvironment();
+    for (const path of [`/directory/${STAGING_UUID}`, "/bi4-staging/status"]) {
+      const response = stagingCall(path, { headers: { accept: "text/html" } });
+      const overridden = (response.headers.get("x-middleware-override-headers") ?? "").split(",");
+      expect(overridden, path).not.toContain("x-bi4-staging-key");
+      expect(overridden, path).toContain("accept");
+      expect(response.headers.get("x-middleware-request-x-bi4-staging-key"), path).toBeNull();
+      expect([...response.headers.values()].some((value) => value.includes(STAGING_KEY)), path).toBe(false);
+    }
+  });
+
+  it("PX-12: keyed S2 responses get Cache-Control private, no-store; status gets no proxy header", () => {
+    stagingEnvironment();
+    for (const path of [`/directory/${STAGING_UUID}`, "/directory/malformed"]) {
+      expect(stagingCall(path).headers.get("cache-control"), path).toBe("private, no-store");
+    }
+    expect(addedHeaders(stagingCall("/bi4-staging/status"))).toEqual({});
+  });
+
+  it("PX-13: deny-all on every invalid condition, even with a valid key", async () => {
+    const cases: Record<string, string | undefined>[] = [
+      { BI4_STAGING: "" },
+      { BI4_STAGING: "0" },
+      { BI4_STAGING_ACCESS_KEY_SHA256: undefined },
+      { BI4_STAGING_CA_PEM: "nope" },
+      { BI4_E3_LOCAL: "1" },
+      { LOCAL_DEMO_DATABASE_URL: "postgres://x@127.0.0.1:1/x" },
+      { BI4_STAGING_CALIBRATION: "garbage" },
+    ];
+    for (const overrides of cases) {
+      stagingEnvironment(overrides);
+      for (const path of [`/directory/${STAGING_UUID}`, "/bi4-staging/status", "/admin", "/"]) {
+        await expectGate(stagingCall(path), `${JSON.stringify(overrides)} ${path}`);
+      }
+    }
+  });
+
+  it("PX-14: the staging variables are ignored outside production", () => {
+    for (const nodeEnv of ["development", "test"]) {
+      stagingEnvironment({ NODE_ENV: nodeEnv });
+      const response = stagingCall("/", { key: null });
+      expect(isPassThrough(response), nodeEnv).toBe(true);
+      expect(addedHeaders(response), nodeEnv).toEqual({});
+    }
   });
 });

@@ -24,6 +24,10 @@ export const metadata: Metadata = {
  * fails or when it sees the sticky refusal, **before** it renders anything; no render order with
  * the page is assumed. Under the demo it does no checkout and behaves exactly as before. `S1`
  * (`/directory`) never reaches here under `E3-local`: `src/proxy.ts` answers it with 404.
+ *
+ * **OP-2 staging (issue #246, OP-2 staging Scope Gate revision 2).** The same pre-stream check runs
+ * for the staging source, with the same sticky-refusal semantics. Under staging, `src/proxy.ts`
+ * lets only keyed `S2` requests reach this layout.
  */
 export default async function DirectoryLayout({ children }: { children: ReactNode }) {
   const source = publicReadSource();
@@ -33,6 +37,10 @@ export default async function DirectoryLayout({ children }: { children: ReactNod
   }
 
   if (source.kind === "e3-local" && (await source.e3.precheck()) === "refused") {
+    notFound();
+  }
+
+  if (source.kind === "staging" && (await source.staging.precheck()) === "refused") {
     notFound();
   }
 

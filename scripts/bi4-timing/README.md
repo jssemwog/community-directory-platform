@@ -471,3 +471,268 @@ attacker.
   fires when its median or p10 interval excludes 0 or an accuracy interval lies above 0.50;
   "difference detected" uses the same rule; Kruskal–Wallis for identity heterogeneity; a
   3-scaled-MAD identity flag (flagged, never dropped).
+
+## OP-2 private staging (`staging-*`)
+
+Implements **OP-2 staging Scope Gate revision 2** (SHA-256
+`30fb50b046a7a062b8b3d98c844a66c36664c930eb58844e12014d8cc3e12443`), approved for implementation
+and local development checks, with three approval rulings:
+1. cache feedback from a local configured check;
+2. the event-loop histogram is report-only and shown side by side;
+3. seven days as the planning basis, with a $24 projected-spend stop and a $30 operating ceiling.
+
+**It gathers no timing evidence. `BI-4` stays pending, #246 stays open, `OP-1` timing stays
+outstanding and S-C stays Not exercised. Public production stays gated by `DG-4`.**
+
+### Every live use needs its own authorization
+
+Merging authorizes nothing. Each of these needs its own explicit authorization:
+- the §5 regression runs;
+- **P-0, the required live `e3-check` on the candidate**;
+- provisioning, setup and readiness;
+- any measurement;
+- teardown.
+
+The tool **provisions nothing and deletes no provider resource**. The operator creates and deletes
+them in the provider consoles, and the tool verifies before and after. **The existing E3-local
+launcher (`e3-check`) is unchanged.**
+
+### P-0 comes first, and is enforced
+
+Hosted staging needs a passed live `e3-check` on **exactly** the authorized candidate commit, with a
+configured disposable database (gate §5.3).
+
+- **Enforcement:** `staging-record` refuses to contact DigitalOcean or write a record unless
+  `run.p0Report` (that run's `e3-check.json`) hashes to `run.p0ReportSha256`, and the report shows
+  all of:
+  - the authorized commit;
+  - normal acceptance passed;
+  - E-A4b `pass`;
+  - no problems and no safety problems;
+  - nothing left by teardown.
+- **The record** carries the report's hash and commit. A record without them is refused at V-1.
+- **Since the candidate must be a commit,** P-0 can run only after this work is committed.
+
+### The application mode
+
+- **Where it is on:** production only, when `BI4_STAGING` is present (`src/interface/public/staging-access.ts`).
+  - **Fully valid:** the mode is **on**.
+  - **Anything else** (a value other than `1`, a missing or malformed variable, `BI4_E3_LOCAL` or
+    the demo's variable also set, calibration malformed or over the 2 ms ceiling): **deny-all**.
+- **Publicly reachable, application-key gated** (`src/proxy.ts`).
+  - **The matcher** is global (`/:path*`) in every build. Outside staging, behaviour is unchanged.
+  - **Under staging,** only `GET`/`HEAD` on one `S2` path and `GET /bi4-staging/status` pass, and
+    only with the key in exactly one `X-BI4-Staging-Key` header, no query string and no `Cookie`.
+    Everything else, admin included, gets the plain gate `404`.
+  - **The key header** is deleted from the forwarded request.
+  - **Keyed `S2` responses** get `Cache-Control: private, no-store`.
+- **The data source** (`staging-persistence.ts`):
+  - **C-1′:** TLS `verify-full` with the pinned CA.
+  - **C-2 to C-4:** in `onConnect`: database, marker and a non-superuser role.
+  - **One client;** sticky, silent refusal, with `E3-local`'s post-#284 semantics.
+- **The status route** reports identity, state, counters and, for the same window, the event-loop
+  histogram and the realized calibration delays, side by side. It answers `notFound()` for every
+  method outside the mode.
+
+**A driver hazard, pinned by test (SI-2):** with an IP-literal host, `pg` checks the server
+certificate against `localhost`, not against that IP. The mode therefore refuses IP literals:
+**the host must be a DNS name**.
+
+### What the counters observe (§7.4)
+
+- **No arrival is observable.** A calibration busy-wait blocks the event loop, and no JavaScript
+  runs while it does.
+- **`overlappedReads`** counts reads that **began** while another read was in progress, observed at
+  dispatch into the persistence. **Any observed overlap during a measured phase invalidates the
+  run** (SP-5).
+- **The event-loop histogram is report-only.** The calibration delays are reported beside it, are
+  not subtracted from it, and no stall is attributed to a cause.
+- **L-11:** Render health probes and unsolicited traffic reach the same process, and cannot be
+  observed per request.
+
+### Database preflight and TLS controls
+
+Every SQL-sending subcommand (`staging-setup`, `staging-verify`, `staging-marker`,
+`staging-predelete`) runs the same gate, in this order, and stops at the first failing step.
+
+1. **Preflight, with no connection and no SQL.**
+   - V-1: the record's hash.
+   - V-2: the API's cluster ID, name, project, region, engine, version, size, host, port and
+     creation time all equal the record.
+   - V-3: the CA's hash.
+   - V-6, by phase:
+     - setup needs exactly `defaultdb` (a fresh cluster);
+     - a marker change or D-1 needs `bi4_staging` and nothing foreign;
+     - verify refuses foreign databases.
+   - V-7: the trusted sources equal the recorded Render ranges plus, when given, the operator's own
+     rule. **This is a network filter only.**
+2. **V-4, TLS controls, sending identity reads only.**
+   - The positive control (recorded host and recorded CA) must succeed.
+   - **Both negative controls must be refused by TLS certificate verification:** a public root CA
+     that did not issue the certificate, and the resolved IPv4 literal of the host.
+   - A refusal for any other reason (a timeout, a closed port) leaves that control
+     **inconclusive**, and V-4 fails.
+3. **Operator SQL.** The first statement on every connection is the V-5 identity read.
+   - `staging-verify` connects to `bi4_staging` only once it exists. Before setup it says the marker
+     and privilege checks are not yet applicable.
+   - `staging-marker` re-marks only our database:
+     - before `--set wrong`, the current marker must be the recorded one;
+     - before `--set recorded`, it must be a staging-shaped marker.
+
+**R-8 (`staging-verify --operator-rule none`)** passes only on a **network refusal**. A successful
+connection, a TLS failure or an unclassified failure fails R-8.
+
+### Commands
+
+From Git Bash, with secrets only in the environment (never flags):
+
+```bash
+export BI4_STAGING_DO_TOKEN=...          # read-only (or database:read + project:read); valid until deadline + 3 days
+export BI4_STAGING_DOADMIN_PASSWORD=...  # setup, verify, marker, predelete only
+export BI4_STAGING_KEY="$(cat <out>/staging-key.secret.txt)"   # status and readiness only
+node --experimental-transform-types --import ./scripts/local-demo/register.mjs scripts/bi4-timing/cli.ts staging-<subcommand> ...
+```
+
+Name the cluster `bi4-staging-<12 lower-case hex>` when creating it. The record refuses any other
+name.
+
+`--inputs` for `staging-record` holds:
+- **DigitalOcean:** the cluster ID, the project name, and the expected trusted sources (Render
+  Virginia's published outbound ranges);
+- **Render:** the service fields from the dashboard, with `autoDeploy: "no"`, `previews: "off"`,
+  `edgeCache: "off"` and an empty `healthCheckPath`;
+- **Run:** `run.authorizedCommit`, `run.window` (`7-day`), `run.calibrationIdentities` (0 to 4),
+  `run.p0Report` and `run.p0ReportSha256`.
+
+### Readiness coverage and outstanding operator evidence
+
+This is exactly what the tool establishes, and what remains the operator's evidence. The same table
+is in `READINESS_COVERAGE` and in every `readiness.json`. `staging-readiness` prints the outstanding
+rows after its own result: **passing it does not complete readiness.**
+
+| Gate check | Covered by | Kind | Outstanding operator evidence |
+|---|---|---|---|
+| P-0 | `staging-record` (`p0Problems`) | automated + operator action | the separately authorized live `e3-check` on the committed candidate; its `e3-check.json` and SHA-256 |
+| R-0 | `staging-regress-capture` / `-compare` / `-teardown` | automated + operator action | the operator creates the worktrees, builds, starts and stops the servers, and provides each launch-environment **operator attestation**. PB-3 versus PB-4 rests on that attestation alone (procedure below) |
+| R-1 | `staging-build-scan` | automated | none beyond the build |
+| R-2 | `staging-record` (`recordProblems`) and `staging-status` (service ID, hostname, commit) | automated + operator action | the Render settings transcribed from the dashboard: plan, region, instances, health path, auto-deploy, previews, edge cache, variable names. The response size is in `readiness.json` |
+| R-2b | `staging-readiness`: K-1 to K-5 **through Render** | automated | none |
+| R-3 | `staging-readiness` | automated | none |
+| R-4 | `staging-readiness`: GET on every path, plus the disallowed methods on S2 and status | automated | none |
+| R-5 | `staging-verify` (V-4: positive, wrong-CA and IP-literal controls) and `staging-status` (`verified`) | automated | none |
+| R-6 | `staging-setup` and `staging-verify` | automated | none |
+| R-7 | `staging-marker`, then `staging-status --expect refused` / `verified` | automated + operator action | the two Render service restarts, with their times |
+| R-8 | `staging-verify --operator-rule none` (network refusal required) | automated + operator action | removing the operator's trusted-source rule in the console |
+| R-9 | `staging-readiness` | automated | none |
+| R-10 | `staging-readiness` (`Date` and `Rndr-Id` removed, own UUID masked) | automated | none |
+| R-11 | none | **not implemented** | the calibration pilot belongs to the later measurement slice |
+| R-12 | `staging-readiness` (every response) | automated + operator action | an export of the Render application logs for the scan |
+| M-1 | `staging-status --previous` | automated | none |
+| M-2 | none | **operator evidence** | the Render event list for each window: no deploy, restart, instance, edge-cache, plan or suspension event |
+| M-3, M-4, M-5, M-8 | none | **not implemented** | the remote measurement harness (later slice) |
+| M-6 | `staging-project` | automated + operator action | the accrued amounts from both billing pages at each phase boundary |
+| M-7 | `staging-verify --operator-rule none` | automated + operator action | no operator rule during the run |
+| T-1, T-3, T-4 (D-2) | `staging-status` or `staging-identity`; `staging-predelete`; `staging-confirm-deleted` | automated + operator action | the console deletions themselves |
+| T-2 | `staging-readiness` (responses) | **operator evidence** | the final Render log export and the run's console output, for the leak scan |
+| T-5, T-6 | `staging-identity` (F-1 to F-4 checklist; F-4 automated) | **operator evidence** | the Render service and project deletions, the token revocation time, and deletion of the local key, CA and password files |
+
+### Regression (§5): operator-managed procedure, for review
+
+The tool does **not** create worktrees, build, or start or stop servers (a departure from §5's
+wording, retained for review). The operator does those steps. **The tool proves each claim before
+it captures, and proves teardown afterwards.** Use one run directory per regression run: absolute,
+outside the repository and the temp directory. Captures are never overwritten.
+
+**1. Worktrees, by the operator.** Create one detached worktree per side, outside the repository:
+
+```bash
+git worktree add --detach <abs>/bi4-regress-baseline ba1002746f2b8a9d133182151af97961d1dfa06c
+git worktree add --detach <abs>/bi4-regress-candidate <candidate sha>
+# in each:  npm ci  &&  npx next build      (PB-1 to PB-4)
+```
+
+**2. Servers, by the operator.** Start each server from its own worktree, bound to `127.0.0.1`, with
+only the mode's variables. Write the variables you set to a JSON file per server,
+`{"variables": {...}}`, holding `BI4_*` and `LOCAL_DEMO_*` names only. **This file is the launch
+environment's operator attestation.** No tool here can read a running process's environment, so
+it is a statement by the operator, not an observation. The capture report records it as
+`launchEnvironment.kind: "operator attestation"`, with its SHA-256 and the corroboration that
+applies.
+
+| Mode | Servers | `variables` |
+|---|---|---|
+| PB-1 | baseline and candidate: `node node_modules/next/dist/bin/next start -H 127.0.0.1 -p <port>` | `{}` |
+| PB-2 | the same | `{"BI4_E3_LOCAL": "1"}` |
+| PB-3 | candidate only | `{"BI4_STAGING": "1"}` |
+| PB-4 | candidate only | `BI4_STAGING` and `BI4_E3_LOCAL` set to `1`, plus staging variables valid in form (synthetic values) |
+| PB-5 | `npm run demo:local` in the baseline worktree, then stop it, then the same in the candidate worktree (fixed port 3000, so one at a time) | `{}` |
+
+**3. Capture each side** (`staging-regress-capture`). It runs in three stages:
+
+| Stage | Checks | HTTP | On a finding |
+|---|---|---|---|
+| **1** | **Commit:** `git -C <worktree> rev-parse HEAD` equals `--commit`; no tracked changes; the worktree is registered with the main repository, detached at that commit, and outside the main tree. **The baseline must be `ba10027`.** **Launch environment (operator attestation):** the file matches the mode exactly. **Listener identity:** every listener on the port is on `127.0.0.1` and owned by one process, whose command line runs Next.js **from this worktree**; its PID and creation time are recorded | **none** | **Stop before any HTTP request.** The capture is written with its findings and no exchanges. A check that throws stops it too, and writes nothing |
+| **2** | **Mode signature:** PB-1 `/directory` is the framework 404; PB-2 it is the plain `Not Found`; PB-3/PB-4 `/` is the gate 404; PB-5 `/directory` lists the demo's approved listing. **Build** (PB-1, PB-2): the static asset served is byte-identical to the file in this worktree's `.next` | `/`, `/directory`, and the asset | **Skip the regression matrix.** The capture is written with its findings |
+| **3** | The regression matrix: the §5 list × GET, HEAD, POST and OPTIONS, with fixed identities, so both sides send identical requests (PB-5: the demo requests) | the matrix | — |
+
+The capture records where it stopped (`stoppedAt`). The exit code is 0 only when all three stages
+ran. The cap is 250 attempts per capture, so 500 per run.
+
+**What corroborates the launch-environment attestation.** Nothing reads the environment, so
+corroboration comes only from HTTP behaviour and process identity. It is recorded per capture
+(`launchEnvironment.corroboration`, from `ATTESTATION_CORROBORATION`):
+
+| Mode | Independently corroborated by | What stays attested only |
+|---|---|---|
+| PB-1 | `/` answers 200, so the staging gate is off. `/directory` is the framework 404, so the E3-local rule is off. The listener runs `next start` from the stated worktree. The build proof | the exact absence of every other `BI4_*` variable |
+| PB-2 | `/` answers 200, so staging is off. `/directory` is the plain `Not Found`, so `BI4_E3_LOCAL=1` reached the proxy. Listener identity. The build proof | the absence of other `BI4_*` variables |
+| PB-3 | `/` is the gate 404, so `BI4_STAGING` is armed and deny-all is in force. Listener identity | **whether `BI4_E3_LOCAL` was also set.** No build proof: every asset is gated |
+| PB-4 | the same as PB-3 | **whether `BI4_E3_LOCAL` was set.** No build proof |
+| PB-5 | `/directory` lists the demo's approved listing, so the dev demo's data source is configured. Listener identity | the absence of `BI4_*` variables, which `next dev` ignores anyway. No build proof: dev server |
+
+**PB-3 and PB-4 cannot be distinguished by HTTP behaviour.** Both are deny-all: every request gets
+the same gate `404`. Which of the two modes a capture shows rests on the operator attestation
+alone.
+
+**4. Compare** (`staging-regress-compare --mode PB-n`). It refuses captures with unresolved
+problems, the wrong side or mode, a baseline other than `ba10027`, a candidate equal to the
+baseline, or differing request lists. Then:
+
+- **PB-1/PB-2:** status, header list and body are equal after masking `Date`, `ETag`, `x-nextjs-*`
+  and build IDs.
+- **PB-3/PB-4:** the candidate denies every probe: the gate `404`, or `308` for trailing-slash forms.
+- **PB-5, the demo listing comparison:** for `/directory`, the approved listing
+  (`0b7e4c52-…`, "Juniper Lane Bakery"), the pending and rejected listings, and a malformed
+  identity, status and body agree after the dev request-ID mask. In addition, **on both sides**:
+  - the approved page shows its name;
+  - the pending, rejected and malformed pages show the not-available content;
+  - no non-public listing's name appears anywhere.
+
+**5. Teardown, by the operator, then proven** (`staging-regress-teardown`). Stop each server in its
+own terminal (Ctrl+C), then run `git worktree remove --force <worktree>` for each. The tool then
+proves, for every capture in the run directory:
+- the recorded PID is gone (or now belongs to a different process, by creation time);
+- nothing listens on the port;
+- the worktree directory is gone and no longer registered;
+- the main tree's `git status` shows only the two pre-existing untracked files.
+
+Anything else is reported as residue, with exit code 1.
+
+### Local configured check (approval ruling 1)
+
+`staging-local-check` records keyed `S2` `Cache-Control` verbatim from the candidate under
+`next start` in a configured staging mode, against a disposable cluster with TLS for `localhost`.
+**This is implementation feedback only. R-2b through Render remains the readiness gate.** The check
+run during implementation observed `private, no-store`.
+
+### Window and spend (seven-day planning basis)
+
+`staging-project` adds the remaining days to the deadline at the gate's rates: Render $25 a month
+prorated per second, and DigitalOcean at its worst case, $15.15, unless the billing page shows
+hourly accrual.
+- **$24** projected stops measurement and starts teardown.
+- **$30** is the operating ceiling.
+- **The deadline** is the cluster's creation + 7 days, and never after 2026-12-11 23:59
+  America/New_York.
+
+**The dates and estimated charges are confirmed at provisioning approval.**

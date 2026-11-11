@@ -146,6 +146,7 @@ import {
   type PlanIdentity,
 } from "./schedule";
 import { HEALTH_PATH } from "./calibration-server";
+import { realStagingSeams, STAGING_FLAGS, STAGING_USAGE, stagingMain } from "./staging-check";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = resolve(HERE, "..", "..");
@@ -177,7 +178,8 @@ changes no smoke verdict. analyze refuses its output.
 e3-check is the E3-local acceptance run (E3-local Scope Gate revision 4): next build with no
 database or E3 configuration, then one disposable cluster and three next start phases, with a hard
 60-attempt HTTP cap across every phase. It computes no timing statistic. Deliberate fault injection
-(E-A4b) is reported separately from the normal acceptance result.`;
+(E-A4b) is reported separately from the normal acceptance result.
+${STAGING_USAGE}`;
 
 const FLAGS: Readonly<Record<string, readonly string[]>> = {
   smoke: ["--boundary", "--out", "--seed", "--delays-ns", "--background", "--commit"],
@@ -187,6 +189,7 @@ const FLAGS: Readonly<Record<string, readonly string[]>> = {
   analyze: ["--run", "--out"],
   cleanup: ["--run"],
   "e3-check": ["--out", "--commit"],
+  ...STAGING_FLAGS,
 };
 
 /** Internal flags, used only when the smoke driver spawns a forced-pass child. */
@@ -1961,6 +1964,10 @@ async function main(argv: readonly string[]): Promise<number> {
   if (command === "smoke") return smoke(flags);
 
   if (command === "e3-check") return e3Check(flags);
+
+  if (command.startsWith("staging-")) {
+    return stagingMain(command, flags, realStagingSeams((out) => outputDirectoryProblems(out, { repositoryRoot: REPOSITORY_ROOT, tempDirectory: tmpdir(), directoryEntries }), REPOSITORY_ROOT));
+  }
 
   if (command === "validate-e2") {
     if (platform() !== "win32") throw new Error("the harness's process and cleanup operations are Windows-only");
