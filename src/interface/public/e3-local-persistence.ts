@@ -25,7 +25,9 @@
  *
  * No render order is assumed: the layout and the page may run in either order, on different
  * clients. A client that fails `onConnect` is closed by `pg-pool` and never handed out, so no
- * listing query can run on it.
+ * listing query can run on it. After refusal the pool stays open but idle: any connection opened
+ * then is rejected before any SQL, so a checkout queued behind the failing client still settles
+ * with the refusal. Only an explicit `shutdown()` ends the pool.
  *
  * **Server-side only.** Nothing here has a `NEXT_PUBLIC_` name, and nothing logs.
  */
@@ -238,14 +240,16 @@ export function createE3Local(configuration: E3LocalConfiguration, seams: E3Loca
   let refused = false;
   let persistence: ListingPersistence | undefined;
 
+  /**
+   * Set the sticky refusal at once. The pool is **not** ended here (pool-lifecycle amendment to
+   * revision 3 §1.4): `pg-pool` 3.14.0 `end()` never settles a checkout already queued behind a
+   * client in `onConnect`, so ending the pool inside the hook abandoned the concurrent layout or
+   * page checkout and hung the triggering request (run `e3-check-a63838bb`). Instead, every
+   * connection opened after refusal is rejected before any SQL, which settles each queued checkout
+   * with the refusal outcome. The pool is ended only by an explicit `shutdown()`.
+   */
   const refuse = (): void => {
-    if (refused) {
-      return;
-    }
-
     refused = true;
-    // Ends the pool; `pg-pool` waits for checked-out clients to be released.
-    void persistence?.shutdown().catch(() => {});
   };
 
   persistence = createPersistence({
@@ -254,6 +258,12 @@ export function createE3Local(configuration: E3LocalConfiguration, seams: E3Loca
       max: E3_POOL_MAX,
       idleTimeoutMillis: E3_IDLE_TIMEOUT_MILLIS,
       onConnect: async (client: unknown) => {
+        // A connection opened after refusal is rejected before any verification or listing SQL;
+        // `pg-pool` then closes it and fails that checkout, which the caller reads as the refusal.
+        if (refused) {
+          throw new E3LocalRefused();
+        }
+
         let matches = false;
 
         try {
