@@ -927,14 +927,19 @@ describe("SC-14: regression procedure proofs", () => {
   });
 
   it("proves the server: one loopback listener whose process runs Next.js from this worktree", async () => {
-    const worktree = "C:\\wt\\candidate";
-    const identity: ProcessIdentity = { pid: 4242, parentPid: 1, creationTime: "133000000000000000", executable: "C:\\node.exe", commandLine: '"C:\\node.exe" C:\\wt\\candidate\\node_modules\\next\\dist\\bin\\next start -p 3101' };
+    // Host-native absolute paths: a Windows-style literal such as `C:\wt\candidate` is not absolute
+    // under POSIX, so `resolve()` would place it under the working directory on Linux CI.
+    const worktree = mkdtempSync(join(tmpdir(), "staging-identity-wt-"));
+    const otherWorktree = mkdtempSync(join(tmpdir(), "staging-identity-other-"));
+    cleanup.push(worktree, otherWorktree);
+    const nextBin = (root: string) => join(root, "node_modules", "next", "dist", "bin", "next");
+    const identity: ProcessIdentity = { pid: 4242, parentPid: 1, creationTime: "133000000000000000", executable: process.execPath, commandLine: `"${process.execPath}" ${nextBin(worktree)} start -p 3101` };
     const seams = (entries: ListeningEntry[], live: ProcessIdentity | undefined) => ({ listeners: async () => entries, processes: { inspect: async () => live, listener: async () => undefined } });
     const origin = "http://127.0.0.1:3101";
     expect((await serverIdentityProblems(seams([{ localAddress: "127.0.0.1", owningProcess: 4242 }], identity), origin, worktree)).problems).toEqual([]);
     expect((await serverIdentityProblems(seams([], undefined), origin, worktree)).problems[0]).toMatch(/nothing listens/);
     expect((await serverIdentityProblems(seams([{ localAddress: "0.0.0.0", owningProcess: 4242 }], identity), origin, worktree)).problems[0]).toMatch(/not on 127\.0\.0\.1/);
-    expect((await serverIdentityProblems(seams([{ localAddress: "127.0.0.1", owningProcess: 4242 }], { ...identity, commandLine: "node C:\\wt\\baseline\\next start" }), origin, worktree)).problems[0]).toMatch(/not run from this worktree/);
+    expect((await serverIdentityProblems(seams([{ localAddress: "127.0.0.1", owningProcess: 4242 }], { ...identity, commandLine: `"${process.execPath}" ${nextBin(otherWorktree)} start -p 3101` }), origin, worktree)).problems[0]).toMatch(/not run from this worktree/);
   });
 
   it("proves the build: the served asset equals this worktree's .next output", () => {
