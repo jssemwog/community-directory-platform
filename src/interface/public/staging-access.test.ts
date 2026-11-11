@@ -3,7 +3,8 @@
  *
  * SA-1 off unless production with `BI4_STAGING` present; SA-2 deny-all on every invalid condition;
  * SA-3 the configuration that turns the mode on; SA-4 calibration bounds; SA-5 the key check;
- * SA-6 the `S2` path shape; SA-7 the module stays pure.
+ * SA-6 the `S2` path shape; SA-7 the module stays pure; SA-8 the reserved status identity
+ * (amendment A1, option D).
  */
 
 import { readFileSync } from "node:fs";
@@ -25,6 +26,7 @@ import {
   isStagingS2Path,
   presentsStagingKey,
   STAGING_KEY_HEADER,
+  STAGING_STATUS_IDENTITY,
   stagingKeyDigestHex,
   stagingModeOf,
 } from "./staging-access";
@@ -228,6 +230,16 @@ describe("SA-6: the S2 path shape", () => {
     for (const path of ["/directory", "/directory/", "/directory/a/b", "/Directory/x", "/", "/admin", "/_next/static/x.js"]) {
       expect(isStagingS2Path(path), path).toBe(false);
     }
+  });
+});
+
+describe("SA-8: the reserved status identity (amendment A1, option D)", () => {
+  it("is one S2 segment, never UUID-shaped, and cannot collide with the harness malformed controls", () => {
+    expect(STAGING_STATUS_IDENTITY).toBe("__bi4_status__");
+    expect(isStagingS2Path(`/directory/${STAGING_STATUS_IDENTITY}`)).toBe(true);
+    expect(STAGING_STATUS_IDENTITY).not.toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    expect(STAGING_STATUS_IDENTITY).not.toMatch(/^(e3|demo)-malformed-/);
+    expect(encodeURIComponent(STAGING_STATUS_IDENTITY)).toBe(STAGING_STATUS_IDENTITY);
   });
 });
 

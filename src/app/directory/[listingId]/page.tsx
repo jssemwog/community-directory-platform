@@ -6,6 +6,7 @@ import { findPubliclyAvailableListing } from "../../../data/public-listing-read"
 import { DIRECTORY_COPY, listingDetailStateOf, NOT_AVAILABLE } from "../../../interface/public/directory-view";
 import { isRefused } from "../../../interface/public/e3-local-persistence";
 import { publicReadSource } from "../../../interface/public/public-read-persistence";
+import { STATUS_ELEMENT_ID, statusViewFor } from "../../../interface/public/staging-status";
 import styles from "../directory.module.css";
 
 export const dynamic = "force-dynamic";
@@ -41,6 +42,14 @@ export default async function ListingPage({ params }: { params: Promise<{ listin
   }
 
   const { listingId } = await params;
+
+  // OP-2 staging status (amendment A1, option D): only under the staging source and only for the
+  // reserved identity. It runs before, and instead of, any OP-2 read.
+  const statusJson = await statusViewFor(source, listingId, process.env);
+  if (statusJson !== null) {
+    return <script type="application/json" id={STATUS_ELEMENT_ID} dangerouslySetInnerHTML={{ __html: statusJson }} />;
+  }
+
   const outcome =
     source.kind === "demo"
       ? await findPubliclyAvailableListing(source.persistence.db, listingId)

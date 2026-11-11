@@ -521,18 +521,55 @@ configured disposable database (gate §5.3).
     the demo's variable also set, calibration malformed or over the 2 ms ceiling): **deny-all**.
 - **Publicly reachable, application-key gated** (`src/proxy.ts`).
   - **The matcher** is global (`/:path*`) in every build. Outside staging, behaviour is unchanged.
-  - **Under staging,** only `GET`/`HEAD` on one `S2` path and `GET /bi4-staging/status` pass, and
+  - **Under staging,** only `GET`/`HEAD` on one `S2` path pass (the status identity included), and
     only with the key in exactly one `X-BI4-Staging-Key` header, no query string and no `Cookie`.
-    Everything else, admin included, gets the plain gate `404`.
+    Everything else, admin and `/bi4-staging/status` included, gets the plain gate `404`.
   - **The key header** is deleted from the forwarded request.
   - **Keyed `S2` responses** get `Cache-Control: private, no-store`.
 - **The data source** (`staging-persistence.ts`):
   - **C-1′:** TLS `verify-full` with the pinned CA.
   - **C-2 to C-4:** in `onConnect`: database, marker and a non-superuser role.
   - **One client;** sticky, silent refusal, with `E3-local`'s post-#284 semantics.
-- **The status route** reports identity, state, counters and, for the same window, the event-loop
-  histogram and the realized calibration delays, side by side. It answers `notFound()` for every
-  method outside the mode.
+- **Status** (amendment A1, option D) is served at the reserved `S2` identity
+  `/directory/__bi4_status__`, **only** under the staging source. It reports identity, state,
+  counters and, for the same window, the event-loop histogram and the realized calibration delays,
+  side by side.
+  - **Where:** one `<script type="application/json" id="bi4-staging-status">` element in the page,
+    escaped so the payload cannot close it. The page pre-checks the connection and **never calls the
+    listing read**, so status reads do not count in `s2Reads`.
+  - **There is no status route.** `/bi4-staging/status` is a missing route in every build: the
+    gate under staging, the framework's not-found everywhere else, as on the baseline (D-G1).
+    Outside staging, `/directory/__bi4_status__` is an ordinary `S2` path with no configured source.
+  - **The HTTP contract (§2.5).** Keyed, on a healthy process: `200` with exactly one status
+    element. Keyed, on a cold refusing or already refused process: the directory layout answers
+    `404` with the framework's not-found page **before** the page renders, so no payload is
+    returned. A `200` with `state: "refused"` appears only if refusal arrives after the layout's
+    pre-check passed (S-7). Keyless: the gate.
+  - **The reader classifies** each response as `status`, `gated`, `refused-404` or `malformed`.
+    `refused-404` names an observed shape (a framework-style HTML `404` with no status payload) and
+    alone does not establish why the request was refused. R-7 establishes database refusal through
+    its controlled sequence. **During measurement, an unexpected `404` or a refused payload
+    invalidates the run, whatever its cause.**
+
+**R-7, the controlled refusal sequence.** Each step needs a passing exit **and** the report fields
+shown. **For the refused step, the exit code is not enough on its own:**
+`staging-status --expect refused` also exits `0` on a `200` status payload with `state: "refused"`.
+That response is valid S-7 handling (refusal after the layout's pre-check passed), but it **does
+not pass R-7**, which tests a fresh process refusing before any page renders.
+
+1. **Before:** `staging-status --expect verified`. `status.json` shows `classification` of
+   `status (state verified)`.
+2. `staging-marker --set wrong`, then restart the service and record the time.
+3. **Refused:** `staging-status --expect refused`. R-7 passes this step **only if `status.json`
+   shows both:**
+   - `"classification": "refused-404"`;
+   - `"r7KeyedS2": "framework 404"`.
+
+   A `classification` of `status (state refused)` fails R-7, even with exit `0`. So do `gated`,
+   `malformed`, and any other `r7KeyedS2` value.
+4. `staging-marker --set recorded`, then restart the service and record the time.
+5. **After:** `staging-status --expect verified`. `status.json` again shows `classification` of
+   `status (state verified)`.
 
 **A driver hazard, pinned by test (SI-2):** with an IP-literal host, `pg` checks the server
 certificate against `localhost`, not against that IP. The mode therefore refuses IP literals:
@@ -618,16 +655,16 @@ rows after its own result: **passing it does not complete readiness.**
 | R-2 | `staging-record` (`recordProblems`) and `staging-status` (service ID, hostname, commit) | automated + operator action | the Render settings transcribed from the dashboard: plan, region, instances, health path, auto-deploy, previews, edge cache, variable names. The response size is in `readiness.json` |
 | R-2b | `staging-readiness`: K-1 to K-5 **through Render** | automated | none |
 | R-3 | `staging-readiness` | automated | none |
-| R-4 | `staging-readiness`: GET on every path, plus the disallowed methods on S2 and status | automated | none |
-| R-5 | `staging-verify` (V-4: positive, wrong-CA and IP-literal controls) and `staging-status` (`verified`) | automated | none |
+| R-4 | `staging-readiness`: GET on every path, `/bi4-staging/status` included, plus the disallowed methods on S2 and the status identity | automated | none |
+| R-5 | `staging-verify` (V-4: positive, wrong-CA and IP-literal controls); `staging-readiness` (the first keyed status read is class `status`, state `verified`, `s2Reads` 0; any other read stops readiness) and `staging-status --expect verified` | automated | none |
 | R-6 | `staging-setup` and `staging-verify` | automated | none |
-| R-7 | `staging-marker`, then `staging-status --expect refused` / `verified` | automated + operator action | the two Render service restarts, with their times |
+| R-7 | The controlled sequence (see **R-7, the controlled refusal sequence**): `staging-status --expect verified`; `staging-marker --set wrong`, restart, `staging-status --expect refused`; `staging-marker --set recorded`, restart, `staging-status --expect verified`. The refused step passes R-7 only when `status.json` shows `classification` `refused-404` **and** `r7KeyedS2` `framework 404`; exit `0` alone is insufficient, and a `200` payload with `state: "refused"` (S-7) does not pass | automated + operator action | the two Render service restarts, with their times; the operator's reading of the refused step's `status.json` |
 | R-8 | `staging-verify --operator-rule none` (network refusal required) | automated + operator action | removing the operator's trusted-source rule in the console |
 | R-9 | `staging-readiness` | automated | none |
 | R-10 | `staging-readiness` (`Date` and `Rndr-Id` removed, own UUID masked) | automated | none |
 | R-11 | none | **not implemented** | the calibration pilot belongs to the later measurement slice |
 | R-12 | `staging-readiness` (every response) | automated + operator action | an export of the Render application logs for the scan |
-| M-1 | `staging-status --previous` | automated | none |
+| M-1 | `staging-status --previous`: class `status`, state `verified`; an unexpected `404` or a refused payload invalidates the run | automated | none |
 | M-2 | none | **operator evidence** | the Render event list for each window: no deploy, restart, instance, edge-cache, plan or suspension event |
 | M-3, M-4, M-5, M-8 | none | **not implemented** | the remote measurement harness (later slice) |
 | M-6 | `staging-project` | automated + operator action | the accrued amounts from both billing pages at each phase boundary |
@@ -699,7 +736,11 @@ problems, the wrong side or mode, a baseline other than `ba10027`, a candidate e
 baseline, or differing request lists. Then:
 
 - **PB-1/PB-2:** status, header list and body are equal after masking `Date`, `ETag`, `x-nextjs-*`
-  and build IDs.
+  and build IDs. Both `/bi4-staging/status` and `/directory/__bi4_status__` are in the matrix.
+  - **`Last-Modified` (amendment A1 §1):** only its **value** is masked, and only for a GET or HEAD
+    probe on the paired static asset, when both paired GETs are `200` with byte-identical bodies and
+    the compared responses each carry exactly one `Last-Modified`. Its presence and position, every
+    other header, the status and the body are compared as usual. It does not apply to any other path.
 - **PB-3/PB-4:** the candidate denies every probe: the gate `404`, or `308` for trailing-slash forms.
 - **PB-5, the demo listing comparison:** for `/directory`, the approved listing
   (`0b7e4c52-…`, "Juniper Lane Bakery"), the pending and rejected listings, and a malformed
